@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url"
 import { gatherContext } from "./context.js"
 import { formatNotification } from "./format.js"
 import { sendMessage } from "./telegram.js"
+import { getOrCreateTopic } from "./topics.js"
 import { extractLastInstruction } from "./transcript.js"
 import type { StopHookInput } from "./types.js"
 
@@ -42,7 +43,8 @@ async function main() {
     const ctx = gatherContext(input.cwd)
     const lastInstruction = extractLastInstruction(input.transcript_path)
     const message = formatNotification(input, ctx, lastInstruction)
-    await sendMessage(token, chatId, message)
+    const threadId = await getOrCreateTopic(token, chatId, ctx.project)
+    await sendMessage(token, chatId, message, threadId ?? undefined)
   } catch (err) {
     process.stderr.write(`notify: unexpected error: ${err}\n`)
   }

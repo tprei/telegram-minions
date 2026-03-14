@@ -22,10 +22,12 @@ async function sendOne(
   token: string,
   chatId: string,
   html: string,
+  threadId?: number,
   replyToMessageId?: number,
 ): Promise<number | null> {
   try {
     const body: Record<string, unknown> = { chat_id: chatId, text: html, parse_mode: "HTML" }
+    if (threadId !== undefined) body.message_thread_id = threadId
     if (replyToMessageId !== undefined) body.reply_to_message_id = replyToMessageId
 
     const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
@@ -48,14 +50,19 @@ async function sendOne(
   }
 }
 
-export async function sendMessage(token: string, chatId: string, html: string): Promise<boolean> {
+export async function sendMessage(
+  token: string,
+  chatId: string,
+  html: string,
+  threadId?: number,
+): Promise<boolean> {
   const chunks = splitMessage(html)
 
-  const firstId = await sendOne(token, chatId, chunks[0])
+  const firstId = await sendOne(token, chatId, chunks[0], threadId)
   if (firstId === null) return false
 
   for (let i = 1; i < chunks.length; i++) {
-    if ((await sendOne(token, chatId, chunks[i], firstId)) === null) return false
+    if ((await sendOne(token, chatId, chunks[i], threadId, firstId)) === null) return false
   }
 
   return true
