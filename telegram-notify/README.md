@@ -79,6 +79,5 @@ echo '{"session_id":"abc","cwd":"'$(pwd)'","hook_event_name":"Stop","last_assist
 | Missing env vars | Logs warning to stderr, exits 0 |
 | Invalid stdin JSON | Logs warning to stderr, exits 0 |
 | Non-git directory | Branch shows `n/a` |
-| Message > 4096 chars | Truncated with `[truncated]` marker |
-| Last message > 2000 chars | Truncated before formatting |
+| Message > 4096 chars | Split into reply chain within the same topic thread |
 | Telegram API error | Logged to stderr, exits 0 |
