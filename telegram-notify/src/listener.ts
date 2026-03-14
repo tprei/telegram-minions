@@ -98,7 +98,7 @@ async function poll(offset: number): Promise<number> {
       const result = await safeInject(message.text, entry.pane_id)
 
       if (!result.ok) {
-        await sendReply(message.message_thread_id, result.reason)
+        process.stderr.write(`listener: injection blocked: ${result.reason}\n`)
       }
     } catch (err) {
       process.stderr.write(`listener: error processing update ${update.update_id}: ${err}\n`)
