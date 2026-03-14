@@ -17,14 +17,16 @@ export function formatNotification(
   ctx: EnvContext,
   lastInstruction: string | null,
 ): string {
-  const meta = [
-    `🤖 <b>${esc(ctx.project)}</b>`,
-    `<code>${esc(ctx.branch)}</code>`,
-    ...(ctx.tmuxWindow ? [esc(ctx.tmuxWindow)] : []),
-    esc(ctx.hostname),
-  ].join(" · ")
+  const line2 = [
+    `🌿 <code>${esc(ctx.branch)}</code>`,
+    ...(ctx.tmuxWindow ? [`🪟 ${esc(ctx.tmuxWindow)}`] : []),
+    `🖥 ${esc(ctx.hostname)}`,
+  ].join("  ·  ")
 
-  const parts = [meta]
+  const parts = [
+    `📦 <b>${esc(ctx.project)}</b>  ·  📂 <code>${esc(input.cwd)}</code>`,
+    line2,
+  ]
 
   if (lastInstruction) {
     parts.push("", `❓ <i>${esc(truncate(lastInstruction, MAX_INSTRUCTION))}</i>`)
