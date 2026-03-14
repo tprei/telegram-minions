@@ -95,7 +95,7 @@ async function poll(offset: number): Promise<number> {
       if (!message.text) continue
 
       const entry = cache[threadKey]
-      const result = await safeInject(message.text, entry.pane_id, entry.session_id, entry.cwd)
+      const result = await safeInject(message.text, entry.pane_id)
 
       if (!result.ok) {
         await sendReply(message.message_thread_id, result.reason)

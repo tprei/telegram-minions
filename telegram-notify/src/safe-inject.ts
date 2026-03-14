@@ -7,8 +7,6 @@ export type InjectResult =
 export async function safeInject(
   text: string,
   paneId: string | null,
-  sessionId: string,
-  cwd: string,
 ): Promise<InjectResult> {
   const sanitized = text.replace(/[\x00-\x1f\x7f\x9b]/g, "")
 
@@ -43,51 +41,32 @@ export async function safeInject(
   )
 
   if (classifierResult.error) {
+    process.stderr.write(`safe-inject: classifier error: ${classifierResult.error}\n`)
     return { ok: false, reason: "classifier unavailable" }
   }
 
   if (classifierResult.status !== 0 && !classifierResult.stdout) {
+    process.stderr.write(`safe-inject: classifier exited ${classifierResult.status}, stderr: ${classifierResult.stderr?.slice(0, 300)}\n`)
     return { ok: false, reason: "classifier unavailable" }
   }
 
+  process.stderr.write(`safe-inject: classifier stdout: ${JSON.stringify(classifierResult.stdout)}\n`)
   if (classifierResult.stdout.toUpperCase().includes("UNSAFE")) {
     return { ok: false, reason: "blocked: classifier flagged as unsafe" }
   }
 
-  let resolvedPaneId = paneId
+  if (paneId === null) {
+    return { ok: false, reason: "no pane registered for this session" }
+  }
 
-  if (resolvedPaneId === null) {
-    execSync(`tmux new-window -c ${JSON.stringify(cwd)}`, { stdio: "ignore" })
-    const newPaneId = execSync("tmux display-message -p '#{pane_id}'", {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim()
-    execSync(
-      `tmux send-keys -t ${newPaneId} ${JSON.stringify(`claude --resume ${sessionId}`)} Enter`,
-      { stdio: "ignore" },
-    )
-    await new Promise((r) => setTimeout(r, 2500))
-    resolvedPaneId = newPaneId
-  } else {
-    try {
-      execSync(`tmux display-message -p '' -t ${resolvedPaneId}`, { stdio: "ignore" })
-    } catch {
-      execSync(`tmux new-window -c ${JSON.stringify(cwd)}`, { stdio: "ignore" })
-      const newPaneId = execSync("tmux display-message -p '#{pane_id}'", {
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "ignore"],
-      }).trim()
-      execSync(
-        `tmux send-keys -t ${newPaneId} ${JSON.stringify(`claude --resume ${sessionId}`)} Enter`,
-        { stdio: "ignore" },
-      )
-      await new Promise((r) => setTimeout(r, 2500))
-      resolvedPaneId = newPaneId
-    }
+  try {
+    execSync(`tmux display-message -p '' -t ${paneId}`, { stdio: "ignore" })
+  } catch {
+    return { ok: false, reason: `pane ${paneId} no longer exists` }
   }
 
   const cmd = execSync(
-    `tmux display-message -p '#{pane_current_command}' -t ${resolvedPaneId}`,
+    `tmux display-message -p '#{pane_current_command}' -t ${paneId}`,
     { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
   ).trim()
 
@@ -95,7 +74,7 @@ export async function safeInject(
     return { ok: false, reason: `pane is running '${cmd}', not Claude — injection blocked` }
   }
 
-  execSync(`tmux send-keys -t ${resolvedPaneId} ${JSON.stringify(sanitized)} Enter`, {
+  execSync(`tmux send-keys -t ${paneId} ${JSON.stringify(sanitized)} Enter`, {
     stdio: "ignore",
   })
 
