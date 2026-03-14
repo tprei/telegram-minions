@@ -7,6 +7,7 @@ export interface EnvContext {
   branch: string
   hostname: string
   tmuxWindow: string | null
+  paneId: string | null
 }
 
 export function gatherContext(cwd: string): EnvContext {
@@ -15,6 +16,7 @@ export function gatherContext(cwd: string): EnvContext {
     branch: gitBranch(cwd),
     hostname: os.hostname(),
     tmuxWindow: tmuxWindowName(),
+    paneId: tmuxPaneId(),
   }
 }
 
@@ -22,6 +24,15 @@ function tmuxWindowName(): string | null {
   if (!process.env["TMUX"]) return null
   try {
     return execSync("tmux display-message -p '#W'", { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim() || null
+  } catch {
+    return null
+  }
+}
+
+function tmuxPaneId(): string | null {
+  if (!process.env["TMUX"]) return null
+  try {
+    return execSync("tmux display-message -p '#{pane_id}'", { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim() || null
   } catch {
     return null
   }
