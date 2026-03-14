@@ -31,7 +31,7 @@ export function formatNotification(
     parts.push("", `❓ <i>${esc(truncate(lastInstruction, MAX_INSTRUCTION))}</i>`)
   }
 
-  parts.push("", `💬 ${esc(input.last_assistant_message)}`)
+  parts.push("", `💬 ${esc(input.last_assistant_message ?? "")}`)
 
   return parts.join("\n")
 }

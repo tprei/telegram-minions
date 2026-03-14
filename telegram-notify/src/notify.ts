@@ -42,8 +42,6 @@ async function main() {
     }
 
     const ctx = gatherContext(input.cwd)
-    const lastInstruction = extractLastInstruction(input.transcript_path)
-    const message = formatNotification(input, ctx, lastInstruction)
     const threadId = await getOrCreateTopic(token, chatId, ctx.project)
     if (threadId !== null && process.env["LISTENER_ENABLED"]) {
       upsertSession(threadId, {
@@ -53,7 +51,11 @@ async function main() {
         ts: Date.now(),
       })
     }
-    await sendMessage(token, chatId, message, threadId ?? undefined)
+    if (input.hook_event_name === "Stop") {
+      const lastInstruction = extractLastInstruction(input.transcript_path)
+      const message = formatNotification(input, ctx, lastInstruction)
+      await sendMessage(token, chatId, message, threadId ?? undefined)
+    }
   } catch (err) {
     process.stderr.write(`notify: unexpected error: ${err}\n`)
   }
