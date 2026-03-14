@@ -2,7 +2,6 @@ import type { EnvContext } from "./context.js"
 import type { StopHookInput } from "./types.js"
 
 const MAX_INSTRUCTION = 300
-const MAX_RESPONSE = 800
 
 function esc(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
@@ -32,7 +31,7 @@ export function formatNotification(
     parts.push("", `❓ <i>${esc(truncate(lastInstruction, MAX_INSTRUCTION))}</i>`)
   }
 
-  parts.push("", `💬 ${esc(truncate(input.last_assistant_message, MAX_RESPONSE))}`)
+  parts.push("", `💬 ${esc(input.last_assistant_message)}`)
 
   return parts.join("\n")
 }
