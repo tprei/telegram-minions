@@ -60,7 +60,7 @@ export async function safeInject(
   }
 
   try {
-    execSync(`tmux display-message -p '' -t ${paneId}`, { stdio: "ignore" })
+    execSync(`tmux display-message -p -t ${paneId}`, { stdio: "ignore" })
   } catch {
     return { ok: false, reason: `pane ${paneId} no longer exists` }
   }
