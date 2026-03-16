@@ -5,7 +5,15 @@ import { gatherContext } from "./context.js"
 import { formatUserPrompt, formatAssistantReply, formatToolActivity } from "./format.js"
 import { sendMessage, editMessage } from "./telegram.js"
 import { upsertSession, removeSession } from "./sessions.js"
-import { getOrCreateTopic, deleteTopic, getProjectByThreadId, removeTopicFromCache } from "./topics.js"
+import {
+  getOrCreateTopic,
+  lookupTopic,
+  deleteTopic,
+  removeTopicFromCache,
+  renameTopic,
+  markTopicRenamed,
+  isTopicRenamed,
+} from "./topics.js"
 import { extractLastInstruction } from "./transcript.js"
 import { savePromptInfo, loadPromptInfo, clearPromptInfo, saveActivityInfo, loadActivityInfo, incrementToolCount } from "./prompt-cache.js"
 import type { HookInput } from "./types.js"
@@ -48,23 +56,23 @@ async function main() {
     }
 
     const ctx = gatherContext(input.cwd)
-    const threadId = await getOrCreateTopic(token, chatId, ctx.project)
 
     if (input.hook_event_name === "SessionEnd") {
+      const threadId = lookupTopic(input.session_id)
       if (threadId !== null) {
         const deleted = await deleteTopic(token, chatId, threadId)
         if (deleted) {
           removeSession(threadId)
-          const projectName = getProjectByThreadId(threadId)
-          if (projectName) {
-            removeTopicFromCache(projectName)
-          }
+          removeTopicFromCache(input.session_id)
         }
       }
       process.stdout.write("{}\n")
       process.exit(0)
       return
     }
+
+    const topicName = `${ctx.project} (${input.session_id.slice(0, 6)})`
+    const threadId = await getOrCreateTopic(token, chatId, topicName, input.session_id)
 
     if (threadId !== null && process.env["LISTENER_ENABLED"]) {
       upsertSession(threadId, {
@@ -80,6 +88,15 @@ async function main() {
       const result = await sendMessage(token, chatId, message, threadId ?? undefined)
       if (result.ok && result.messageId !== null) {
         savePromptInfo(input.session_id, result.messageId, Date.now())
+      }
+      if (threadId !== null && !isTopicRenamed(input.session_id) && input.prompt) {
+        const prefix = `${ctx.project} · `
+        const maxPromptLen = 128 - prefix.length
+        const truncatedPrompt = input.prompt.length > maxPromptLen
+          ? input.prompt.slice(0, maxPromptLen)
+          : input.prompt
+        await renameTopic(token, chatId, threadId, `${prefix}${truncatedPrompt}`)
+        markTopicRenamed(input.session_id)
       }
     } else if (input.hook_event_name === "PostToolUse") {
       const toolName = input.tool_name ?? ""
