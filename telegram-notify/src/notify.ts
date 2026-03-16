@@ -91,9 +91,9 @@ async function main() {
       }
       if (threadId !== null && !isTopicRenamed(input.session_id) && input.prompt) {
         const prefix = `${ctx.project} · `
-        const maxPromptLen = 128 - prefix.length
+        const maxPromptLen = 64 - prefix.length
         const truncatedPrompt = input.prompt.length > maxPromptLen
-          ? input.prompt.slice(0, maxPromptLen)
+          ? input.prompt.slice(0, maxPromptLen) + "…"
           : input.prompt
         await renameTopic(token, chatId, threadId, `${prefix}${truncatedPrompt}`)
         markTopicRenamed(input.session_id)
