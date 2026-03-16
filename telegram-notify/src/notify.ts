@@ -1,7 +1,7 @@
 import { createRequire } from "node:module"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
-import { gatherContext } from "./context.js"
+import { gatherContext, renameTmuxWindow } from "./context.js"
 import { formatUserPrompt, formatAssistantReply, formatToolActivity } from "./format.js"
 import { sendMessage, editMessage } from "./telegram.js"
 import { upsertSession, removeSession } from "./sessions.js"
@@ -15,6 +15,7 @@ import {
   isTopicRenamed,
 } from "./topics.js"
 import { extractLastInstruction } from "./transcript.js"
+import { generateSlug } from "./slugs.js"
 import { savePromptInfo, loadPromptInfo, clearPromptInfo, saveActivityInfo, loadActivityInfo, incrementToolCount } from "./prompt-cache.js"
 import type { HookInput } from "./types.js"
 
@@ -90,12 +91,10 @@ async function main() {
         savePromptInfo(input.session_id, result.messageId, Date.now())
       }
       if (threadId !== null && !isTopicRenamed(input.session_id) && input.prompt) {
-        const prefix = `${ctx.project} · `
-        const maxPromptLen = 64 - prefix.length
-        const truncatedPrompt = input.prompt.length > maxPromptLen
-          ? input.prompt.slice(0, maxPromptLen) + "…"
-          : input.prompt
-        await renameTopic(token, chatId, threadId, `${prefix}${truncatedPrompt}`)
+        const slug = generateSlug(input.session_id)
+        const topicName = `${ctx.project} · ${slug}`
+        await renameTopic(token, chatId, threadId, topicName)
+        if (ctx.paneId) renameTmuxWindow(slug)
         markTopicRenamed(input.session_id)
       }
     } else if (input.hook_event_name === "PostToolUse") {

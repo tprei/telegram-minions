@@ -38,6 +38,15 @@ function tmuxPaneId(): string | null {
   }
 }
 
+export function renameTmuxWindow(name: string): void {
+  if (!process.env["TMUX"]) return
+  try {
+    execSync(`tmux rename-window ${JSON.stringify(name)}`, { stdio: "ignore" })
+  } catch {
+    // best-effort
+  }
+}
+
 function gitBranch(cwd: string): string {
   try {
     return execSync("git rev-parse --abbrev-ref HEAD", { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim()
