@@ -12,17 +12,20 @@
 
 ## Project overview
 
-Telegram notification bot for Claude Code's `Stop` hook. When Claude finishes a session, `src/notify.ts` fires via stdin JSON, gathers git/tmux/hostname context, and POSTs to the Telegram Bot API. Failures never block Claude from stopping.
+Multi-hook Telegram notification system for Claude Code. Hooks into `UserPromptSubmit`, `PostToolUse`, `Stop`, and `SessionEnd` to create threaded conversations with real-time tool activity tracking. Each session gets its own forum topic with a deterministic slug name.
 
 ## Key files
 
 | File | Purpose |
 |---|---|
-| `src/notify.ts` | Entry point — reads stdin, sends notification, exits 0 |
+| `src/notify.ts` | Entry point — routes hooks, manages topics, sends messages |
 | `src/telegram.ts` | Telegram API client via native `fetch` |
-| `src/context.ts` | Git branch, tmux window, hostname |
-| `src/format.ts` | HTML message builder |
-| `src/types.ts` | `StopHookInput` / `HookOutput` interfaces |
+| `src/topics.ts` | Forum topic manager with session-based keying |
+| `src/slugs.ts` | Deterministic adjective-noun slug generator |
+| `src/prompt-cache.ts` | Session → message/timing/activity cache |
+| `src/format.ts` | HTML message builders for each hook type |
+| `src/context.ts` | Git branch, tmux window/pane, hostname |
+| `src/types.ts` | `HookInput` interface with optional hook-specific fields |
 | `.env` | Runtime secrets — gitignored, never committed |
 | `.env.example` | Placeholder template — the only committed secrets file |
 
@@ -34,4 +37,4 @@ npx tsc --noEmit                         # type check
 echo '{...}' | npx tsx src/notify.ts     # smoke test
 ```
 
-See `README.md` for full setup and test instructions.
+See `README.md` for full setup and `docs/llm.md` for architecture details.

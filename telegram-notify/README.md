@@ -1,12 +1,17 @@
-# scripts
+# telegram-notify
 
-Telegram notification bot for Claude Code's `Stop` hook. Sends a message with project, branch, session, and last assistant message whenever Claude finishes a task.
+Telegram notification bot for Claude Code hooks. Sends threaded notifications with real-time tool activity, project context, and session tracking.
 
 ## How it works
 
-Claude Code fires the `Stop` hook when it finishes. The hook runs `notify.ts` via `npx tsx`, which reads the hook's stdin JSON, enriches it with git/hostname context, and POSTs to the Telegram Bot API. Failures are logged to stderr and never block Claude from stopping.
+The bot hooks into four Claude Code events:
 
-When `LISTENER_ENABLED=true`, a separate `listener.ts` process polls for incoming Telegram messages and injects them as keystrokes into the active tmux pane running Claude. `notify.ts` also registers on the `SessionStart` hook so the session cache always has the current pane ID before any reply arrives.
+1. **UserPromptSubmit** — Creates a new forum topic with a deterministic slug name (e.g., `scripts · bold-arc`), posts the user's prompt, and renames the tmux window
+2. **PostToolUse** — Sends or edits an activity message showing tool usage (Edit, Write, Bash) with throttling to avoid spam
+3. **Stop** — Posts the assistant's reply as a thread reply to the original prompt, including elapsed time
+4. **SessionEnd** — Deletes the forum topic and cleans up caches
+
+When `LISTENER_ENABLED=true`, a separate `listener.ts` process polls for incoming Telegram messages and injects them as keystrokes into the active tmux pane. Each session gets its own topic, enabling parallel sessions on the same project.
 
 ## Setup
 
@@ -40,16 +45,40 @@ npm install
 ### 5. Test
 
 ```sh
-echo '{"session_id":"test","cwd":"/tmp","hook_event_name":"Stop","last_assistant_message":"done","stop_hook_active":false,"transcript_path":"/tmp/t.json","permission_mode":"default"}' | npx tsx src/notify.ts
+echo '{"session_id":"test123","cwd":"/tmp","hook_event_name":"UserPromptSubmit","prompt":"hello","transcript_path":"/tmp/t.json","permission_mode":"default"}' | npx tsx src/notify.ts
 ```
 
 Expect `{}` on stdout. With `.env` configured, a message should arrive in Telegram.
 
 ### 6. Register the hooks
 
-Add to `~/.claude/settings.json` under `hooks`. Both `Stop` and `SessionStart` must run `notify.ts` — Stop sends the Telegram message, SessionStart writes the pane ID to sessions-cache so the listener can route replies correctly.
+Add to `~/.claude/settings.json` under `hooks`:
 
 ```json
+"UserPromptSubmit": [
+  {
+    "matcher": "",
+    "hooks": [
+      {
+        "type": "command",
+        "command": "npx tsx /absolute/path/to/telegram-notify/src/notify.ts",
+        "timeout": 15
+      }
+    ]
+  }
+],
+"PostToolUse": [
+  {
+    "matcher": "",
+    "hooks": [
+      {
+        "type": "command",
+        "command": "npx tsx /absolute/path/to/telegram-notify/src/notify.ts",
+        "timeout": 15
+      }
+    ]
+  }
+],
 "Stop": [
   {
     "matcher": "",
@@ -62,7 +91,7 @@ Add to `~/.claude/settings.json` under `hooks`. Both `Stop` and `SessionStart` m
     ]
   }
 ],
-"SessionStart": [
+"SessionEnd": [
   {
     "matcher": "",
     "hooks": [
@@ -108,6 +137,44 @@ chmod +x ~/bin/z-claude
 npx tsx src/listener.ts
 ```
 
+## Configuration
+
+| Environment variable | Default | Description |
+|---|---|---|
+| `TELEGRAM_BOT_TOKEN` | (required) | Bot token from @BotFather |
+| `TELEGRAM_CHAT_ID` | (required) | Supergroup chat ID (negative number) |
+| `LISTENER_ENABLED` | `false` | Enable two-way message handling |
+| `ALLOWED_USER_IDS` | (none) | Comma-separated Telegram user IDs allowed to inject |
+| `ACTIVITY_THROTTLE_MS` | `3000` | Throttle window for PostToolUse activity updates |
+| `TELEGRAM_NOTIFY_DISABLED` | (none) | Set to any value to disable all notifications |
+
+## Message flow
+
+```
+UserPromptSubmit         PostToolUse (x N)              Stop
+      │                       │                          │
+      ▼                       ▼                          ▼
+┌─────────────┐        ┌─────────────┐           ┌─────────────┐
+│ 👤 Prompt   │        │ 🔧 Edit     │           │ 🤖 Reply    │
+│ 📦 project  │◄──────►│   file.ts   │◄─ edit ──►│ ⏱ 45s       │
+│ 🌿 branch   │        │   (3 tools) │           │ 📦 project  │
+│             │        └─────────────┘           │             │
+│ "fix bug"   │                                  │ "Done!"     │
+└─────────────┘                                  └─────────────┘
+      │                                                │
+      └──────────────── thread reply ─────────────────┘
+```
+
+## Topic naming
+
+Topics use session-based keying for parallel session support:
+
+1. Created as `project (abc123)` using first 6 chars of session ID
+2. Renamed to `project · adj-noun` after first prompt (e.g., `scripts · bold-arc`)
+3. Deleted automatically on SessionEnd
+
+The slug is deterministic: same session ID always produces the same adjective-noun pair.
+
 ## Verification
 
 ```sh
@@ -115,7 +182,7 @@ npx tsx src/listener.ts
 npx tsc --noEmit
 
 # End-to-end with Telegram
-echo '{"session_id":"abc","cwd":"'$(pwd)'","hook_event_name":"Stop","last_assistant_message":"All done.","stop_hook_active":false,"transcript_path":"/tmp/t.json","permission_mode":"default"}' | npx tsx src/notify.ts
+echo '{"session_id":"abc123","cwd":"'$(pwd)'","hook_event_name":"UserPromptSubmit","prompt":"test","transcript_path":"/tmp/t.json","permission_mode":"default"}' | npx tsx src/notify.ts
 ```
 
 ## Edge cases
@@ -127,3 +194,5 @@ echo '{"session_id":"abc","cwd":"'$(pwd)'","hook_event_name":"Stop","last_assist
 | Non-git directory | Branch shows `n/a` |
 | Message > 4096 chars | Split into reply chain within the same topic thread |
 | Telegram API error | Logged to stderr, exits 0 |
+| PostToolUse before UserPromptSubmit | Ignored (no cached prompt info) |
+| SessionEnd with no topic | No-op |
