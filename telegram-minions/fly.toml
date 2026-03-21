@@ -11,11 +11,6 @@ primary_region = "iad"
   GOOSE_MODEL = "default"
   HOME = "/workspace/home"
 
-[http_service]
-  auto_stop_machines = false
-  auto_start_machines = true
-  min_machines_running = 1
-
 [[mounts]]
   source = "workspace_data"
   destination = "/workspace"
@@ -23,4 +18,4 @@ primary_region = "iad"
 [[vm]]
   size = "shared-cpu-2x"
   memory = "2gb"
-
+  auto_stop = false
