@@ -13,12 +13,9 @@ RUN curl -fsSL https://github.com/block/goose/releases/download/stable/download_
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm ci --only=production
+RUN npm ci --production
 
 COPY . .
 RUN npm run build
-
-# Set Goose config location
-ENV GOOSE_CONFIG=/app/goose/config.yaml
 
 CMD ["node", "dist/main.js"]

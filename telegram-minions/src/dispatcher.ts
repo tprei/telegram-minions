@@ -163,7 +163,6 @@ export class Dispatcher {
         })
       },
       config.workspace.sessionTimeoutMs,
-      config.goose.configPath,
     )
 
     this.sessions.set(threadId, { handle, meta })

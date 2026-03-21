@@ -38,9 +38,7 @@ export const config = {
   },
   goose: {
     provider: optional("GOOSE_PROVIDER", "anthropic"),
-    model: optional("GOOSE_MODEL", "claude-4-sonnet"),
-    mode: optional("GOOSE_MODE", "auto"),
-    configPath: path.resolve(scriptDir, "..", "goose", "config.yaml"),
+    model: optional("GOOSE_MODEL", "claude-sonnet-4-5"),
   },
   workspace: {
     root: optional("WORKSPACE_ROOT", "/workspace"),

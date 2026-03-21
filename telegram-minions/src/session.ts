@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process"
 import { createInterface } from "node:readline"
+import { config } from "./config.js"
 import type { GooseStreamEvent, SessionMeta, SessionState } from "./types.js"
 
 export type SessionEventCallback = (event: GooseStreamEvent) => void
@@ -15,13 +16,11 @@ export class SessionHandle {
     private readonly onEvent: SessionEventCallback,
     private readonly onDone: SessionDoneCallback,
     private readonly timeoutMs: number,
-    private readonly gooseConfigPath: string,
   ) {}
 
   start(task: string): void {
     const env: Record<string, string> = {
       ...process.env as Record<string, string>,
-      GOOSE_CONFIG: this.gooseConfigPath,
       GOOSE_MODE: "auto",
       GOOSE_MAX_TURNS: "200",
       GOOSE_CONTEXT_STRATEGY: "summarize",
@@ -37,8 +36,10 @@ export class SessionHandle {
         "--text", task,
         "--output-format", "stream-json",
         "--name", this.meta.topicName,
-        "--provider", env["GOOSE_PROVIDER"] ?? "anthropic",
-        "--model", env["GOOSE_MODEL"] ?? "claude-4-sonnet",
+        "--provider", config.goose.provider,
+        "--model", config.goose.model,
+        "--no-profile",
+        "--with-builtin", "developer",
         "--quiet",
       ],
       {
