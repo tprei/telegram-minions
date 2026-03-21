@@ -8,16 +8,21 @@ import {
   formatAssistantText,
 } from "./format.js"
 
-interface ActivityState {
-  messageId: number | null
-  lastSentAt: number
+// Text flush delay: if no new text chunk arrives within this window, send what's buffered.
+const TEXT_FLUSH_DEBOUNCE_MS = 1500
+
+interface SessionState {
+  // Text buffering: Goose streams text token-by-token; we accumulate and flush.
+  textBuffer: string
+  flushTimer: ReturnType<typeof setTimeout> | null
+  // Tool activity tracking
+  activityMessageId: number | null
+  activityLastSentAt: number
   toolCount: number
-  lastToolName: string
-  lastToolArgs: Record<string, unknown>
 }
 
 export class Observer {
-  private readonly activity = new Map<string, ActivityState>()
+  private readonly sessions = new Map<string, SessionState>()
 
   constructor(
     private readonly telegram: TelegramClient,
@@ -25,6 +30,13 @@ export class Observer {
   ) {}
 
   async onSessionStart(meta: SessionMeta, task: string): Promise<void> {
+    this.sessions.set(meta.sessionId, {
+      textBuffer: "",
+      flushTimer: null,
+      activityMessageId: null,
+      activityLastSentAt: 0,
+      toolCount: 0,
+    })
     await this.telegram.sendMessage(
       formatSessionStart(meta.repo, meta.topicName, task),
       meta.threadId,
@@ -38,6 +50,7 @@ export class Observer {
         break
 
       case "error":
+        await this.flushTextBuffer(meta)
         await this.telegram.sendMessage(
           formatSessionError(meta.topicName, event.error),
           meta.threadId,
@@ -50,22 +63,55 @@ export class Observer {
     }
   }
 
-  private async handleMessage(
-    meta: SessionMeta,
-    message: GooseMessage,
-  ): Promise<void> {
+  private async handleMessage(meta: SessionMeta, message: GooseMessage): Promise<void> {
+    if (message.role !== "assistant") return
+
     for (const block of message.content) {
-      if (block.type === "text" && message.role === "assistant") {
-        const text = (block as { type: "text"; text: string }).text.trim()
+      if (block.type === "text") {
+        const text = (block as { type: "text"; text: string }).text
         if (text) {
-          await this.telegram.sendMessage(
-            formatAssistantText(meta.topicName, text),
-            meta.threadId,
-          )
+          this.bufferText(meta, text)
         }
-      } else if (block.type === "toolRequest" && message.role === "assistant") {
+      } else if (block.type === "toolRequest") {
+        // Flush buffered text before showing tool activity
+        await this.flushTextBuffer(meta)
         await this.handleToolRequest(meta, block as GooseToolRequestContent)
       }
+    }
+  }
+
+  private bufferText(meta: SessionMeta, chunk: string): void {
+    const state = this.sessions.get(meta.sessionId)
+    if (!state) return
+
+    state.textBuffer += chunk
+
+    // Reset debounce timer
+    if (state.flushTimer !== null) clearTimeout(state.flushTimer)
+    state.flushTimer = setTimeout(() => {
+      this.flushTextBuffer(meta).catch((err) => {
+        process.stderr.write(`observer: flush error: ${err}\n`)
+      })
+    }, TEXT_FLUSH_DEBOUNCE_MS)
+  }
+
+  private async flushTextBuffer(meta: SessionMeta): Promise<void> {
+    const state = this.sessions.get(meta.sessionId)
+    if (!state) return
+
+    if (state.flushTimer !== null) {
+      clearTimeout(state.flushTimer)
+      state.flushTimer = null
+    }
+
+    const text = state.textBuffer.trim()
+    state.textBuffer = ""
+
+    if (text) {
+      await this.telegram.sendMessage(
+        formatAssistantText(meta.topicName, text),
+        meta.threadId,
+      )
     }
   }
 
@@ -77,48 +123,36 @@ export class Observer {
 
     const { name, arguments: args } = block.toolCall
     const now = Date.now()
-    const state = this.activity.get(meta.sessionId)
-
-    if (!state) {
-      const html = formatToolActivity(name, args, 1)
-      const { messageId } = await this.telegram.sendMessage(html, meta.threadId)
-      this.activity.set(meta.sessionId, {
-        messageId,
-        lastSentAt: now,
-        toolCount: 1,
-        lastToolName: name,
-        lastToolArgs: args,
-      })
-      return
-    }
+    const state = this.sessions.get(meta.sessionId)
+    if (!state) return
 
     state.toolCount++
-    state.lastToolName = name
-    state.lastToolArgs = args
 
-    if (now - state.lastSentAt < this.throttleMs) {
+    if (now - state.activityLastSentAt < this.throttleMs && state.activityMessageId !== null) {
+      // Within throttle window: edit existing activity message
+      const html = formatToolActivity(name, args, state.toolCount)
+      state.activityLastSentAt = now
+      await this.telegram.editMessage(state.activityMessageId, html, meta.threadId)
       return
     }
 
+    // Outside throttle window or no existing message: send new activity message
     const html = formatToolActivity(name, args, state.toolCount)
-    state.lastSentAt = now
-
-    if (state.messageId !== null) {
-      await this.telegram.editMessage(state.messageId, html, meta.threadId)
-    } else {
-      const { messageId } = await this.telegram.sendMessage(html, meta.threadId)
-      state.messageId = messageId
-    }
+    state.activityLastSentAt = now
+    const { messageId } = await this.telegram.sendMessage(html, meta.threadId)
+    state.activityMessageId = messageId
   }
 
   async onSessionComplete(
     meta: SessionMeta,
-    state: "completed" | "errored",
+    finalState: "completed" | "errored",
     durationMs: number,
   ): Promise<void> {
-    this.activity.delete(meta.sessionId)
+    // Flush any remaining buffered text before posting summary
+    await this.flushTextBuffer(meta)
+    this.sessions.delete(meta.sessionId)
 
-    if (state === "errored") {
+    if (finalState === "errored") {
       await this.telegram.sendMessage(
         formatSessionError(meta.topicName, "Session ended with an error. Check logs."),
         meta.threadId,
@@ -132,6 +166,8 @@ export class Observer {
   }
 
   clearSession(sessionId: string): void {
-    this.activity.delete(sessionId)
+    const state = this.sessions.get(sessionId)
+    if (state?.flushTimer !== null) clearTimeout(state!.flushTimer)
+    this.sessions.delete(sessionId)
   }
 }
