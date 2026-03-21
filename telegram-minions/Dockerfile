@@ -6,6 +6,7 @@ RUN apt-get update && apt-get install -y \
   curl \
   ca-certificates \
   bzip2 \
+  libgomp1 \
   && rm -rf /var/lib/apt/lists/*
 
 # Install Goose CLI
