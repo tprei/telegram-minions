@@ -243,7 +243,7 @@ describe("formatTaskComplete", () => {
     const msg = formatTaskComplete("bold-arc", 90000, 2000)
     expect(msg).toContain("1m 30s")
     expect(msg).toContain("2,000 tokens")
-    expect(msg).toContain("Reply in this thread")
+    expect(msg).toContain("/reply")
   })
 })
 
