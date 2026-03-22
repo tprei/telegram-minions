@@ -18,6 +18,11 @@ const NOUNS = [
   "silt","sky","slope","snow","soil","spur","stone","tide","tor","vale",
 ]
 
+// Simple string hash using the djb-style multiply-and-add recurrence
+// (h = h * 31 + char) widely used in Java's String.hashCode and similar.
+// The `>>> 0` coerces the result to an unsigned 32-bit integer after every
+// step so the value stays in a predictable non-negative range, avoiding
+// JavaScript's floating-point quirks for large intermediate sums.
 function hash(s: string): number {
   let h = 0
   for (let i = 0; i < s.length; i++) {
