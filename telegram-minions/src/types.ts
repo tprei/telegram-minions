@@ -17,9 +17,17 @@ export interface TelegramMessage {
   is_topic_message?: boolean
 }
 
+export interface TelegramCallbackQuery {
+  id: string
+  from: TelegramUser
+  message?: TelegramMessage
+  data?: string
+}
+
 export interface TelegramUpdate {
   update_id: number
   message?: TelegramMessage
+  callback_query?: TelegramCallbackQuery
 }
 
 export interface TelegramForumTopic {

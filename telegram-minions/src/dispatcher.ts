@@ -5,7 +5,7 @@ import crypto from "node:crypto"
 import type { TelegramClient } from "./telegram.js"
 import { SessionHandle } from "./session.js"
 import { Observer } from "./observer.js"
-import type { TelegramUpdate, SessionMeta } from "./types.js"
+import type { TelegramUpdate, TelegramCallbackQuery, SessionMeta } from "./types.js"
 import { generateSlug } from "./slugs.js"
 import { config } from "./config.js"
 
@@ -17,8 +17,14 @@ interface ActiveSession {
   meta: SessionMeta
 }
 
+interface PendingTask {
+  task: string
+  threadId?: number
+}
+
 export class Dispatcher {
   private readonly sessions = new Map<number, ActiveSession>()
+  private readonly pendingTasks = new Map<number, PendingTask>()
   private offset = 0
   private running = false
 
@@ -61,6 +67,11 @@ export class Dispatcher {
   }
 
   private async handleUpdate(update: TelegramUpdate): Promise<void> {
+    if (update.callback_query) {
+      await this.handleCallbackQuery(update.callback_query)
+      return
+    }
+
     const message = update.message
     if (!message) return
 
@@ -87,6 +98,42 @@ export class Dispatcher {
     }
   }
 
+  private async handleCallbackQuery(query: TelegramCallbackQuery): Promise<void> {
+    if (!config.telegram.allowedUserIds.includes(query.from.id)) {
+      await this.telegram.answerCallbackQuery(query.id, "Not authorized")
+      return
+    }
+
+    const data = query.data
+    if (!data?.startsWith("repo:")) {
+      await this.telegram.answerCallbackQuery(query.id)
+      return
+    }
+
+    const repoSlug = data.slice("repo:".length)
+    const repoUrl = config.repos[repoSlug]
+    if (!repoUrl) {
+      await this.telegram.answerCallbackQuery(query.id, "Unknown repo")
+      return
+    }
+
+    const messageId = query.message?.message_id
+    const threadId = query.message?.message_thread_id
+
+    if (messageId) {
+      const pending = this.pendingTasks.get(messageId)
+      if (pending) {
+        this.pendingTasks.delete(messageId)
+        await this.telegram.answerCallbackQuery(query.id, `Selected: ${repoSlug}`)
+        await this.telegram.deleteMessage(messageId)
+        await this.handleTaskCommand(`${repoUrl} ${pending.task}`, threadId)
+        return
+      }
+    }
+
+    await this.telegram.answerCallbackQuery(query.id)
+  }
+
   private async handleTaskCommand(args: string, replyThreadId?: number): Promise<void> {
     if (this.sessions.size >= config.workspace.maxConcurrentSessions) {
       if (replyThreadId !== undefined) {
@@ -103,12 +150,29 @@ export class Dispatcher {
     if (!task) {
       if (replyThreadId !== undefined) {
         await this.telegram.sendMessage(
-          `Usage: <code>/task https://github.com/org/repo description of the task</code>\n` +
-          `Or: <code>/task description of the task</code> (no repo cloning)`,
+          `Usage: <code>/task [repo] description of the task</code>\n` +
+          `Repos: ${Object.keys(config.repos).map((s) => `<code>${s}</code>`).join(", ")}\n` +
+          `Or use a full URL or omit repo entirely.`,
           replyThreadId,
         )
       }
       return
+    }
+
+    if (!repoUrl) {
+      const repoKeys = Object.keys(config.repos)
+      if (repoKeys.length > 0) {
+        const keyboard = buildRepoKeyboard(repoKeys)
+        const msgId = await this.telegram.sendMessageWithKeyboard(
+          `Pick a repo for: <i>${escapeHtml(task)}</i>`,
+          keyboard,
+          replyThreadId,
+        )
+        if (msgId) {
+          this.pendingTasks.set(msgId, { task, threadId: replyThreadId })
+        }
+        return
+      }
     }
 
     const sessionId = crypto.randomUUID()
@@ -206,7 +270,33 @@ function parseTaskArgs(args: string): { repoUrl?: string; task: string } {
     return { repoUrl: match[1], task: match[2].trim() }
   }
 
+  // Check for repo alias as first word
+  const spaceIdx = args.indexOf(" ")
+  if (spaceIdx > 0) {
+    const firstWord = args.slice(0, spaceIdx)
+    const aliasUrl = config.repos[firstWord]
+    if (aliasUrl) {
+      return { repoUrl: aliasUrl, task: args.slice(spaceIdx + 1).trim() }
+    }
+  }
+
   return { task: args.trim() }
+}
+
+function buildRepoKeyboard(repoKeys: string[]): { text: string; callback_data: string }[][] {
+  const rows: { text: string; callback_data: string }[][] = []
+  for (let i = 0; i < repoKeys.length; i += 2) {
+    const row = [{ text: repoKeys[i], callback_data: `repo:${repoKeys[i]}` }]
+    if (i + 1 < repoKeys.length) {
+      row.push({ text: repoKeys[i + 1], callback_data: `repo:${repoKeys[i + 1]}` })
+    }
+    rows.push(row)
+  }
+  return rows
+}
+
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 }
 
 function extractRepoName(url: string): string {

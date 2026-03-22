@@ -1,4 +1,4 @@
-import type { TelegramUpdate, TelegramForumTopic } from "./types.js"
+import type { TelegramUpdate, TelegramForumTopic, TelegramCallbackQuery } from "./types.js"
 
 const MAX_LENGTH = 4096
 const BASE = "https://api.telegram.org"
@@ -54,7 +54,7 @@ export class TelegramClient {
       const result = await this.call<TelegramUpdate[]>("getUpdates", {
         offset,
         timeout,
-        allowed_updates: ["message"],
+        allowed_updates: ["message", "callback_query"],
       })
       return result
     } catch (err) {
@@ -151,6 +151,48 @@ export class TelegramClient {
       })
     } catch (err) {
       process.stderr.write(`telegram: closeForumTopic failed: ${err}\n`)
+    }
+  }
+
+  async sendMessageWithKeyboard(
+    html: string,
+    keyboard: { text: string; callback_data: string }[][],
+    threadId?: number,
+  ): Promise<number | null> {
+    try {
+      const body: Record<string, unknown> = {
+        chat_id: this.chatId,
+        text: html,
+        parse_mode: "HTML",
+        reply_markup: { inline_keyboard: keyboard },
+      }
+      if (threadId !== undefined) body.message_thread_id = threadId
+      const result = await this.call<{ message_id: number }>("sendMessage", body)
+      return result.message_id
+    } catch (err) {
+      process.stderr.write(`telegram: sendMessageWithKeyboard failed: ${err}\n`)
+      return null
+    }
+  }
+
+  async answerCallbackQuery(callbackQueryId: string, text?: string): Promise<void> {
+    try {
+      const body: Record<string, unknown> = { callback_query_id: callbackQueryId }
+      if (text) body.text = text
+      await this.call("answerCallbackQuery", body)
+    } catch (err) {
+      process.stderr.write(`telegram: answerCallbackQuery failed: ${err}\n`)
+    }
+  }
+
+  async deleteMessage(messageId: number): Promise<void> {
+    try {
+      await this.call("deleteMessage", {
+        chat_id: this.chatId,
+        message_id: messageId,
+      })
+    } catch (err) {
+      process.stderr.write(`telegram: deleteMessage failed: ${err}\n`)
     }
   }
 

@@ -49,4 +49,8 @@ export const config = {
   observer: {
     activityThrottleMs: optionalNumber("ACTIVITY_THROTTLE_MS", 3000),
   },
+  repos: {
+    scripts: "https://github.com/tprei/scripts",
+    pinoquio: "https://github.com/retirers/pinoquio-na-web",
+  } as Record<string, string>,
 } as const
