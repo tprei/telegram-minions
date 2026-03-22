@@ -590,12 +590,17 @@ function buildContextPrompt(topicSession: TopicSession): string {
     ? "## Planning context\n\nYou are continuing a planning conversation. Here is the history:"
     : "## Follow-up context\n\nYou previously worked on this task. Here is the conversation history:"
 
+  const MAX_ASSISTANT_CHARS = 4000
   const lines: string[] = [header, ""]
 
   for (const msg of topicSession.conversation) {
     const label = msg.role === "user" ? "**User**" : "**Agent**"
     lines.push(`${label}:`)
-    lines.push(msg.text)
+    if (msg.role === "assistant" && msg.text.length > MAX_ASSISTANT_CHARS) {
+      lines.push(`[earlier output truncated]\n…${msg.text.slice(-MAX_ASSISTANT_CHARS)}`)
+    } else {
+      lines.push(msg.text)
+    }
     lines.push("")
   }
 
