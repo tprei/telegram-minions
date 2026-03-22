@@ -1,4 +1,5 @@
 import { execSync } from "node:child_process"
+import os from "node:os"
 import path from "node:path"
 import fs from "node:fs"
 import crypto from "node:crypto"
@@ -529,11 +530,10 @@ export class Dispatcher {
     await this.spawnTopicAgent(topicSession, executionTask)
   }
 
-  private async downloadPhotos(photos: TelegramPhotoSize[] | undefined, cwd: string): Promise<string[]> {
+  private async downloadPhotos(photos: TelegramPhotoSize[] | undefined, _cwd: string): Promise<string[]> {
     if (!photos || photos.length === 0) return []
 
-    const imagesDir = path.join(cwd, ".minion-images")
-    fs.mkdirSync(imagesDir, { recursive: true })
+    const imagesDir = fs.mkdtempSync(path.join(os.tmpdir(), "minion-images-"))
 
     // Telegram sends multiple sizes; pick the largest (last in the array)
     const largest = photos[photos.length - 1]
