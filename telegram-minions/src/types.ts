@@ -7,12 +7,22 @@ export interface TelegramUser {
   first_name?: string
 }
 
+export interface TelegramPhotoSize {
+  file_id: string
+  file_unique_id: string
+  width: number
+  height: number
+  file_size?: number
+}
+
 export interface TelegramMessage {
   message_id: number
   from?: TelegramUser
   chat: { id: number; type: string }
   date: number
   text?: string
+  caption?: string
+  photo?: TelegramPhotoSize[]
   message_thread_id?: number
   is_topic_message?: boolean
 }
@@ -122,6 +132,7 @@ export interface SessionMeta {
 export interface PlanMessage {
   role: "user" | "assistant"
   text: string
+  images?: string[]
 }
 
 export interface PlanSession {
