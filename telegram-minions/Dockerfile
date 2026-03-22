@@ -22,7 +22,8 @@ RUN curl -fsSL -o /tmp/goose.tar.bz2 \
 RUN npm install -g @anthropic-ai/claude-code @zed-industries/claude-agent-acp @playwright/mcp
 
 # Install Playwright browsers for MCP vision capability
-RUN npx playwright install --with-deps chromium
+# Need apt-get update because lists were cleaned earlier
+RUN apt-get update && npx playwright install --with-deps chromium && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
