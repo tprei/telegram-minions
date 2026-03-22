@@ -282,20 +282,28 @@ describe("buildExecutionPrompt", () => {
     expect(prompt).toContain("implement feature X")
   })
 
-  it("uses the last assistant message as the plan", () => {
+  it("includes full conversation history", () => {
     const prompt = buildExecutionPrompt(makeTopicSession())
+    expect(prompt).toContain("Plan v1: do A then B")
+    expect(prompt).toContain("also do C")
     expect(prompt).toContain("Plan v2: do A, B, then C")
   })
 
-  it("does not include intermediate plans", () => {
+  it("labels messages with User and Agent", () => {
     const prompt = buildExecutionPrompt(makeTopicSession())
-    expect(prompt).not.toContain("Plan v1")
+    expect(prompt).toContain("**User**:")
+    expect(prompt).toContain("**Agent**:")
   })
 
   it("includes section headers", () => {
     const prompt = buildExecutionPrompt(makeTopicSession())
     expect(prompt).toContain("## Task")
-    expect(prompt).toContain("## Implementation plan")
+    expect(prompt).toContain("## Planning thread")
+  })
+
+  it("uses Research thread header for think mode", () => {
+    const prompt = buildExecutionPrompt(makeTopicSession({ mode: "think" }))
+    expect(prompt).toContain("## Research thread")
   })
 
   it("includes instruction to follow the plan", () => {
@@ -308,7 +316,7 @@ describe("buildExecutionPrompt", () => {
       conversation: [],
     }))
     expect(prompt).toContain("## Task")
-    expect(prompt).toContain("## Implementation plan")
+    expect(prompt).not.toContain("## Planning thread")
   })
 
   it("handles conversation with no assistant messages", () => {
@@ -327,5 +335,17 @@ describe("buildExecutionPrompt", () => {
     }))
     expect(prompt).toContain("build it")
     expect(prompt).toContain("The plan is: step 1, step 2")
+  })
+
+  it("truncates long assistant messages", () => {
+    const longText = "x".repeat(5000)
+    const prompt = buildExecutionPrompt(makeTopicSession({
+      conversation: [
+        { role: "user", text: "task" },
+        { role: "assistant", text: longText },
+      ],
+    }))
+    expect(prompt).toContain("[earlier output truncated]")
+    expect(prompt).not.toContain("x".repeat(5000))
   })
 })

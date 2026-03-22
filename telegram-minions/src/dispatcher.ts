@@ -778,26 +778,36 @@ export function buildContextPrompt(topicSession: TopicSession): string {
 }
 
 export function buildExecutionPrompt(topicSession: TopicSession): string {
-  const planMessages = topicSession.conversation
-    .filter((m) => m.role === "assistant")
-  const lastPlan = planMessages.length > 0
-    ? planMessages[planMessages.length - 1].text
-    : ""
+  const MAX_ASSISTANT_CHARS = 4000
+  const conversation = topicSession.conversation
 
-  const originalRequest = topicSession.conversation[0]?.text ?? ""
+  const originalRequest = conversation[0]?.text ?? ""
 
   const lines: string[] = [
     "## Task",
     "",
     originalRequest,
     "",
-    "## Implementation plan",
-    "",
-    lastPlan,
-    "",
-    "---",
-    "Implement the plan above. Follow the plan closely.",
   ]
+
+  if (conversation.length > 1) {
+    const isThink = topicSession.mode === "think"
+    lines.push(isThink ? "## Research thread" : "## Planning thread")
+    lines.push("")
+    for (const msg of conversation.slice(1)) {
+      const label = msg.role === "user" ? "**User**" : "**Agent**"
+      lines.push(`${label}:`)
+      if (msg.role === "assistant" && msg.text.length > MAX_ASSISTANT_CHARS) {
+        lines.push(`[earlier output truncated]\n…${msg.text.slice(-MAX_ASSISTANT_CHARS)}`)
+      } else {
+        lines.push(msg.text)
+      }
+      lines.push("")
+    }
+  }
+
+  lines.push("---")
+  lines.push("Implement the plan above. Follow the plan closely.")
 
   return lines.join("\n")
 }
