@@ -23,7 +23,7 @@ RUN npm install -g @anthropic-ai/claude-code @zed-industries/claude-agent-acp @p
 
 # Install Playwright browsers for MCP vision capability
 # Need apt-get update because lists were cleaned earlier
-RUN apt-get update && npx playwright install --with-deps chromium && rm -rf /var/lib/apt/lists/*
+RUN chmod 1777 /tmp && apt-get update && npx playwright install --with-deps chromium && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
