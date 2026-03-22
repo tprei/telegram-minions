@@ -13,16 +13,19 @@ import {
   formatPlanIteration,
   formatPlanExecuting,
   formatPlanComplete,
+  formatStatus,
 } from "./format.js"
 
 const POLL_TIMEOUT = 30
 const TASK_PREFIX = "/task"
 const PLAN_PREFIX = "/plan"
 const EXECUTE_CMD = "/execute"
+const STATUS_CMD = "/status"
 
 interface ActiveSession {
   handle: SessionHandle
   meta: SessionMeta
+  task: string
 }
 
 interface PendingTask {
@@ -94,6 +97,11 @@ export class Dispatcher {
     const photos = message.photo
     if (!text && !photos) return
 
+    if (text === STATUS_CMD && message.message_thread_id === undefined) {
+      await this.handleStatusCommand()
+      return
+    }
+
     if (text?.startsWith(PLAN_PREFIX)) {
       await this.handlePlanCommand(text.slice(PLAN_PREFIX.length).trim(), message.message_thread_id, photos)
       return
@@ -163,6 +171,13 @@ export class Dispatcher {
     }
 
     await this.telegram.answerCallbackQuery(query.id)
+  }
+
+  private async handleStatusCommand(): Promise<void> {
+    const taskSessions = [...this.sessions.values()]
+    const planSessionList = [...this.planSessions.values()]
+    const msg = formatStatus(taskSessions, planSessionList, config.workspace.maxConcurrentSessions)
+    await this.telegram.sendMessage(msg)
   }
 
   private async handleTaskCommand(args: string, replyThreadId?: number, photos?: TelegramPhotoSize[]): Promise<void> {
@@ -264,7 +279,7 @@ export class Dispatcher {
       config.workspace.sessionTimeoutMs,
     )
 
-    this.sessions.set(threadId, { handle, meta })
+    this.sessions.set(threadId, { handle, meta, task: fullTask })
 
     await this.observer.onSessionStart(meta, fullTask)
     handle.start(fullTask)
@@ -406,7 +421,7 @@ export class Dispatcher {
       config.workspace.sessionTimeoutMs,
     )
 
-    this.sessions.set(planSession.threadId, { handle, meta })
+    this.sessions.set(planSession.threadId, { handle, meta, task })
 
     await this.observer.onSessionStart(meta, task, onTextCapture)
     handle.start(task)
