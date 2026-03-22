@@ -127,21 +127,23 @@ export interface SessionMeta {
   mode: SessionMode
 }
 
-// Plan mode types
+// Topic session types (used for both plan and task modes)
 
-export interface PlanMessage {
+export interface TopicMessage {
   role: "user" | "assistant"
   text: string
   images?: string[]
 }
 
-export interface PlanSession {
+export interface TopicSession {
   threadId: number
   repo: string
   repoUrl?: string
   cwd: string
   slug: string
-  conversation: PlanMessage[]
+  conversation: TopicMessage[]
   activeSessionId?: string
   pendingFeedback: string[]
+  mode: SessionMode
+  lastActivityAt: number
 }

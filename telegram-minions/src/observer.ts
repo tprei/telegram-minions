@@ -193,6 +193,15 @@ export class Observer {
     }
   }
 
+  async flushAndComplete(
+    meta: SessionMeta,
+    _finalState: "completed" | "errored",
+    _durationMs: number,
+  ): Promise<void> {
+    await this.flushTextBuffer(meta)
+    this.sessions.delete(meta.sessionId)
+  }
+
   clearSession(sessionId: string): void {
     const state = this.sessions.get(sessionId)
     if (state?.flushTimer !== null) clearTimeout(state!.flushTimer)
