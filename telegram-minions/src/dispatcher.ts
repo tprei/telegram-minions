@@ -5,7 +5,7 @@ import crypto from "node:crypto"
 import type { TelegramClient } from "./telegram.js"
 import { SessionHandle } from "./session.js"
 import { Observer } from "./observer.js"
-import type { TelegramUpdate, TelegramCallbackQuery, SessionMeta, PlanSession } from "./types.js"
+import type { TelegramUpdate, TelegramCallbackQuery, TelegramPhotoSize, SessionMeta, PlanSession } from "./types.js"
 import { generateSlug } from "./slugs.js"
 import { config } from "./config.js"
 import {
@@ -90,16 +90,17 @@ export class Dispatcher {
     const userId = message.from?.id ?? -1
     if (!config.telegram.allowedUserIds.includes(userId)) return
 
-    const text = message.text?.trim()
-    if (!text) return
+    const text = (message.text ?? message.caption)?.trim()
+    const photos = message.photo
+    if (!text && !photos) return
 
-    if (text.startsWith(PLAN_PREFIX)) {
-      await this.handlePlanCommand(text.slice(PLAN_PREFIX.length).trim(), message.message_thread_id)
+    if (text?.startsWith(PLAN_PREFIX)) {
+      await this.handlePlanCommand(text.slice(PLAN_PREFIX.length).trim(), message.message_thread_id, photos)
       return
     }
 
-    if (text.startsWith(TASK_PREFIX)) {
-      await this.handleTaskCommand(text.slice(TASK_PREFIX.length).trim(), message.message_thread_id)
+    if (text?.startsWith(TASK_PREFIX)) {
+      await this.handleTaskCommand(text.slice(TASK_PREFIX.length).trim(), message.message_thread_id, photos)
       return
     }
 
@@ -109,7 +110,7 @@ export class Dispatcher {
         if (text === EXECUTE_CMD) {
           await this.handleExecuteCommand(planSession)
         } else {
-          await this.handlePlanFeedback(planSession, text)
+          await this.handlePlanFeedback(planSession, text ?? "", photos)
         }
         return
       }
@@ -164,7 +165,7 @@ export class Dispatcher {
     await this.telegram.answerCallbackQuery(query.id)
   }
 
-  private async handleTaskCommand(args: string, replyThreadId?: number): Promise<void> {
+  private async handleTaskCommand(args: string, replyThreadId?: number, photos?: TelegramPhotoSize[]): Promise<void> {
     if (this.sessions.size >= config.workspace.maxConcurrentSessions) {
       if (replyThreadId !== undefined) {
         await this.telegram.sendMessage(
@@ -230,6 +231,9 @@ export class Dispatcher {
       return
     }
 
+    const imagePaths = await this.downloadPhotos(photos, cwd)
+    const fullTask = appendImageContext(task, imagePaths)
+
     const meta: SessionMeta = {
       sessionId,
       threadId,
@@ -262,11 +266,11 @@ export class Dispatcher {
 
     this.sessions.set(threadId, { handle, meta })
 
-    await this.observer.onSessionStart(meta, task)
-    handle.start(task)
+    await this.observer.onSessionStart(meta, fullTask)
+    handle.start(fullTask)
   }
 
-  private async handlePlanCommand(args: string, replyThreadId?: number): Promise<void> {
+  private async handlePlanCommand(args: string, replyThreadId?: number, photos?: TelegramPhotoSize[]): Promise<void> {
     const { repoUrl, task } = parseTaskArgs(args)
 
     if (!task) {
@@ -295,10 +299,10 @@ export class Dispatcher {
       }
     }
 
-    await this.startPlanSession(repoUrl, task)
+    await this.startPlanSession(repoUrl, task, photos)
   }
 
-  private async startPlanSession(repoUrl: string | undefined, task: string): Promise<void> {
+  private async startPlanSession(repoUrl: string | undefined, task: string, photos?: TelegramPhotoSize[]): Promise<void> {
     const sessionId = crypto.randomUUID()
     const slug = generateSlug(sessionId)
     const repo = repoUrl ? extractRepoName(repoUrl) : "local"
@@ -321,13 +325,16 @@ export class Dispatcher {
       return
     }
 
+    const imagePaths = await this.downloadPhotos(photos, cwd)
+    const fullTask = appendImageContext(task, imagePaths)
+
     const planSession: PlanSession = {
       threadId,
       repo,
       repoUrl,
       cwd,
       slug,
-      conversation: [{ role: "user", text: task }],
+      conversation: [{ role: "user", text: fullTask, images: imagePaths.length > 0 ? imagePaths : undefined }],
       pendingFeedback: [],
     }
 
@@ -338,7 +345,7 @@ export class Dispatcher {
       threadId,
     )
 
-    await this.spawnPlanAgent(planSession, task)
+    await this.spawnPlanAgent(planSession, fullTask)
   }
 
   private async spawnPlanAgent(planSession: PlanSession, task: string): Promise<void> {
@@ -405,7 +412,7 @@ export class Dispatcher {
     handle.start(task)
   }
 
-  private async handlePlanFeedback(planSession: PlanSession, feedback: string): Promise<void> {
+  private async handlePlanFeedback(planSession: PlanSession, feedback: string, photos?: TelegramPhotoSize[]): Promise<void> {
     // If the plan agent is still running, queue the feedback
     if (planSession.activeSessionId) {
       planSession.pendingFeedback.push(feedback)
@@ -416,7 +423,14 @@ export class Dispatcher {
       return
     }
 
-    planSession.conversation.push({ role: "user", text: feedback })
+    const imagePaths = await this.downloadPhotos(photos, planSession.cwd)
+    const fullFeedback = appendImageContext(feedback, imagePaths)
+
+    planSession.conversation.push({
+      role: "user",
+      text: fullFeedback,
+      images: imagePaths.length > 0 ? imagePaths : undefined,
+    })
 
     const iteration = Math.floor(planSession.conversation.filter((m) => m.role === "user").length)
 
@@ -453,6 +467,23 @@ export class Dispatcher {
       planSession.repoUrl ? `${planSession.repoUrl} ${plan}` : plan,
       undefined,
     )
+  }
+
+  private async downloadPhotos(photos: TelegramPhotoSize[] | undefined, cwd: string): Promise<string[]> {
+    if (!photos || photos.length === 0) return []
+
+    const imagesDir = path.join(cwd, ".minion-images")
+    fs.mkdirSync(imagesDir, { recursive: true })
+
+    // Telegram sends multiple sizes; pick the largest (last in the array)
+    const largest = photos[photos.length - 1]
+    const filename = `${largest.file_unique_id}.jpg`
+    const destPath = path.join(imagesDir, filename)
+
+    const ok = await this.telegram.downloadFile(largest.file_id, destPath)
+    if (!ok) return []
+
+    return [destPath]
   }
 
   private async prepareWorkspace(slug: string, repoUrl?: string): Promise<string | null> {
@@ -530,6 +561,13 @@ function extractRepoName(url: string): string {
   } catch {
     return "repo"
   }
+}
+
+function appendImageContext(task: string, imagePaths: string[]): string {
+  if (imagePaths.length === 0) return task
+
+  const imageRefs = imagePaths.map((p) => `- \`${p}\``).join("\n")
+  return `${task}\n\n## Attached images\n\nThe user attached the following image(s). Read them with your file-reading tool to view their contents:\n${imageRefs}`
 }
 
 function buildPlanContextPrompt(planSession: PlanSession): string {

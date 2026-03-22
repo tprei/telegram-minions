@@ -1,3 +1,6 @@
+import fs from "node:fs"
+import { pipeline } from "node:stream/promises"
+import { Readable } from "node:stream"
 import type { TelegramUpdate, TelegramForumTopic, TelegramCallbackQuery } from "./types.js"
 
 const MAX_LENGTH = 4096
@@ -204,6 +207,22 @@ export class TelegramClient {
       })
     } catch (err) {
       process.stderr.write(`telegram: deleteForumTopic failed: ${err}\n`)
+    }
+  }
+
+  async downloadFile(fileId: string, destPath: string): Promise<boolean> {
+    try {
+      const fileInfo = await this.call<{ file_path: string }>("getFile", { file_id: fileId })
+      const url = `${BASE}/file/bot${this.token}/${fileInfo.file_path}`
+      const res = await fetch(url)
+      if (!res.ok || !res.body) {
+        throw new Error(`HTTP ${res.status} downloading file`)
+      }
+      await pipeline(Readable.fromWeb(res.body as import("stream/web").ReadableStream), fs.createWriteStream(destPath))
+      return true
+    } catch (err) {
+      process.stderr.write(`telegram: downloadFile failed: ${err}\n`)
+      return false
     }
   }
 }
