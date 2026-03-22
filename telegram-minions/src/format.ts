@@ -108,13 +108,21 @@ export function formatSessionInterrupted(slug: string): string {
   return `⚠️ <b>Session interrupted</b>  ·  🏷 <code>${esc(slug)}</code>\nRestart not yet supported. Create a new task.`
 }
 
-export function formatAssistantText(slug: string, text: string): string {
+export function formatAssistantText(slug: string, text: string, toolLines?: string[]): string {
   const MAX_TEXT = 3800
-  return [
+  const lines: string[] = [
     `🤖 <b>Reply</b>  ·  🏷 <code>${esc(slug)}</code>`,
-    ``,
-    `<blockquote>${esc(truncate(text, MAX_TEXT))}</blockquote>`,
-  ].join("\n")
+  ]
+
+  if (toolLines && toolLines.length > 0) {
+    lines.push(``)
+    lines.push(...toolLines)
+  }
+
+  lines.push(``)
+  lines.push(`<blockquote>${esc(truncate(text, MAX_TEXT))}</blockquote>`)
+
+  return lines.join("\n")
 }
 
 export function formatPlanStart(

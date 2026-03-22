@@ -138,8 +138,10 @@ export class Observer {
     if (text.length < MIN_TEXT_LENGTH) return
     if (reason === "tool" && text.length < PRE_TOOL_NARRATION_LIMIT) return
 
+    const toolLines = state.activityLog.length > 0 ? [...state.activityLog] : undefined
+
     await this.telegram.sendMessage(
-      formatAssistantText(meta.topicName, text),
+      formatAssistantText(meta.topicName, text, toolLines),
       meta.threadId,
     )
     // Reset activity tracking so the next tool burst gets a fresh message
