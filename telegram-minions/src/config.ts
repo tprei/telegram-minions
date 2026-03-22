@@ -40,6 +40,9 @@ export const config = {
     provider: optional("GOOSE_PROVIDER", "claude-acp"),
     model: optional("GOOSE_MODEL", "default"),
   },
+  claude: {
+    planModel: optional("PLAN_MODEL", "sonnet"),
+  },
   workspace: {
     root: optional("WORKSPACE_ROOT", "/workspace"),
     maxConcurrentSessions: optionalNumber("MAX_CONCURRENT_SESSIONS", 5),

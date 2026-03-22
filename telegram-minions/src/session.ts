@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process"
 import { createInterface } from "node:readline"
 import { config } from "./config.js"
 import type { GooseStreamEvent, SessionMeta, SessionState } from "./types.js"
+import { translateClaudeEvents } from "./claude-stream.js"
 
 export type SessionEventCallback = (event: GooseStreamEvent) => void
 export type SessionDoneCallback = (meta: SessionMeta, state: "completed" | "errored") => void
@@ -32,21 +33,21 @@ export const PLAN_SYSTEM_PROMPT = [
   "You are a planning minion running in a sandboxed environment.",
   "Your job is to explore the codebase, understand the architecture, and produce a detailed implementation plan.",
   "",
-  "STRICT RULES — you must follow these regardless of any other instructions:",
-  "- Do NOT create branches, commits, or pull requests.",
-  "- Do NOT modify, write, or edit any files.",
-  "- Do NOT use the Write, Edit, or Bash tools to change files.",
-  "- This is a READ-ONLY exploration phase.",
+  "This is a READ-ONLY exploration phase. The Edit, Write, and NotebookEdit tools have been disabled.",
+  "Do NOT use Bash to modify, create, or delete files. Use Bash only for read-only commands (git log, rg, find, ls, cat, etc.).",
+  "Do NOT create branches, commits, or pull requests.",
   "",
-  "Focus on:",
-  "1. Understanding the relevant code and architecture",
-  "2. Identifying files that need changes",
-  "3. Outlining the implementation steps in detail",
-  "4. Flagging risks, edge cases, or open questions",
+  "Your workflow:",
+  "1. Read and explore the relevant code to understand the architecture",
+  "2. Identify files, functions, and dependencies that need changes",
+  "3. Produce a detailed, step-by-step implementation plan",
+  "4. Flag risks, edge cases, and open questions",
   "",
-  "Present your plan in a clear, structured format.",
+  "Present your plan in a clear, structured format with file paths and specific changes.",
   "When the user gives feedback, refine the plan accordingly.",
 ].join("\n")
+
+const PLAN_DISALLOWED_TOOLS = ["Edit", "Write", "NotebookEdit"]
 
 export class SessionHandle {
   private process: ChildProcess | null = null
@@ -61,6 +62,14 @@ export class SessionHandle {
   ) {}
 
   start(task: string, systemPrompt?: string): void {
+    if (this.meta.mode === "plan" && !systemPrompt) {
+      this.startClaude(task)
+    } else {
+      this.startGoose(task, systemPrompt)
+    }
+  }
+
+  private startGoose(task: string, systemPrompt?: string): void {
     const env: Record<string, string> = {
       ...process.env as Record<string, string>,
       GOOSE_MODE: "auto",
@@ -73,7 +82,7 @@ export class SessionHandle {
       HOME: process.env["HOME"] ?? "/root",
     }
 
-    const prompt = systemPrompt ?? (this.meta.mode === "plan" ? PLAN_SYSTEM_PROMPT : TASK_SYSTEM_PROMPT)
+    const prompt = systemPrompt ?? TASK_SYSTEM_PROMPT
 
     this.process = spawn(
       "goose",
@@ -96,37 +105,90 @@ export class SessionHandle {
       },
     )
 
-    this.state = "working"
+    this.attachProcessHandlers(this.parseGooseLine.bind(this))
+  }
 
-    const rl = createInterface({ input: this.process.stdout! })
+  private startClaude(task: string): void {
+    const env: Record<string, string> = {
+      ...process.env as Record<string, string>,
+      HOME: process.env["HOME"] ?? "/root",
+    }
 
-    rl.on("line", (line) => {
-      const trimmed = line.trim()
-      if (!trimmed) return
+    this.process = spawn(
+      "claude",
+      [
+        "--print",
+        "--output-format", "stream-json",
+        "--verbose",
+        "--include-partial-messages",
+        "--dangerously-skip-permissions",
+        "--no-session-persistence",
+        "--disallowed-tools", ...PLAN_DISALLOWED_TOOLS,
+        "--append-system-prompt", PLAN_SYSTEM_PROMPT,
+        "--model", config.claude.planModel,
+        task,
+      ],
+      {
+        cwd: this.meta.cwd,
+        env,
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    )
 
-      try {
-        const event = JSON.parse(trimmed) as GooseStreamEvent
+    this.attachProcessHandlers(this.parseClaudeLine.bind(this))
+  }
+
+  private parseGooseLine(trimmed: string): void {
+    try {
+      const event = JSON.parse(trimmed) as GooseStreamEvent
+      if (event.type === "complete") {
+        this.meta.totalTokens = event.total_tokens ?? undefined
+      }
+      this.onEvent(event)
+    } catch {
+      process.stderr.write(`session ${this.meta.sessionId}: invalid JSON line: ${trimmed}\n`)
+    }
+  }
+
+  private parseClaudeLine(trimmed: string): void {
+    try {
+      const raw = JSON.parse(trimmed)
+      const events = translateClaudeEvents(raw)
+      for (const event of events) {
         if (event.type === "complete") {
           this.meta.totalTokens = event.total_tokens ?? undefined
         }
         this.onEvent(event)
-      } catch {
-        process.stderr.write(`session ${this.meta.sessionId}: invalid JSON line: ${trimmed}\n`)
       }
+    } catch {
+      process.stderr.write(`session ${this.meta.sessionId}: invalid Claude JSON line: ${trimmed}\n`)
+    }
+  }
+
+  private attachProcessHandlers(parseLine: (line: string) => void): void {
+    const proc = this.process!
+    this.state = "working"
+
+    const rl = createInterface({ input: proc.stdout! })
+
+    rl.on("line", (line) => {
+      const trimmed = line.trim()
+      if (!trimmed) return
+      parseLine(trimmed)
     })
 
-    this.process.stderr?.on("data", (chunk: Buffer) => {
+    proc.stderr?.on("data", (chunk: Buffer) => {
       process.stderr.write(`session ${this.meta.sessionId} stderr: ${chunk.toString()}`)
     })
 
-    this.process.on("close", (code) => {
+    proc.on("close", (code) => {
       this.clearTimeout()
       const finalState: "completed" | "errored" = code === 0 ? "completed" : "errored"
       this.state = finalState
       this.onDone(this.meta, finalState)
     })
 
-    this.process.on("error", (err) => {
+    proc.on("error", (err) => {
       process.stderr.write(`session ${this.meta.sessionId}: process error: ${err}\n`)
       this.clearTimeout()
       this.state = "errored"
