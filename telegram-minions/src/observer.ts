@@ -1,7 +1,8 @@
 import type { TelegramClient } from "./telegram.js"
 import type { GooseStreamEvent, GooseMessage, GooseToolRequestContent, SessionMeta } from "./types.js"
 import {
-  formatToolActivity,
+  formatToolLine,
+  formatActivityLog,
   formatSessionStart,
   formatSessionComplete,
   formatSessionError,
@@ -11,6 +12,9 @@ import {
 // Text flush delay: if no new text chunk arrives within this window, send what's buffered.
 const TEXT_FLUSH_DEBOUNCE_MS = 1500
 
+// Maximum number of recent tool lines to keep in the activity log.
+const MAX_ACTIVITY_LINES = 6
+
 interface SessionState {
   // Text buffering: Goose streams text token-by-token; we accumulate and flush.
   textBuffer: string
@@ -19,6 +23,7 @@ interface SessionState {
   activityMessageId: number | null
   activityLastSentAt: number
   toolCount: number
+  activityLog: string[]
 }
 
 export class Observer {
@@ -36,6 +41,7 @@ export class Observer {
       activityMessageId: null,
       activityLastSentAt: 0,
       toolCount: 0,
+      activityLog: [],
     })
     await this.telegram.sendMessage(
       formatSessionStart(meta.repo, meta.topicName, task),
@@ -112,6 +118,9 @@ export class Observer {
         formatAssistantText(meta.topicName, text),
         meta.threadId,
       )
+      // Reset activity tracking so the next tool burst gets a fresh message
+      state.activityMessageId = null
+      state.activityLog = []
     }
   }
 
@@ -128,16 +137,23 @@ export class Observer {
 
     state.toolCount++
 
+    // Append to rolling activity log
+    const line = formatToolLine(name, args)
+    state.activityLog.push(line)
+    if (state.activityLog.length > MAX_ACTIVITY_LINES) {
+      state.activityLog.shift()
+    }
+
+    const html = formatActivityLog(state.activityLog, state.toolCount)
+
     if (now - state.activityLastSentAt < this.throttleMs && state.activityMessageId !== null) {
       // Within throttle window: edit existing activity message
-      const html = formatToolActivity(name, args, state.toolCount)
       state.activityLastSentAt = now
       await this.telegram.editMessage(state.activityMessageId, html, meta.threadId)
       return
     }
 
     // Outside throttle window or no existing message: send new activity message
-    const html = formatToolActivity(name, args, state.toolCount)
     state.activityLastSentAt = now
     const { messageId } = await this.telegram.sendMessage(html, meta.threadId)
     state.activityMessageId = messageId
