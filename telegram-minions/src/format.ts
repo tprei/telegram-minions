@@ -128,7 +128,7 @@ export function formatPlanStart(
     ``,
     `<blockquote>${esc(truncate(task, MAX_TASK))}</blockquote>`,
     ``,
-    `Reply in this thread to give feedback. Send <code>/execute</code> when the plan is ready.`,
+    `Use <code>/reply</code> (or <code>/r</code>) to give feedback. Send <code>/execute</code> when the plan is ready.`,
   ].join("\n")
 }
 
@@ -145,7 +145,7 @@ export function formatPlanExecuting(slug: string, execSlug: string): string {
 }
 
 export function formatPlanComplete(slug: string): string {
-  return `📋 <b>Plan complete</b>  ·  🏷 <code>${esc(slug)}</code>\n\nReply with feedback or send <code>/execute</code> to begin implementation.`
+  return `📋 <b>Plan complete</b>  ·  🏷 <code>${esc(slug)}</code>\n\nUse <code>/reply</code> (or <code>/r</code>) for feedback, or send <code>/execute</code> to begin implementation.`
 }
 
 export function formatTaskComplete(
@@ -161,7 +161,7 @@ export function formatTaskComplete(
   return [
     `✅ <b>Complete</b>  ·  🏷 <code>${esc(slug)}</code>  ·  ⏱ ${dur}${tokenPart}`,
     ``,
-    `Reply in this thread to give feedback.`,
+    `Use <code>/reply</code> (or <code>/r</code>) to give feedback.`,
   ].join("\n")
 }
 

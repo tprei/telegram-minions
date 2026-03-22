@@ -23,6 +23,8 @@ const TASK_PREFIX = "/task"
 const PLAN_PREFIX = "/plan"
 const EXECUTE_CMD = "/execute"
 const STATUS_CMD = "/status"
+const REPLY_PREFIX = "/reply"
+const REPLY_SHORT = "/r"
 
 interface ActiveSession {
   handle: SessionHandle
@@ -197,8 +199,11 @@ export class Dispatcher {
       if (topicSession) {
         if (topicSession.mode === "plan" && text === EXECUTE_CMD) {
           await this.handleExecuteCommand(topicSession)
-        } else {
-          await this.handleTopicFeedback(topicSession, text ?? "", photos)
+        } else if (text?.startsWith(REPLY_PREFIX + " ") || text?.startsWith(REPLY_SHORT + " ") || text === REPLY_PREFIX || text === REPLY_SHORT) {
+          const stripped = text.startsWith(REPLY_PREFIX)
+            ? text.slice(REPLY_PREFIX.length).trim()
+            : text.slice(REPLY_SHORT.length).trim()
+          await this.handleTopicFeedback(topicSession, stripped, photos)
         }
         return
       }
@@ -470,7 +475,7 @@ export class Dispatcher {
     if (topicSession.activeSessionId) {
       topicSession.pendingFeedback.push(feedback)
       await this.telegram.sendMessage(
-        `📝 Feedback queued — will be applied when the current iteration finishes.`,
+        `📝 Reply queued — will be applied when the current iteration finishes.`,
         topicSession.threadId,
       )
       return
