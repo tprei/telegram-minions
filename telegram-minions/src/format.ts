@@ -148,14 +148,35 @@ export function formatPlanComplete(slug: string): string {
   return `📋 <b>Plan complete</b>  ·  🏷 <code>${esc(slug)}</code>\n\nReply with feedback or send <code>/execute</code> to begin implementation.`
 }
 
+export function formatTaskComplete(
+  slug: string,
+  durationMs: number,
+  totalTokens: number | null | undefined,
+): string {
+  const secs = Math.round(durationMs / 1000)
+  const dur = secs >= 60
+    ? `${Math.floor(secs / 60)}m ${secs % 60}s`
+    : `${secs}s`
+  const tokenPart = totalTokens != null ? `  ·  🪙 ${totalTokens.toLocaleString()} tokens` : ""
+  return [
+    `✅ <b>Complete</b>  ·  🏷 <code>${esc(slug)}</code>  ·  ⏱ ${dur}${tokenPart}`,
+    ``,
+    `Reply in this thread to give feedback.`,
+  ].join("\n")
+}
+
+export function formatFollowUpIteration(slug: string, iteration: number): string {
+  return `🔄 <b>Follow-up</b>  ·  🏷 <code>${esc(slug)}</code>  ·  iteration ${iteration}`
+}
+
 export function formatStatus(
   taskSessions: { meta: { topicName: string; repo: string; startedAt: number; mode: string }; task: string; handle: { isActive(): boolean; getState(): string } }[],
-  planSessions: { slug: string; repo: string; conversation: { role: string; text: string }[]; activeSessionId?: string }[],
+  topicSessions: { slug: string; repo: string; conversation: { role: string; text: string }[]; activeSessionId?: string }[],
   maxConcurrent: number,
 ): string {
   const lines: string[] = [`📊 <b>Status</b>  ·  ${taskSessions.length}/${maxConcurrent} slots in use`, ""]
 
-  if (taskSessions.length === 0 && planSessions.length === 0) {
+  if (taskSessions.length === 0 && topicSessions.length === 0) {
     lines.push("No active sessions.")
     return lines.join("\n")
   }
@@ -170,10 +191,10 @@ export function formatStatus(
     lines.push("")
   }
 
-  const standbyPlans = planSessions.filter((p) => !p.activeSessionId)
-  for (const plan of standbyPlans) {
-    const originalTask = plan.conversation[0]?.text ?? ""
-    lines.push(`🟡 <b>${esc(plan.slug)}</b>  ·  📦 ${esc(plan.repo)}  ·  📋 plan  ·  awaiting feedback`)
+  const standbyTopics = topicSessions.filter((p) => !p.activeSessionId)
+  for (const topic of standbyTopics) {
+    const originalTask = topic.conversation[0]?.text ?? ""
+    lines.push(`🟡 <b>${esc(topic.slug)}</b>  ·  📦 ${esc(topic.repo)}  ·  📋 plan  ·  awaiting feedback`)
     lines.push(`   <blockquote>${esc(truncate(originalTask, 120))}</blockquote>`)
     lines.push("")
   }

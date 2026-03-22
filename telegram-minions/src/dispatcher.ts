@@ -5,15 +5,18 @@ import crypto from "node:crypto"
 import type { TelegramClient } from "./telegram.js"
 import { SessionHandle } from "./session.js"
 import { Observer } from "./observer.js"
-import type { TelegramUpdate, TelegramCallbackQuery, TelegramPhotoSize, SessionMeta, PlanSession } from "./types.js"
+import type { TelegramUpdate, TelegramCallbackQuery, TelegramPhotoSize, SessionMeta, TopicSession } from "./types.js"
 import { generateSlug } from "./slugs.js"
 import { config } from "./config.js"
+import { SessionStore } from "./store.js"
 import {
   formatPlanStart,
   formatPlanIteration,
   formatPlanExecuting,
   formatPlanComplete,
   formatStatus,
+  formatTaskComplete,
+  formatFollowUpIteration,
 } from "./format.js"
 
 const POLL_TIMEOUT = 30
@@ -35,15 +38,28 @@ interface PendingTask {
 
 export class Dispatcher {
   private readonly sessions = new Map<number, ActiveSession>()
-  private readonly planSessions = new Map<number, PlanSession>()
+  private readonly topicSessions = new Map<number, TopicSession>()
   private readonly pendingTasks = new Map<number, PendingTask>()
+  private readonly store: SessionStore
   private offset = 0
   private running = false
 
   constructor(
     private readonly telegram: TelegramClient,
     private readonly observer: Observer,
-  ) {}
+  ) {
+    this.store = new SessionStore(config.workspace.root)
+  }
+
+  loadPersistedSessions(): void {
+    const persisted = this.store.load()
+    for (const [threadId, session] of persisted) {
+      this.topicSessions.set(threadId, session)
+    }
+    if (persisted.size > 0) {
+      process.stderr.write(`dispatcher: loaded ${persisted.size} persisted session(s)\n`)
+    }
+  }
 
   async start(): Promise<void> {
     this.running = true
@@ -59,8 +75,19 @@ export class Dispatcher {
     for (const { handle } of this.sessions.values()) {
       handle.interrupt()
     }
-    this.planSessions.clear()
+    this.persistTopicSessions()
     process.stderr.write("dispatcher: stopped\n")
+  }
+
+  private persistTopicSessions(): void {
+    // Only persist sessions that aren't actively running
+    const toSave = new Map<number, TopicSession>()
+    for (const [threadId, session] of this.topicSessions) {
+      if (!session.activeSessionId) {
+        toSave.set(threadId, session)
+      }
+    }
+    this.store.save(toSave)
   }
 
   private async poll(): Promise<void> {
@@ -113,12 +140,12 @@ export class Dispatcher {
     }
 
     if (message.message_thread_id !== undefined) {
-      const planSession = this.planSessions.get(message.message_thread_id)
-      if (planSession) {
-        if (text === EXECUTE_CMD) {
-          await this.handleExecuteCommand(planSession)
+      const topicSession = this.topicSessions.get(message.message_thread_id)
+      if (topicSession) {
+        if (topicSession.mode === "plan" && text === EXECUTE_CMD) {
+          await this.handleExecuteCommand(topicSession)
         } else {
-          await this.handlePlanFeedback(planSession, text ?? "", photos)
+          await this.handleTopicFeedback(topicSession, text ?? "", photos)
         }
         return
       }
@@ -126,7 +153,7 @@ export class Dispatcher {
       const session = this.sessions.get(message.message_thread_id)
       if (session) {
         process.stderr.write(
-          `dispatcher: received message in active topic ${message.message_thread_id}, follow-ups not yet supported\n`,
+          `dispatcher: received message in active topic ${message.message_thread_id}, session still initializing\n`,
         )
       }
     }
@@ -161,7 +188,7 @@ export class Dispatcher {
         await this.telegram.answerCallbackQuery(query.id, `Selected: ${repoSlug}`)
         await this.telegram.deleteMessage(messageId)
         if (isPlan) {
-          await this.startPlanSession(repoUrl, pending.task)
+          await this.startTopicSession(repoUrl, pending.task, "plan")
         } else {
           const threadId = query.message?.message_thread_id
           await this.handleTaskCommand(`${repoUrl} ${pending.task}`, threadId)
@@ -175,8 +202,8 @@ export class Dispatcher {
 
   private async handleStatusCommand(): Promise<void> {
     const taskSessions = [...this.sessions.values()]
-    const planSessionList = [...this.planSessions.values()]
-    const msg = formatStatus(taskSessions, planSessionList, config.workspace.maxConcurrentSessions)
+    const topicSessionList = [...this.topicSessions.values()]
+    const msg = formatStatus(taskSessions, topicSessionList, config.workspace.maxConcurrentSessions)
     await this.telegram.sendMessage(msg)
   }
 
@@ -221,68 +248,7 @@ export class Dispatcher {
       }
     }
 
-    const sessionId = crypto.randomUUID()
-    const slug = generateSlug(sessionId)
-    const repo = repoUrl ? extractRepoName(repoUrl) : "local"
-    const topicName = `${repo} · ${slug}`
-
-    let topic: { message_thread_id: number }
-    try {
-      topic = await this.telegram.createForumTopic(topicName)
-    } catch (err) {
-      process.stderr.write(`dispatcher: failed to create topic: ${err}\n`)
-      return
-    }
-
-    const threadId = topic.message_thread_id
-
-    const cwd = await this.prepareWorkspace(slug, repoUrl)
-    if (!cwd) {
-      await this.telegram.sendMessage(
-        `❌ Failed to prepare workspace for task.`,
-        threadId,
-      )
-      await this.telegram.deleteForumTopic(threadId)
-      return
-    }
-
-    const imagePaths = await this.downloadPhotos(photos, cwd)
-    const fullTask = appendImageContext(task, imagePaths)
-
-    const meta: SessionMeta = {
-      sessionId,
-      threadId,
-      topicName: slug,
-      repo,
-      cwd,
-      startedAt: Date.now(),
-      mode: "task",
-    }
-
-    const handle = new SessionHandle(
-      meta,
-      (event) => {
-        this.observer.onEvent(meta, event).catch((err) => {
-          process.stderr.write(`observer: onEvent error: ${err}\n`)
-        })
-      },
-      (m, state) => {
-        const durationMs = Date.now() - m.startedAt
-        this.observer.onSessionComplete(m, state, durationMs).catch((err) => {
-          process.stderr.write(`observer: onSessionComplete error: ${err}\n`)
-        })
-        this.sessions.delete(threadId)
-        this.telegram.closeForumTopic(threadId).catch((err) => {
-          process.stderr.write(`telegram: closeForumTopic error: ${err}\n`)
-        })
-      },
-      config.workspace.sessionTimeoutMs,
-    )
-
-    this.sessions.set(threadId, { handle, meta, task: fullTask })
-
-    await this.observer.onSessionStart(meta, fullTask)
-    handle.start(fullTask)
+    await this.startTopicSession(repoUrl, task, "task", photos)
   }
 
   private async handlePlanCommand(args: string, replyThreadId?: number, photos?: TelegramPhotoSize[]): Promise<void> {
@@ -314,20 +280,25 @@ export class Dispatcher {
       }
     }
 
-    await this.startPlanSession(repoUrl, task, photos)
+    await this.startTopicSession(repoUrl, task, "plan", photos)
   }
 
-  private async startPlanSession(repoUrl: string | undefined, task: string, photos?: TelegramPhotoSize[]): Promise<void> {
+  private async startTopicSession(
+    repoUrl: string | undefined,
+    task: string,
+    mode: "task" | "plan",
+    photos?: TelegramPhotoSize[],
+  ): Promise<void> {
     const sessionId = crypto.randomUUID()
     const slug = generateSlug(sessionId)
     const repo = repoUrl ? extractRepoName(repoUrl) : "local"
-    const topicName = `📋 ${repo} · ${slug}`
+    const topicName = mode === "plan" ? `📋 ${repo} · ${slug}` : `${repo} · ${slug}`
 
     let topic: { message_thread_id: number }
     try {
       topic = await this.telegram.createForumTopic(topicName)
     } catch (err) {
-      process.stderr.write(`dispatcher: failed to create plan topic: ${err}\n`)
+      process.stderr.write(`dispatcher: failed to create topic: ${err}\n`)
       return
     }
 
@@ -343,7 +314,7 @@ export class Dispatcher {
     const imagePaths = await this.downloadPhotos(photos, cwd)
     const fullTask = appendImageContext(task, imagePaths)
 
-    const planSession: PlanSession = {
+    const topicSession: TopicSession = {
       threadId,
       repo,
       repoUrl,
@@ -351,42 +322,46 @@ export class Dispatcher {
       slug,
       conversation: [{ role: "user", text: fullTask, images: imagePaths.length > 0 ? imagePaths : undefined }],
       pendingFeedback: [],
+      mode,
+      lastActivityAt: Date.now(),
     }
 
-    this.planSessions.set(threadId, planSession)
+    this.topicSessions.set(threadId, topicSession)
 
-    await this.telegram.sendMessage(
-      formatPlanStart(repo, slug, task),
-      threadId,
-    )
+    if (mode === "plan") {
+      await this.telegram.sendMessage(
+        formatPlanStart(repo, slug, task),
+        threadId,
+      )
+    }
 
-    await this.spawnPlanAgent(planSession, fullTask)
+    await this.spawnTopicAgent(topicSession, fullTask)
   }
 
-  private async spawnPlanAgent(planSession: PlanSession, task: string): Promise<void> {
+  private async spawnTopicAgent(topicSession: TopicSession, task: string): Promise<void> {
     if (this.sessions.size >= config.workspace.maxConcurrentSessions) {
       await this.telegram.sendMessage(
         `⚠️ Max concurrent sessions reached. Try again later.`,
-        planSession.threadId,
+        topicSession.threadId,
       )
       return
     }
 
     const sessionId = crypto.randomUUID()
-    planSession.activeSessionId = sessionId
+    topicSession.activeSessionId = sessionId
 
     const meta: SessionMeta = {
       sessionId,
-      threadId: planSession.threadId,
-      topicName: planSession.slug,
-      repo: planSession.repo,
-      cwd: planSession.cwd,
+      threadId: topicSession.threadId,
+      topicName: topicSession.slug,
+      repo: topicSession.repo,
+      cwd: topicSession.cwd,
       startedAt: Date.now(),
-      mode: "plan",
+      mode: topicSession.mode,
     }
 
     const onTextCapture = (_sid: string, text: string) => {
-      planSession.conversation.push({ role: "assistant", text })
+      topicSession.conversation.push({ role: "assistant", text })
     }
 
     const handle = new SessionHandle(
@@ -398,22 +373,40 @@ export class Dispatcher {
       },
       (m, state) => {
         const durationMs = Date.now() - m.startedAt
-        this.observer.onSessionComplete(m, state, durationMs).catch((err) => {
-          process.stderr.write(`observer: onSessionComplete error: ${err}\n`)
-        })
-        this.sessions.delete(planSession.threadId)
-        planSession.activeSessionId = undefined
+        this.sessions.delete(topicSession.threadId)
+        topicSession.activeSessionId = undefined
+        topicSession.lastActivityAt = Date.now()
 
-        // After plan agent completes, send guidance and process queued feedback
-        this.telegram.sendMessage(
-          formatPlanComplete(planSession.slug),
-          planSession.threadId,
-        ).catch(() => {})
+        if (topicSession.mode === "plan") {
+          this.observer.onSessionComplete(m, state, durationMs).catch((err) => {
+            process.stderr.write(`observer: onSessionComplete error: ${err}\n`)
+          })
+          this.telegram.sendMessage(
+            formatPlanComplete(topicSession.slug),
+            topicSession.threadId,
+          ).catch(() => {})
+        } else if (state === "errored") {
+          this.observer.onSessionComplete(m, state, durationMs).catch((err) => {
+            process.stderr.write(`observer: onSessionComplete error: ${err}\n`)
+          })
+        } else {
+          // Task mode completed: flush text then send completion with follow-up hint
+          this.observer.flushAndComplete(m, state, durationMs).then(() => {
+            this.telegram.sendMessage(
+              formatTaskComplete(topicSession.slug, durationMs, m.totalTokens),
+              topicSession.threadId,
+            ).catch(() => {})
+          }).catch((err) => {
+            process.stderr.write(`observer: flushAndComplete error: ${err}\n`)
+          })
+        }
 
-        if (planSession.pendingFeedback.length > 0) {
-          const feedback = planSession.pendingFeedback.join("\n\n")
-          planSession.pendingFeedback = []
-          this.handlePlanFeedback(planSession, feedback).catch((err) => {
+        this.persistTopicSessions()
+
+        if (topicSession.pendingFeedback.length > 0) {
+          const feedback = topicSession.pendingFeedback.join("\n\n")
+          topicSession.pendingFeedback = []
+          this.handleTopicFeedback(topicSession, feedback).catch((err) => {
             process.stderr.write(`dispatcher: queued feedback error: ${err}\n`)
           })
         }
@@ -421,67 +414,73 @@ export class Dispatcher {
       config.workspace.sessionTimeoutMs,
     )
 
-    this.sessions.set(planSession.threadId, { handle, meta, task })
+    this.sessions.set(topicSession.threadId, { handle, meta, task })
 
     await this.observer.onSessionStart(meta, task, onTextCapture)
     handle.start(task)
   }
 
-  private async handlePlanFeedback(planSession: PlanSession, feedback: string, photos?: TelegramPhotoSize[]): Promise<void> {
-    // If the plan agent is still running, queue the feedback
-    if (planSession.activeSessionId) {
-      planSession.pendingFeedback.push(feedback)
+  private async handleTopicFeedback(topicSession: TopicSession, feedback: string, photos?: TelegramPhotoSize[]): Promise<void> {
+    if (topicSession.activeSessionId) {
+      topicSession.pendingFeedback.push(feedback)
       await this.telegram.sendMessage(
         `📝 Feedback queued — will be applied when the current iteration finishes.`,
-        planSession.threadId,
+        topicSession.threadId,
       )
       return
     }
 
-    const imagePaths = await this.downloadPhotos(photos, planSession.cwd)
+    const imagePaths = await this.downloadPhotos(photos, topicSession.cwd)
     const fullFeedback = appendImageContext(feedback, imagePaths)
 
-    planSession.conversation.push({
+    topicSession.conversation.push({
       role: "user",
       text: fullFeedback,
       images: imagePaths.length > 0 ? imagePaths : undefined,
     })
 
-    const iteration = Math.floor(planSession.conversation.filter((m) => m.role === "user").length)
+    const iteration = Math.floor(topicSession.conversation.filter((m) => m.role === "user").length)
 
-    await this.telegram.sendMessage(
-      formatPlanIteration(planSession.slug, iteration),
-      planSession.threadId,
-    )
+    if (topicSession.mode === "plan") {
+      await this.telegram.sendMessage(
+        formatPlanIteration(topicSession.slug, iteration),
+        topicSession.threadId,
+      )
+    } else {
+      await this.telegram.sendMessage(
+        formatFollowUpIteration(topicSession.slug, iteration),
+        topicSession.threadId,
+      )
+    }
 
-    const contextTask = buildPlanContextPrompt(planSession)
-    await this.spawnPlanAgent(planSession, contextTask)
+    const contextTask = buildContextPrompt(topicSession)
+    await this.spawnTopicAgent(topicSession, contextTask)
   }
 
-  private async handleExecuteCommand(planSession: PlanSession): Promise<void> {
+  private async handleExecuteCommand(topicSession: TopicSession): Promise<void> {
     // If agent is still running, interrupt it first
-    if (planSession.activeSessionId) {
-      const activeSession = this.sessions.get(planSession.threadId)
+    if (topicSession.activeSessionId) {
+      const activeSession = this.sessions.get(topicSession.threadId)
       if (activeSession) {
         activeSession.handle.interrupt()
       }
+      // Wait briefly for the process to exit so the session slot frees up
+      await new Promise((resolve) => setTimeout(resolve, 500))
     }
 
-    const plan = buildExecutionPrompt(planSession)
+    const executionTask = buildExecutionPrompt(topicSession)
 
     await this.telegram.sendMessage(
-      formatPlanExecuting(planSession.slug, "starting…"),
-      planSession.threadId,
+      formatPlanExecuting(topicSession.slug, "starting…"),
+      topicSession.threadId,
     )
 
-    await this.telegram.closeForumTopic(planSession.threadId)
-    this.planSessions.delete(planSession.threadId)
+    // Switch mode from plan to task in the same topic
+    topicSession.mode = "task"
+    topicSession.activeSessionId = undefined
+    topicSession.pendingFeedback = []
 
-    // Spawn execution as a regular /task with the accumulated plan
-    await this.handleTaskCommand(
-      planSession.repoUrl ? `${planSession.repoUrl} ${plan}` : plan,
-      undefined,
-    )
+    await this.spawnTopicAgent(topicSession, executionTask)
   }
 
   private async downloadPhotos(photos: TelegramPhotoSize[] | undefined, cwd: string): Promise<string[]> {
@@ -585,35 +584,45 @@ function appendImageContext(task: string, imagePaths: string[]): string {
   return `${task}\n\n## Attached images\n\nThe user attached the following image(s). Read them with your file-reading tool to view their contents:\n${imageRefs}`
 }
 
-function buildPlanContextPrompt(planSession: PlanSession): string {
-  const lines: string[] = [
-    "## Planning context",
-    "",
-    "You are continuing a planning conversation. Here is the history:",
-    "",
-  ]
+function buildContextPrompt(topicSession: TopicSession): string {
+  const isPlan = topicSession.mode === "plan"
+  const header = isPlan
+    ? "## Planning context\n\nYou are continuing a planning conversation. Here is the history:"
+    : "## Follow-up context\n\nYou previously worked on this task. Here is the conversation history:"
 
-  for (const msg of planSession.conversation) {
+  const MAX_ASSISTANT_CHARS = 4000
+  const lines: string[] = [header, ""]
+
+  for (const msg of topicSession.conversation) {
     const label = msg.role === "user" ? "**User**" : "**Agent**"
     lines.push(`${label}:`)
-    lines.push(msg.text)
+    if (msg.role === "assistant" && msg.text.length > MAX_ASSISTANT_CHARS) {
+      lines.push(`[earlier output truncated]\n…${msg.text.slice(-MAX_ASSISTANT_CHARS)}`)
+    } else {
+      lines.push(msg.text)
+    }
     lines.push("")
   }
 
   lines.push("---")
-  lines.push("Refine the plan based on the latest feedback. Present the updated plan clearly.")
+  if (isPlan) {
+    lines.push("Refine the plan based on the latest feedback. Present the updated plan clearly.")
+  } else {
+    lines.push("The workspace still has your previous changes (branch, commits, PR).")
+    lines.push("Address the user's latest feedback. Push updates to the existing branch.")
+  }
 
   return lines.join("\n")
 }
 
-function buildExecutionPrompt(planSession: PlanSession): string {
-  const planMessages = planSession.conversation
+function buildExecutionPrompt(topicSession: TopicSession): string {
+  const planMessages = topicSession.conversation
     .filter((m) => m.role === "assistant")
   const lastPlan = planMessages.length > 0
     ? planMessages[planMessages.length - 1].text
     : ""
 
-  const originalRequest = planSession.conversation[0]?.text ?? ""
+  const originalRequest = topicSession.conversation[0]?.text ?? ""
 
   const lines: string[] = [
     "## Task",
