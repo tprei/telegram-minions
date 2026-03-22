@@ -147,3 +147,41 @@ export function formatPlanExecuting(slug: string, execSlug: string): string {
 export function formatPlanComplete(slug: string): string {
   return `📋 <b>Plan complete</b>  ·  🏷 <code>${esc(slug)}</code>\n\nReply with feedback or send <code>/execute</code> to begin implementation.`
 }
+
+export function formatStatus(
+  taskSessions: { meta: { topicName: string; repo: string; startedAt: number; mode: string }; task: string; handle: { isActive(): boolean; getState(): string } }[],
+  planSessions: { slug: string; repo: string; conversation: { role: string; text: string }[]; activeSessionId?: string }[],
+  maxConcurrent: number,
+): string {
+  const lines: string[] = [`📊 <b>Status</b>  ·  ${taskSessions.length}/${maxConcurrent} slots in use`, ""]
+
+  if (taskSessions.length === 0 && planSessions.length === 0) {
+    lines.push("No active sessions.")
+    return lines.join("\n")
+  }
+
+  for (const { meta, task, handle } of taskSessions) {
+    const state = handle.getState()
+    const icon = handle.isActive() ? "🟢" : "🔴"
+    const elapsed = formatElapsed(Date.now() - meta.startedAt)
+    const mode = meta.mode === "plan" ? "📋 plan" : "⚡ task"
+    lines.push(`${icon} <b>${esc(meta.topicName)}</b>  ·  📦 ${esc(meta.repo)}  ·  ${mode}  ·  ${state}  ·  ⏱ ${elapsed}`)
+    lines.push(`   <blockquote>${esc(truncate(task, 120))}</blockquote>`)
+    lines.push("")
+  }
+
+  const standbyPlans = planSessions.filter((p) => !p.activeSessionId)
+  for (const plan of standbyPlans) {
+    const originalTask = plan.conversation[0]?.text ?? ""
+    lines.push(`🟡 <b>${esc(plan.slug)}</b>  ·  📦 ${esc(plan.repo)}  ·  📋 plan  ·  awaiting feedback`)
+    lines.push(`   <blockquote>${esc(truncate(originalTask, 120))}</blockquote>`)
+    lines.push("")
+  }
+
+  return lines.join("\n")
+}
+
+function formatElapsed(ms: number): string {
+  const secs = Math.round(ms / 1000)
+  return secs >= 60 ? `${Math.floor(secs / 60)}m ${secs % 60}s` : `${secs}s`
+}
