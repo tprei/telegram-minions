@@ -15,6 +15,11 @@ const TEXT_FLUSH_DEBOUNCE_MS = 1500
 // Maximum number of recent tool lines to keep in the activity log.
 const MAX_ACTIVITY_LINES = 6
 
+// Text flushed before a tool call that is shorter than this is almost certainly
+// agent narration ("Let me read…", "Now I'll…") — suppress it from Telegram.
+// Longer pre-tool text (e.g. an explanation before running a command) still gets sent.
+const PRE_TOOL_NARRATION_LIMIT = 200
+
 export type TextCaptureCallback = (sessionId: string, text: string) => void
 
 interface SessionState {
@@ -89,7 +94,7 @@ export class Observer {
         }
       } else if (block.type === "toolRequest") {
         // Flush buffered text before showing tool activity
-        await this.flushTextBuffer(meta)
+        await this.flushTextBuffer(meta, "tool")
         await this.handleToolRequest(meta, block as GooseToolRequestContent)
       }
     }
@@ -110,7 +115,10 @@ export class Observer {
     }, TEXT_FLUSH_DEBOUNCE_MS)
   }
 
-  private async flushTextBuffer(meta: SessionMeta): Promise<void> {
+  private async flushTextBuffer(
+    meta: SessionMeta,
+    reason: "timer" | "tool" | "end" = "timer",
+  ): Promise<void> {
     const state = this.sessions.get(meta.sessionId)
     if (!state) return
 
@@ -122,18 +130,24 @@ export class Observer {
     const text = state.textBuffer.trim()
     state.textBuffer = ""
 
-    if (text) {
-      if (state.onTextCapture) {
-        state.onTextCapture(meta.sessionId, text)
-      }
-      await this.telegram.sendMessage(
-        formatAssistantText(meta.topicName, text),
-        meta.threadId,
-      )
-      // Reset activity tracking so the next tool burst gets a fresh message
-      state.activityMessageId = null
-      state.activityLog = []
+    if (!text) return
+
+    // Always forward to plan-mode capture regardless of Telegram filtering
+    if (state.onTextCapture) {
+      state.onTextCapture(meta.sessionId, text)
     }
+
+    // Short text flushed right before a tool call is narration — suppress it.
+    // Timer/end flushes and longer pre-tool text still get sent.
+    if (reason === "tool" && text.length < PRE_TOOL_NARRATION_LIMIT) return
+
+    await this.telegram.sendMessage(
+      formatAssistantText(meta.topicName, text),
+      meta.threadId,
+    )
+    // Reset activity tracking so the next tool burst gets a fresh message
+    state.activityMessageId = null
+    state.activityLog = []
   }
 
   private async handleToolRequest(
@@ -177,7 +191,7 @@ export class Observer {
     durationMs: number,
   ): Promise<void> {
     // Flush any remaining buffered text before posting summary
-    await this.flushTextBuffer(meta)
+    await this.flushTextBuffer(meta, "end")
     this.sessions.delete(meta.sessionId)
 
     if (finalState === "errored") {
