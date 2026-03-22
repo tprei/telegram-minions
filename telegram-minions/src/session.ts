@@ -6,6 +6,32 @@ import type { GooseStreamEvent, SessionMeta, SessionState } from "./types.js"
 export type SessionEventCallback = (event: GooseStreamEvent) => void
 export type SessionDoneCallback = (meta: SessionMeta, state: "completed" | "errored") => void
 
+const TASK_SYSTEM_PROMPT = [
+  "You are a coding minion running in a sandboxed environment.",
+  "Your working directory is a fresh clone — local changes do not persist after this session ends.",
+  "To deliver your work, you MUST:",
+  "1. Create a new branch from the current HEAD",
+  "2. Commit your changes to that branch",
+  "3. Push the branch and open a pull request using `gh pr create`",
+  "If you skip the PR, your work is lost.",
+  "Use conventional commit messages. Keep PRs focused and well-described.",
+  "The `gh` CLI is available and authenticated via GITHUB_TOKEN.",
+].join("\n")
+
+const PLAN_SYSTEM_PROMPT = [
+  "You are a planning minion running in a sandboxed environment.",
+  "Your job is to explore the codebase, understand the architecture, and produce a detailed implementation plan.",
+  "Do NOT create branches, commits, or pull requests during planning.",
+  "Do NOT modify any files — this is a read-only exploration phase.",
+  "Focus on:",
+  "1. Understanding the relevant code and architecture",
+  "2. Identifying files that need changes",
+  "3. Outlining the implementation steps in detail",
+  "4. Flagging risks, edge cases, or open questions",
+  "Present your plan in a clear, structured format.",
+  "When the user gives feedback, refine the plan accordingly.",
+].join("\n")
+
 export class SessionHandle {
   private process: ChildProcess | null = null
   private state: SessionState = "spawning"
@@ -18,7 +44,7 @@ export class SessionHandle {
     private readonly timeoutMs: number,
   ) {}
 
-  start(task: string): void {
+  start(task: string, systemPrompt?: string): void {
     const env: Record<string, string> = {
       ...process.env as Record<string, string>,
       GOOSE_MODE: "auto",
@@ -31,17 +57,7 @@ export class SessionHandle {
       HOME: process.env["HOME"] ?? "/root",
     }
 
-    const systemPrompt = [
-      "You are a coding minion running in a sandboxed environment.",
-      "Your working directory is a fresh clone — local changes do not persist after this session ends.",
-      "To deliver your work, you MUST:",
-      "1. Create a new branch from the current HEAD",
-      "2. Commit your changes to that branch",
-      "3. Push the branch and open a pull request using `gh pr create`",
-      "If you skip the PR, your work is lost.",
-      "Use conventional commit messages. Keep PRs focused and well-described.",
-      "The `gh` CLI is available and authenticated via GITHUB_TOKEN.",
-    ].join("\n")
+    const prompt = systemPrompt ?? (this.meta.mode === "plan" ? PLAN_SYSTEM_PROMPT : TASK_SYSTEM_PROMPT)
 
     this.process = spawn(
       "goose",
@@ -52,7 +68,7 @@ export class SessionHandle {
         "--name", this.meta.topicName,
         "--provider", config.goose.provider,
         "--model", config.goose.model,
-        "--system", systemPrompt,
+        "--system", prompt,
         "--no-profile",
         "--with-builtin", "developer",
         "--quiet",

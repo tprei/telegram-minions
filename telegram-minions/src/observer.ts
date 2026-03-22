@@ -15,6 +15,8 @@ const TEXT_FLUSH_DEBOUNCE_MS = 1500
 // Maximum number of recent tool lines to keep in the activity log.
 const MAX_ACTIVITY_LINES = 6
 
+export type TextCaptureCallback = (sessionId: string, text: string) => void
+
 interface SessionState {
   // Text buffering: Goose streams text token-by-token; we accumulate and flush.
   textBuffer: string
@@ -24,6 +26,8 @@ interface SessionState {
   activityLastSentAt: number
   toolCount: number
   activityLog: string[]
+  // Optional callback for capturing flushed text (used by plan mode)
+  onTextCapture?: TextCaptureCallback
 }
 
 export class Observer {
@@ -34,7 +38,11 @@ export class Observer {
     private readonly throttleMs: number,
   ) {}
 
-  async onSessionStart(meta: SessionMeta, task: string): Promise<void> {
+  async onSessionStart(
+    meta: SessionMeta,
+    task: string,
+    onTextCapture?: TextCaptureCallback,
+  ): Promise<void> {
     this.sessions.set(meta.sessionId, {
       textBuffer: "",
       flushTimer: null,
@@ -42,6 +50,7 @@ export class Observer {
       activityLastSentAt: 0,
       toolCount: 0,
       activityLog: [],
+      onTextCapture,
     })
     await this.telegram.sendMessage(
       formatSessionStart(meta.repo, meta.topicName, task),
@@ -114,6 +123,9 @@ export class Observer {
     state.textBuffer = ""
 
     if (text) {
+      if (state.onTextCapture) {
+        state.onTextCapture(meta.sessionId, text)
+      }
       await this.telegram.sendMessage(
         formatAssistantText(meta.topicName, text),
         meta.threadId,

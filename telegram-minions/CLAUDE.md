@@ -56,12 +56,22 @@ npm run dev              # run directly with tsx (requires .env)
 npm run build            # compile to dist/
 ```
 
-## Task command format
+## Command format
 
+### Task (one-shot execution)
 ```
 /task https://github.com/org/repo Description of the coding task
+/task repo-alias Description of the task
 /task Description of the task (no repo, uses current workspace)
 ```
+
+### Plan (multi-turn planning → execution)
+```
+/plan repo-alias Let's work on feature A
+```
+1. Creates a planning thread with a read-only agent that explores code and proposes a plan
+2. Reply in the thread with feedback — the agent refines the plan
+3. Send `/execute` to close the planning thread and spawn an execution task with the final plan
 
 ## Goose stream-json event schema
 

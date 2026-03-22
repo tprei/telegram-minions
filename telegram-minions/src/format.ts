@@ -116,3 +116,34 @@ export function formatAssistantText(slug: string, text: string): string {
     `<blockquote>${esc(truncate(text, MAX_TEXT))}</blockquote>`,
   ].join("\n")
 }
+
+export function formatPlanStart(
+  repo: string,
+  slug: string,
+  task: string,
+): string {
+  const MAX_TASK = 200
+  return [
+    `📋 <b>Planning started</b>  ·  📦 <b>${esc(repo)}</b>  ·  🏷 <code>${esc(slug)}</code>`,
+    ``,
+    `<blockquote>${esc(truncate(task, MAX_TASK))}</blockquote>`,
+    ``,
+    `Reply in this thread to give feedback. Send <code>/execute</code> when the plan is ready.`,
+  ].join("\n")
+}
+
+export function formatPlanIteration(slug: string, iteration: number): string {
+  return `📋 <b>Refining plan</b>  ·  🏷 <code>${esc(slug)}</code>  ·  iteration ${iteration}`
+}
+
+export function formatPlanExecuting(slug: string, execSlug: string): string {
+  return [
+    `🚀 <b>Executing plan</b>  ·  🏷 <code>${esc(slug)}</code>`,
+    ``,
+    `Implementation started in thread <code>${esc(execSlug)}</code>`,
+  ].join("\n")
+}
+
+export function formatPlanComplete(slug: string): string {
+  return `📋 <b>Plan complete</b>  ·  🏷 <code>${esc(slug)}</code>\n\nReply with feedback or send <code>/execute</code> to begin implementation.`
+}

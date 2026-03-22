@@ -5,12 +5,20 @@ import crypto from "node:crypto"
 import type { TelegramClient } from "./telegram.js"
 import { SessionHandle } from "./session.js"
 import { Observer } from "./observer.js"
-import type { TelegramUpdate, TelegramCallbackQuery, SessionMeta } from "./types.js"
+import type { TelegramUpdate, TelegramCallbackQuery, SessionMeta, PlanSession } from "./types.js"
 import { generateSlug } from "./slugs.js"
 import { config } from "./config.js"
+import {
+  formatPlanStart,
+  formatPlanIteration,
+  formatPlanExecuting,
+  formatPlanComplete,
+} from "./format.js"
 
 const POLL_TIMEOUT = 30
 const TASK_PREFIX = "/task"
+const PLAN_PREFIX = "/plan"
+const EXECUTE_CMD = "/execute"
 
 interface ActiveSession {
   handle: SessionHandle
@@ -24,6 +32,7 @@ interface PendingTask {
 
 export class Dispatcher {
   private readonly sessions = new Map<number, ActiveSession>()
+  private readonly planSessions = new Map<number, PlanSession>()
   private readonly pendingTasks = new Map<number, PendingTask>()
   private offset = 0
   private running = false
@@ -47,6 +56,7 @@ export class Dispatcher {
     for (const { handle } of this.sessions.values()) {
       handle.interrupt()
     }
+    this.planSessions.clear()
     process.stderr.write("dispatcher: stopped\n")
   }
 
@@ -83,12 +93,27 @@ export class Dispatcher {
     const text = message.text?.trim()
     if (!text) return
 
+    if (text.startsWith(PLAN_PREFIX)) {
+      await this.handlePlanCommand(text.slice(PLAN_PREFIX.length).trim(), message.message_thread_id)
+      return
+    }
+
     if (text.startsWith(TASK_PREFIX)) {
       await this.handleTaskCommand(text.slice(TASK_PREFIX.length).trim(), message.message_thread_id)
       return
     }
 
     if (message.message_thread_id !== undefined) {
+      const planSession = this.planSessions.get(message.message_thread_id)
+      if (planSession) {
+        if (text === EXECUTE_CMD) {
+          await this.handleExecuteCommand(planSession)
+        } else {
+          await this.handlePlanFeedback(planSession, text)
+        }
+        return
+      }
+
       const session = this.sessions.get(message.message_thread_id)
       if (session) {
         process.stderr.write(
@@ -105,12 +130,13 @@ export class Dispatcher {
     }
 
     const data = query.data
-    if (!data?.startsWith("repo:")) {
+    if (!data?.startsWith("repo:") && !data?.startsWith("plan-repo:")) {
       await this.telegram.answerCallbackQuery(query.id)
       return
     }
 
-    const repoSlug = data.slice("repo:".length)
+    const isPlan = data.startsWith("plan-repo:")
+    const repoSlug = isPlan ? data.slice("plan-repo:".length) : data.slice("repo:".length)
     const repoUrl = config.repos[repoSlug]
     if (!repoUrl) {
       await this.telegram.answerCallbackQuery(query.id, "Unknown repo")
@@ -118,7 +144,6 @@ export class Dispatcher {
     }
 
     const messageId = query.message?.message_id
-    const threadId = query.message?.message_thread_id
 
     if (messageId) {
       const pending = this.pendingTasks.get(messageId)
@@ -126,7 +151,12 @@ export class Dispatcher {
         this.pendingTasks.delete(messageId)
         await this.telegram.answerCallbackQuery(query.id, `Selected: ${repoSlug}`)
         await this.telegram.deleteMessage(messageId)
-        await this.handleTaskCommand(`${repoUrl} ${pending.task}`, threadId)
+        if (isPlan) {
+          await this.startPlanSession(repoUrl, pending.task)
+        } else {
+          const threadId = query.message?.message_thread_id
+          await this.handleTaskCommand(`${repoUrl} ${pending.task}`, threadId)
+        }
         return
       }
     }
@@ -207,6 +237,7 @@ export class Dispatcher {
       repo,
       cwd,
       startedAt: Date.now(),
+      mode: "task",
     }
 
     const handle = new SessionHandle(
@@ -233,6 +264,195 @@ export class Dispatcher {
 
     await this.observer.onSessionStart(meta, task)
     handle.start(task)
+  }
+
+  private async handlePlanCommand(args: string, replyThreadId?: number): Promise<void> {
+    const { repoUrl, task } = parseTaskArgs(args)
+
+    if (!task) {
+      if (replyThreadId !== undefined) {
+        await this.telegram.sendMessage(
+          `Usage: <code>/plan [repo] description of what to plan</code>`,
+          replyThreadId,
+        )
+      }
+      return
+    }
+
+    if (!repoUrl) {
+      const repoKeys = Object.keys(config.repos)
+      if (repoKeys.length > 0) {
+        const keyboard = buildRepoKeyboard(repoKeys, "plan")
+        const msgId = await this.telegram.sendMessageWithKeyboard(
+          `Pick a repo for plan: <i>${escapeHtml(task)}</i>`,
+          keyboard,
+          replyThreadId,
+        )
+        if (msgId) {
+          this.pendingTasks.set(msgId, { task, threadId: replyThreadId })
+        }
+        return
+      }
+    }
+
+    await this.startPlanSession(repoUrl, task)
+  }
+
+  private async startPlanSession(repoUrl: string | undefined, task: string): Promise<void> {
+    const sessionId = crypto.randomUUID()
+    const slug = generateSlug(sessionId)
+    const repo = repoUrl ? extractRepoName(repoUrl) : "local"
+    const topicName = `📋 ${repo} · ${slug}`
+
+    let topic: { message_thread_id: number }
+    try {
+      topic = await this.telegram.createForumTopic(topicName)
+    } catch (err) {
+      process.stderr.write(`dispatcher: failed to create plan topic: ${err}\n`)
+      return
+    }
+
+    const threadId = topic.message_thread_id
+
+    const cwd = await this.prepareWorkspace(slug, repoUrl)
+    if (!cwd) {
+      await this.telegram.sendMessage(`❌ Failed to prepare workspace.`, threadId)
+      await this.telegram.deleteForumTopic(threadId)
+      return
+    }
+
+    const planSession: PlanSession = {
+      threadId,
+      repo,
+      repoUrl,
+      cwd,
+      slug,
+      conversation: [{ role: "user", text: task }],
+      pendingFeedback: [],
+    }
+
+    this.planSessions.set(threadId, planSession)
+
+    await this.telegram.sendMessage(
+      formatPlanStart(repo, slug, task),
+      threadId,
+    )
+
+    await this.spawnPlanAgent(planSession, task)
+  }
+
+  private async spawnPlanAgent(planSession: PlanSession, task: string): Promise<void> {
+    if (this.sessions.size >= config.workspace.maxConcurrentSessions) {
+      await this.telegram.sendMessage(
+        `⚠️ Max concurrent sessions reached. Try again later.`,
+        planSession.threadId,
+      )
+      return
+    }
+
+    const sessionId = crypto.randomUUID()
+    planSession.activeSessionId = sessionId
+
+    const meta: SessionMeta = {
+      sessionId,
+      threadId: planSession.threadId,
+      topicName: planSession.slug,
+      repo: planSession.repo,
+      cwd: planSession.cwd,
+      startedAt: Date.now(),
+      mode: "plan",
+    }
+
+    const onTextCapture = (_sid: string, text: string) => {
+      planSession.conversation.push({ role: "assistant", text })
+    }
+
+    const handle = new SessionHandle(
+      meta,
+      (event) => {
+        this.observer.onEvent(meta, event).catch((err) => {
+          process.stderr.write(`observer: onEvent error: ${err}\n`)
+        })
+      },
+      (m, state) => {
+        const durationMs = Date.now() - m.startedAt
+        this.observer.onSessionComplete(m, state, durationMs).catch((err) => {
+          process.stderr.write(`observer: onSessionComplete error: ${err}\n`)
+        })
+        this.sessions.delete(planSession.threadId)
+        planSession.activeSessionId = undefined
+
+        // After plan agent completes, send guidance and process queued feedback
+        this.telegram.sendMessage(
+          formatPlanComplete(planSession.slug),
+          planSession.threadId,
+        ).catch(() => {})
+
+        if (planSession.pendingFeedback.length > 0) {
+          const feedback = planSession.pendingFeedback.join("\n\n")
+          planSession.pendingFeedback = []
+          this.handlePlanFeedback(planSession, feedback).catch((err) => {
+            process.stderr.write(`dispatcher: queued feedback error: ${err}\n`)
+          })
+        }
+      },
+      config.workspace.sessionTimeoutMs,
+    )
+
+    this.sessions.set(planSession.threadId, { handle, meta })
+
+    await this.observer.onSessionStart(meta, task, onTextCapture)
+    handle.start(task)
+  }
+
+  private async handlePlanFeedback(planSession: PlanSession, feedback: string): Promise<void> {
+    // If the plan agent is still running, queue the feedback
+    if (planSession.activeSessionId) {
+      planSession.pendingFeedback.push(feedback)
+      await this.telegram.sendMessage(
+        `📝 Feedback queued — will be applied when the current iteration finishes.`,
+        planSession.threadId,
+      )
+      return
+    }
+
+    planSession.conversation.push({ role: "user", text: feedback })
+
+    const iteration = Math.floor(planSession.conversation.filter((m) => m.role === "user").length)
+
+    await this.telegram.sendMessage(
+      formatPlanIteration(planSession.slug, iteration),
+      planSession.threadId,
+    )
+
+    const contextTask = buildPlanContextPrompt(planSession)
+    await this.spawnPlanAgent(planSession, contextTask)
+  }
+
+  private async handleExecuteCommand(planSession: PlanSession): Promise<void> {
+    // If agent is still running, interrupt it first
+    if (planSession.activeSessionId) {
+      const activeSession = this.sessions.get(planSession.threadId)
+      if (activeSession) {
+        activeSession.handle.interrupt()
+      }
+    }
+
+    const plan = buildExecutionPrompt(planSession)
+
+    await this.telegram.sendMessage(
+      formatPlanExecuting(planSession.slug, "starting…"),
+      planSession.threadId,
+    )
+
+    await this.telegram.closeForumTopic(planSession.threadId)
+    this.planSessions.delete(planSession.threadId)
+
+    // Spawn execution as a regular /task with the accumulated plan
+    await this.handleTaskCommand(
+      planSession.repoUrl ? `${planSession.repoUrl} ${plan}` : plan,
+      undefined,
+    )
   }
 
   private async prepareWorkspace(slug: string, repoUrl?: string): Promise<string | null> {
@@ -283,12 +503,16 @@ function parseTaskArgs(args: string): { repoUrl?: string; task: string } {
   return { task: args.trim() }
 }
 
-function buildRepoKeyboard(repoKeys: string[]): { text: string; callback_data: string }[][] {
+function buildRepoKeyboard(
+  repoKeys: string[],
+  prefix: "repo" | "plan" = "repo",
+): { text: string; callback_data: string }[][] {
+  const dataPrefix = prefix === "plan" ? "plan-repo" : "repo"
   const rows: { text: string; callback_data: string }[][] = []
   for (let i = 0; i < repoKeys.length; i += 2) {
-    const row = [{ text: repoKeys[i], callback_data: `repo:${repoKeys[i]}` }]
+    const row = [{ text: repoKeys[i], callback_data: `${dataPrefix}:${repoKeys[i]}` }]
     if (i + 1 < repoKeys.length) {
-      row.push({ text: repoKeys[i + 1], callback_data: `repo:${repoKeys[i + 1]}` })
+      row.push({ text: repoKeys[i + 1], callback_data: `${dataPrefix}:${repoKeys[i + 1]}` })
     }
     rows.push(row)
   }
@@ -306,4 +530,50 @@ function extractRepoName(url: string): string {
   } catch {
     return "repo"
   }
+}
+
+function buildPlanContextPrompt(planSession: PlanSession): string {
+  const lines: string[] = [
+    "## Planning context",
+    "",
+    "You are continuing a planning conversation. Here is the history:",
+    "",
+  ]
+
+  for (const msg of planSession.conversation) {
+    const label = msg.role === "user" ? "**User**" : "**Agent**"
+    lines.push(`${label}:`)
+    lines.push(msg.text)
+    lines.push("")
+  }
+
+  lines.push("---")
+  lines.push("Refine the plan based on the latest feedback. Present the updated plan clearly.")
+
+  return lines.join("\n")
+}
+
+function buildExecutionPrompt(planSession: PlanSession): string {
+  const planMessages = planSession.conversation
+    .filter((m) => m.role === "assistant")
+  const lastPlan = planMessages.length > 0
+    ? planMessages[planMessages.length - 1].text
+    : ""
+
+  const originalRequest = planSession.conversation[0]?.text ?? ""
+
+  const lines: string[] = [
+    "## Task",
+    "",
+    originalRequest,
+    "",
+    "## Implementation plan",
+    "",
+    lastPlan,
+    "",
+    "---",
+    "Implement the plan above. Follow the plan closely.",
+  ]
+
+  return lines.join("\n")
 }

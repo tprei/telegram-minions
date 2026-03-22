@@ -104,6 +104,8 @@ export type GooseStreamEvent =
 
 export type SessionState = "spawning" | "working" | "idle" | "completed" | "errored"
 
+export type SessionMode = "task" | "plan"
+
 export interface SessionMeta {
   sessionId: string
   threadId: number
@@ -112,4 +114,23 @@ export interface SessionMeta {
   cwd: string
   startedAt: number
   totalTokens?: number
+  mode: SessionMode
+}
+
+// Plan mode types
+
+export interface PlanMessage {
+  role: "user" | "assistant"
+  text: string
+}
+
+export interface PlanSession {
+  threadId: number
+  repo: string
+  repoUrl?: string
+  cwd: string
+  slug: string
+  conversation: PlanMessage[]
+  activeSessionId?: string
+  pendingFeedback: string[]
 }
