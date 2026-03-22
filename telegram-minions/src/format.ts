@@ -13,6 +13,7 @@ const TOOL_ICONS: Record<string, string> = {
   shell: "💻", Bash: "💻",
   list_directory: "📂", Glob: "📂",
   search: "🔍", Grep: "🔍",
+  WebSearch: "🌐", WebFetch: "🌐",
 }
 
 export function formatToolLine(
@@ -44,6 +45,12 @@ export function formatToolLine(
   } else if (toolName === "search" || toolName === "Grep") {
     const pattern = args["pattern"] ?? args["query"]
     summary = typeof pattern === "string" ? truncate(pattern, MAX_SUMMARY) : ""
+  } else if (toolName === "WebSearch") {
+    const query = args["query"] ?? args["search_query"]
+    summary = typeof query === "string" ? truncate(query, MAX_SUMMARY) : ""
+  } else if (toolName === "WebFetch") {
+    const url = args["url"]
+    summary = typeof url === "string" ? truncate(url, MAX_SUMMARY) : ""
   }
 
   return summary
@@ -125,6 +132,29 @@ export function formatAssistantText(slug: string, text: string, toolLines?: stri
   return lines.join("\n")
 }
 
+export function formatThinkStart(
+  repo: string,
+  slug: string,
+  task: string,
+): string {
+  const MAX_TASK = 200
+  return [
+    `🧠 <b>Deep research started</b>  ·  📦 <b>${esc(repo)}</b>  ·  🏷 <code>${esc(slug)}</code>`,
+    ``,
+    `<blockquote>${esc(truncate(task, MAX_TASK))}</blockquote>`,
+    ``,
+    `Use <code>/reply</code> (or <code>/r</code>) to ask follow-up questions.`,
+  ].join("\n")
+}
+
+export function formatThinkIteration(slug: string, iteration: number): string {
+  return `🧠 <b>Thinking deeper</b>  ·  🏷 <code>${esc(slug)}</code>  ·  iteration ${iteration}`
+}
+
+export function formatThinkComplete(slug: string): string {
+  return `🧠 <b>Research complete</b>  ·  🏷 <code>${esc(slug)}</code>\n\nUse <code>/reply</code> (or <code>/r</code>) to ask follow-up questions, or send <code>/execute</code> to act on the findings.`
+}
+
 export function formatPlanStart(
   repo: string,
   slug: string,
@@ -179,7 +209,7 @@ export function formatFollowUpIteration(slug: string, iteration: number): string
 
 export function formatStatus(
   taskSessions: { meta: { topicName: string; repo: string; startedAt: number; mode: string }; task: string; handle: { isActive(): boolean; getState(): string } }[],
-  topicSessions: { slug: string; repo: string; conversation: { role: string; text: string }[]; activeSessionId?: string }[],
+  topicSessions: { slug: string; repo: string; mode?: string; conversation: { role: string; text: string }[]; activeSessionId?: string }[],
   maxConcurrent: number,
 ): string {
   const lines: string[] = [`📊 <b>Status</b>  ·  ${taskSessions.length}/${maxConcurrent} slots in use`, ""]
@@ -193,7 +223,7 @@ export function formatStatus(
     const state = handle.getState()
     const icon = handle.isActive() ? "🟢" : "🔴"
     const elapsed = formatElapsed(Date.now() - meta.startedAt)
-    const mode = meta.mode === "plan" ? "📋 plan" : "⚡ task"
+    const mode = meta.mode === "think" ? "🧠 think" : meta.mode === "plan" ? "📋 plan" : "⚡ task"
     lines.push(`${icon} <b>${esc(meta.topicName)}</b>  ·  📦 ${esc(meta.repo)}  ·  ${mode}  ·  ${state}  ·  ⏱ ${elapsed}`)
     lines.push(`   <blockquote>${esc(truncate(task, 120))}</blockquote>`)
     lines.push("")
@@ -202,7 +232,8 @@ export function formatStatus(
   const standbyTopics = topicSessions.filter((p) => !p.activeSessionId)
   for (const topic of standbyTopics) {
     const originalTask = topic.conversation[0]?.text ?? ""
-    lines.push(`🟡 <b>${esc(topic.slug)}</b>  ·  📦 ${esc(topic.repo)}  ·  📋 plan  ·  awaiting feedback`)
+    const topicMode = topic.mode === "think" ? "🧠 think" : "📋 plan"
+    lines.push(`🟡 <b>${esc(topic.slug)}</b>  ·  📦 ${esc(topic.repo)}  ·  ${topicMode}  ·  awaiting feedback`)
     lines.push(`   <blockquote>${esc(truncate(originalTask, 120))}</blockquote>`)
     lines.push("")
   }

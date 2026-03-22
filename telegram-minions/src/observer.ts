@@ -5,6 +5,7 @@ import {
   formatActivityLog,
   formatSessionStart,
   formatPlanStart,
+  formatThinkStart,
   formatSessionComplete,
   formatSessionError,
   formatAssistantText,
@@ -56,7 +57,9 @@ export class Observer {
       activityLog: [],
       onTextCapture,
     })
-    const msg = meta.mode === "plan"
+    const msg = meta.mode === "think"
+      ? formatThinkStart(meta.repo, meta.topicName, task)
+      : meta.mode === "plan"
       ? formatPlanStart(meta.repo, meta.topicName, task)
       : formatSessionStart(meta.repo, meta.topicName, task)
     await this.telegram.sendMessage(msg, meta.threadId)

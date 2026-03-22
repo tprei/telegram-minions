@@ -14,6 +14,8 @@ import {
   formatPlanIteration,
   formatPlanExecuting,
   formatPlanComplete,
+  formatThinkIteration,
+  formatThinkComplete,
   formatStatus,
   formatTaskComplete,
   formatFollowUpIteration,
@@ -23,6 +25,7 @@ import {
 const POLL_TIMEOUT = 30
 const TASK_PREFIX = "/task"
 const PLAN_PREFIX = "/plan"
+const THINK_PREFIX = "/think"
 const EXECUTE_CMD = "/execute"
 const STATUS_CMD = "/status"
 const REPLY_PREFIX = "/reply"
@@ -194,6 +197,11 @@ export class Dispatcher {
       }
     }
 
+    if (text?.startsWith(THINK_PREFIX)) {
+      await this.handleThinkCommand(text.slice(THINK_PREFIX.length).trim(), message.message_thread_id, photos)
+      return
+    }
+
     if (text?.startsWith(PLAN_PREFIX)) {
       await this.handlePlanCommand(text.slice(PLAN_PREFIX.length).trim(), message.message_thread_id, photos)
       return
@@ -209,7 +217,7 @@ export class Dispatcher {
       if (topicSession) {
         if (text === CLOSE_CMD) {
           await this.handleCloseCommand(topicSession)
-        } else if (topicSession.mode === "plan" && text === EXECUTE_CMD) {
+        } else if ((topicSession.mode === "plan" || topicSession.mode === "think") && text === EXECUTE_CMD) {
           await this.handleExecuteCommand(topicSession)
         } else if (text?.startsWith(REPLY_PREFIX + " ") || text?.startsWith(REPLY_SHORT + " ") || text === REPLY_PREFIX || text === REPLY_SHORT) {
           const stripped = text.startsWith(REPLY_PREFIX)
@@ -236,13 +244,18 @@ export class Dispatcher {
     }
 
     const data = query.data
-    if (!data?.startsWith("repo:") && !data?.startsWith("plan-repo:")) {
+    if (!data?.startsWith("repo:") && !data?.startsWith("plan-repo:") && !data?.startsWith("think-repo:")) {
       await this.telegram.answerCallbackQuery(query.id)
       return
     }
 
+    const isThink = data.startsWith("think-repo:")
     const isPlan = data.startsWith("plan-repo:")
-    const repoSlug = isPlan ? data.slice("plan-repo:".length) : data.slice("repo:".length)
+    const repoSlug = isThink
+      ? data.slice("think-repo:".length)
+      : isPlan
+      ? data.slice("plan-repo:".length)
+      : data.slice("repo:".length)
     const repoUrl = config.repos[repoSlug]
     if (!repoUrl) {
       await this.telegram.answerCallbackQuery(query.id, "Unknown repo")
@@ -257,7 +270,9 @@ export class Dispatcher {
         this.pendingTasks.delete(messageId)
         await this.telegram.answerCallbackQuery(query.id, `Selected: ${repoSlug}`)
         await this.telegram.deleteMessage(messageId)
-        if (isPlan) {
+        if (isThink) {
+          await this.startTopicSession(repoUrl, pending.task, "think")
+        } else if (isPlan) {
           await this.startTopicSession(repoUrl, pending.task, "plan")
         } else {
           const threadId = query.message?.message_thread_id
@@ -357,16 +372,52 @@ export class Dispatcher {
     await this.startTopicSession(repoUrl, task, "plan", photos)
   }
 
+  private async handleThinkCommand(args: string, replyThreadId?: number, photos?: TelegramPhotoSize[]): Promise<void> {
+    const { repoUrl, task } = parseTaskArgs(args)
+
+    if (!task) {
+      if (replyThreadId !== undefined) {
+        await this.telegram.sendMessage(
+          `Usage: <code>/think [repo] question or topic to research</code>`,
+          replyThreadId,
+        )
+      }
+      return
+    }
+
+    if (!repoUrl) {
+      const repoKeys = Object.keys(config.repos)
+      if (repoKeys.length > 0) {
+        const keyboard = buildRepoKeyboard(repoKeys, "think")
+        const msgId = await this.telegram.sendMessageWithKeyboard(
+          `Pick a repo for research: <i>${escapeHtml(task)}</i>`,
+          keyboard,
+          replyThreadId,
+        )
+        if (msgId) {
+          this.pendingTasks.set(msgId, { task, threadId: replyThreadId })
+        }
+        return
+      }
+    }
+
+    await this.startTopicSession(repoUrl, task, "think", photos)
+  }
+
   private async startTopicSession(
     repoUrl: string | undefined,
     task: string,
-    mode: "task" | "plan",
+    mode: "task" | "plan" | "think",
     photos?: TelegramPhotoSize[],
   ): Promise<void> {
     const sessionId = crypto.randomUUID()
     const slug = generateSlug(sessionId)
     const repo = repoUrl ? extractRepoName(repoUrl) : "local"
-    const topicName = mode === "plan" ? `📋 ${repo} · ${slug}` : `${repo} · ${slug}`
+    const topicName = mode === "think"
+      ? `🧠 ${repo} · ${slug}`
+      : mode === "plan"
+      ? `📋 ${repo} · ${slug}`
+      : `${repo} · ${slug}`
 
     let topic: { message_thread_id: number }
     try {
@@ -444,7 +495,15 @@ export class Dispatcher {
         topicSession.activeSessionId = undefined
         topicSession.lastActivityAt = Date.now()
 
-        if (topicSession.mode === "plan") {
+        if (topicSession.mode === "think") {
+          this.observer.onSessionComplete(m, state, durationMs).catch((err) => {
+            process.stderr.write(`observer: onSessionComplete error: ${err}\n`)
+          })
+          this.telegram.sendMessage(
+            formatThinkComplete(topicSession.slug),
+            topicSession.threadId,
+          ).catch(() => {})
+        } else if (topicSession.mode === "plan") {
           this.observer.onSessionComplete(m, state, durationMs).catch((err) => {
             process.stderr.write(`observer: onSessionComplete error: ${err}\n`)
           })
@@ -508,7 +567,12 @@ export class Dispatcher {
 
     const iteration = Math.floor(topicSession.conversation.filter((m) => m.role === "user").length)
 
-    if (topicSession.mode === "plan") {
+    if (topicSession.mode === "think") {
+      await this.telegram.sendMessage(
+        formatThinkIteration(topicSession.slug, iteration),
+        topicSession.threadId,
+      )
+    } else if (topicSession.mode === "plan") {
       await this.telegram.sendMessage(
         formatPlanIteration(topicSession.slug, iteration),
         topicSession.threadId,
@@ -643,9 +707,9 @@ export function parseTaskArgs(args: string): { repoUrl?: string; task: string } 
 
 export function buildRepoKeyboard(
   repoKeys: string[],
-  prefix: "repo" | "plan" = "repo",
+  prefix: "repo" | "plan" | "think" = "repo",
 ): { text: string; callback_data: string }[][] {
-  const dataPrefix = prefix === "plan" ? "plan-repo" : "repo"
+  const dataPrefix = prefix === "think" ? "think-repo" : prefix === "plan" ? "plan-repo" : "repo"
   const rows: { text: string; callback_data: string }[][] = []
   for (let i = 0; i < repoKeys.length; i += 2) {
     const row = [{ text: repoKeys[i], callback_data: `${dataPrefix}:${repoKeys[i]}` }]
@@ -678,8 +742,11 @@ export function appendImageContext(task: string, imagePaths: string[]): string {
 }
 
 export function buildContextPrompt(topicSession: TopicSession): string {
+  const isThink = topicSession.mode === "think"
   const isPlan = topicSession.mode === "plan"
-  const header = isPlan
+  const header = isThink
+    ? "## Research context\n\nYou are continuing a deep-research conversation. Here is the history:"
+    : isPlan
     ? "## Planning context\n\nYou are continuing a planning conversation. Here is the history:"
     : "## Follow-up context\n\nYou previously worked on this task. Here is the conversation history:"
 
@@ -698,7 +765,9 @@ export function buildContextPrompt(topicSession: TopicSession): string {
   }
 
   lines.push("---")
-  if (isPlan) {
+  if (isThink) {
+    lines.push("Dig deeper based on the latest question. Search the web for additional context. Be thorough.")
+  } else if (isPlan) {
     lines.push("Refine the plan based on the latest feedback. Present the updated plan clearly.")
   } else {
     lines.push("The workspace still has your previous changes (branch, commits, PR).")

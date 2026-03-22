@@ -114,7 +114,7 @@ export type GooseStreamEvent =
 
 export type SessionState = "spawning" | "working" | "idle" | "completed" | "errored"
 
-export type SessionMode = "task" | "plan"
+export type SessionMode = "task" | "plan" | "think"
 
 export interface SessionMeta {
   sessionId: string

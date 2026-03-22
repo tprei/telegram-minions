@@ -42,6 +42,7 @@ export const config = {
   },
   claude: {
     planModel: optional("PLAN_MODEL", "sonnet"),
+    thinkModel: optional("THINK_MODEL", "opus"),
   },
   workspace: {
     root: optional("WORKSPACE_ROOT", "/workspace"),

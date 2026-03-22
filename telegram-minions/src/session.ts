@@ -49,6 +49,41 @@ export const PLAN_SYSTEM_PROMPT = [
 
 const PLAN_DISALLOWED_TOOLS = ["Edit", "Write", "NotebookEdit"]
 
+export const THINK_SYSTEM_PROMPT = [
+  "You are a deep-research minion running in a sandboxed environment.",
+  "Your job is to THINK deeply, search broadly, and understand thoroughly. You make NO changes whatsoever.",
+  "",
+  "This is a READ-ONLY research phase. The Edit, Write, and NotebookEdit tools have been disabled.",
+  "Do NOT use Bash to modify, create, or delete files. Do NOT create branches, commits, or pull requests.",
+  "",
+  "## Web search specialist",
+  "",
+  "You have access to WebSearch and WebFetch tools. Use them aggressively:",
+  "- Search the web for documentation, blog posts, GitHub issues, Stack Overflow threads, RFCs, and any relevant sources",
+  "- Fetch and read full pages when search results look promising",
+  "- Cross-reference multiple sources to validate findings",
+  "- Search for known issues, CVEs, deprecation notices, and migration guides when relevant",
+  "- Look up library changelogs, API documentation, and community discussions",
+  "",
+  "## Research workflow",
+  "",
+  "1. Deeply explore the codebase to build a thorough understanding of the architecture",
+  "2. Search the web extensively for relevant context, documentation, and prior art",
+  "3. Cross-reference codebase findings with external knowledge",
+  "4. Synthesize everything into a clear, comprehensive analysis",
+  "",
+  "## Output expectations",
+  "",
+  "- Think step by step. Use extended thinking to reason through complex problems.",
+  "- Be thorough — explore every relevant angle before drawing conclusions",
+  "- Cite sources when referencing external information",
+  "- Surface non-obvious insights, risks, and connections",
+  "- Present findings in a structured, readable format",
+  "- When the user gives follow-up questions, dig deeper",
+].join("\n")
+
+const THINK_DISALLOWED_TOOLS = ["Edit", "Write", "NotebookEdit"]
+
 export class SessionHandle {
   private process: ChildProcess | null = null
   private state: SessionState = "spawning"
@@ -62,7 +97,9 @@ export class SessionHandle {
   ) {}
 
   start(task: string, systemPrompt?: string): void {
-    if (this.meta.mode === "plan" && !systemPrompt) {
+    if (this.meta.mode === "think" && !systemPrompt) {
+      this.startClaudeThink(task)
+    } else if (this.meta.mode === "plan" && !systemPrompt) {
       this.startClaude(task)
     } else {
       this.startGoose(task, systemPrompt)
@@ -126,6 +163,36 @@ export class SessionHandle {
         "--disallowed-tools", ...PLAN_DISALLOWED_TOOLS,
         "--append-system-prompt", PLAN_SYSTEM_PROMPT,
         "--model", config.claude.planModel,
+        task,
+      ],
+      {
+        cwd: this.meta.cwd,
+        env,
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    )
+
+    this.attachProcessHandlers(this.parseClaudeLine.bind(this))
+  }
+
+  private startClaudeThink(task: string): void {
+    const env: Record<string, string> = {
+      ...process.env as Record<string, string>,
+      HOME: process.env["HOME"] ?? "/root",
+    }
+
+    this.process = spawn(
+      "claude",
+      [
+        "--print",
+        "--output-format", "stream-json",
+        "--verbose",
+        "--include-partial-messages",
+        "--dangerously-skip-permissions",
+        "--no-session-persistence",
+        "--disallowed-tools", ...THINK_DISALLOWED_TOOLS,
+        "--append-system-prompt", THINK_SYSTEM_PROMPT,
+        "--model", config.claude.thinkModel,
         task,
       ],
       {
