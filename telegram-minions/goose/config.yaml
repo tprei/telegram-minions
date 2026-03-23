@@ -22,3 +22,24 @@ extensions:
     args: ["--browser", "chromium", "--headless", "--no-sandbox", "--isolated", "--caps", "vision"]
     enabled: true
     timeout: 300
+  github:
+    name: github
+    type: stdio
+    cmd: github-mcp-server
+    args: ["stdio"]
+    enabled: true
+    timeout: 300
+  context7:
+    name: context7
+    type: stdio
+    cmd: context7-mcp
+    args: []
+    enabled: true
+    timeout: 300
+  memory:
+    name: memory
+    type: stdio
+    cmd: mcp-server-memory
+    args: []
+    enabled: true
+    timeout: 300

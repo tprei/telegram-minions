@@ -12,6 +12,10 @@ primary_region = "iad"
   HOME = "/workspace/home"
   IS_SANDBOX = "true"
   ENABLE_BROWSER_MCP = "true"
+  ENABLE_GITHUB_MCP = "true"
+  ENABLE_CONTEXT7_MCP = "true"
+  ENABLE_MEMORY_MCP = "true"
+  MEMORY_FILE_PATH = "/workspace/home/.memory/graph.json"
   PLAYWRIGHT_BROWSERS_PATH = "/opt/pw-browsers"
 
 [[mounts]]

@@ -112,6 +112,72 @@ export const THINK_SYSTEM_PROMPT = [
 
 const THINK_DISALLOWED_TOOLS = ["Edit", "Write", "NotebookEdit"]
 
+type McpServerConfig = {
+  command: string
+  args: string[]
+  env?: Record<string, string>
+}
+
+function buildMcpServers(): Record<string, McpServerConfig> {
+  const servers: Record<string, McpServerConfig> = {}
+
+  if (config.mcp.browserEnabled) {
+    servers.playwright = {
+      command: "playwright-mcp",
+      args: ["--browser", "chromium", "--headless", "--no-sandbox", "--isolated", "--caps", "vision"],
+    }
+  }
+
+  if (config.mcp.githubEnabled) {
+    const token = process.env["GITHUB_TOKEN"]
+    if (token) {
+      servers.github = {
+        command: "github-mcp-server",
+        args: ["stdio"],
+        env: { GITHUB_PERSONAL_ACCESS_TOKEN: token },
+      }
+    } else {
+      process.stderr.write("MCP: GitHub MCP enabled but GITHUB_TOKEN is not set — skipping\n")
+    }
+  }
+
+  if (config.mcp.context7Enabled) {
+    servers.context7 = {
+      command: "context7-mcp",
+      args: [],
+    }
+  }
+
+  if (config.mcp.memoryEnabled) {
+    servers.memory = {
+      command: "mcp-server-memory",
+      args: [],
+      env: { MEMORY_FILE_PATH: config.mcp.memoryFilePath },
+    }
+  }
+
+  return servers
+}
+
+function buildGooseExtensionArgs(): string[] {
+  const args: string[] = []
+  const servers = buildMcpServers()
+
+  for (const [, server] of Object.entries(servers)) {
+    const cmdWithArgs = [server.command, ...server.args].join(" ")
+    args.push("--with-extension", cmdWithArgs)
+  }
+
+  return args
+}
+
+function buildClaudeMcpConfigArgs(): string[] {
+  const servers = buildMcpServers()
+  if (Object.keys(servers).length === 0) return []
+
+  return ["--mcp-config", JSON.stringify({ mcpServers: servers })]
+}
+
 export class SessionHandle {
   private process: ChildProcess | null = null
   private state: SessionState = "spawning"
@@ -176,6 +242,8 @@ export class SessionHandle {
       PLAYWRIGHT_BROWSERS_PATH:
         process.env["PLAYWRIGHT_BROWSERS_PATH"] ?? "/opt/pw-browsers",
       CLAUDE_CODE_STREAM_CLOSE_TIMEOUT: "30000",
+      GITHUB_PERSONAL_ACCESS_TOKEN: process.env["GITHUB_TOKEN"] ?? "",
+      MEMORY_FILE_PATH: config.mcp.memoryFilePath,
     }
   }
 
@@ -206,9 +274,7 @@ export class SessionHandle {
         "--system", prompt,
         "--no-profile",
         "--with-builtin", "developer",
-        ...(config.mcp.browserEnabled ? [
-          "--with-extension", `playwright-mcp --browser chromium --headless --no-sandbox --isolated --caps vision --output-dir ${path.join(this.meta.cwd, SCREENSHOTS_DIR)}`,
-        ] : []),
+        ...buildGooseExtensionArgs(),
         "--quiet",
       ],
       {
@@ -234,16 +300,7 @@ export class SessionHandle {
         "--dangerously-skip-permissions",
         "--no-session-persistence",
         "--disallowed-tools", ...PLAN_DISALLOWED_TOOLS,
-        ...(config.mcp.browserEnabled ? [
-          "--mcp-config", JSON.stringify({
-            mcpServers: {
-              playwright: {
-                command: "playwright-mcp",
-                args: ["--browser", "chromium", "--headless", "--no-sandbox", "--isolated", "--caps", "vision", "--output-dir", path.join(this.meta.cwd, SCREENSHOTS_DIR)],
-              },
-            },
-          }),
-        ] : []),
+        ...buildClaudeMcpConfigArgs(),
         "--append-system-prompt", PLAN_SYSTEM_PROMPT,
         "--model", config.claude.planModel,
         task,
@@ -271,16 +328,7 @@ export class SessionHandle {
         "--dangerously-skip-permissions",
         "--no-session-persistence",
         "--disallowed-tools", ...THINK_DISALLOWED_TOOLS,
-        ...(config.mcp.browserEnabled ? [
-          "--mcp-config", JSON.stringify({
-            mcpServers: {
-              playwright: {
-                command: "playwright-mcp",
-                args: ["--browser", "chromium", "--headless", "--no-sandbox", "--isolated", "--caps", "vision", "--output-dir", path.join(this.meta.cwd, SCREENSHOTS_DIR)],
-              },
-            },
-          }),
-        ] : []),
+        ...buildClaudeMcpConfigArgs(),
         "--append-system-prompt", THINK_SYSTEM_PROMPT,
         "--model", config.claude.thinkModel,
         task,
