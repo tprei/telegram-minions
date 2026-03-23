@@ -17,6 +17,7 @@ interface ClaudeStreamEvent {
       id?: string
       name?: string
       input?: Record<string, unknown>
+      content?: unknown
     }>
   }
   result?: string
@@ -105,6 +106,29 @@ export function translateClaudeEvents(raw: ClaudeStreamEvent): GooseStreamEvent[
             type: "toolRequest" as const,
             id: block.id ?? "",
             toolCall: { name: block.name ?? "unknown", arguments: block.input ?? {} },
+          },
+        ],
+      },
+    }))
+  }
+
+  if (raw.type === "user") {
+    const msg = raw.message
+    if (!msg || msg.role !== "user") return []
+
+    const toolResultBlocks = msg.content.filter((b) => b.type === "tool_result")
+    if (toolResultBlocks.length === 0) return []
+
+    return toolResultBlocks.map((block) => ({
+      type: "message" as const,
+      message: {
+        role: "user" as const,
+        created: Math.floor(Date.now() / 1000),
+        content: [
+          {
+            type: "toolResponse" as const,
+            id: block.id ?? "",
+            toolResult: block.content ?? block.input ?? null,
           },
         ],
       },

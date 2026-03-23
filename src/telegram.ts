@@ -261,28 +261,52 @@ export class TelegramClient {
   ): Promise<number | null> {
     try {
       const data = fs.readFileSync(photoPath)
-      const form = new FormData()
-      form.append("chat_id", this.chatId)
-      form.append("photo", new Blob([data]), path.basename(photoPath))
-      if (threadId !== undefined) form.append("message_thread_id", String(threadId))
-      if (caption) form.append("caption", sanitizeText(caption))
-
-      const res = await fetch(`${this.baseUrl}/sendPhoto`, { method: "POST", body: form })
-
-      if (!res.ok) {
-        const text = await res.text()
-        throw new Error(`HTTP ${res.status}: ${text}`)
-      }
-
-      const json = (await res.json()) as { ok: boolean; result: { message_id: number }; description?: string }
-      if (!json.ok) throw new Error(json.description ?? "unknown error")
-
-      return json.result.message_id
+      return await this.sendPhotoBlob(new Blob([data]), path.basename(photoPath), threadId, caption)
     } catch (err) {
       process.stderr.write(`telegram: sendPhoto failed: ${err}\n`)
       captureException(err, { method: "sendPhoto" })
       return null
     }
+  }
+
+  async sendPhotoBuffer(
+    buffer: Buffer,
+    filename: string,
+    threadId?: number,
+    caption?: string,
+  ): Promise<number | null> {
+    try {
+      return await this.sendPhotoBlob(new Blob([buffer]), filename, threadId, caption)
+    } catch (err) {
+      process.stderr.write(`telegram: sendPhotoBuffer failed: ${err}\n`)
+      captureException(err, { method: "sendPhotoBuffer" })
+      return null
+    }
+  }
+
+  private async sendPhotoBlob(
+    blob: Blob,
+    filename: string,
+    threadId?: number,
+    caption?: string,
+  ): Promise<number | null> {
+    const form = new FormData()
+    form.append("chat_id", this.chatId)
+    form.append("photo", blob, filename)
+    if (threadId !== undefined) form.append("message_thread_id", String(threadId))
+    if (caption) form.append("caption", sanitizeText(caption))
+
+    const res = await fetch(`${this.baseUrl}/sendPhoto`, { method: "POST", body: form })
+
+    if (!res.ok) {
+      const text = await res.text()
+      throw new Error(`HTTP ${res.status}: ${text}`)
+    }
+
+    const json = (await res.json()) as { ok: boolean; result: { message_id: number }; description?: string }
+    if (!json.ok) throw new Error(json.description ?? "unknown error")
+
+    return json.result.message_id
   }
 
   async downloadFile(fileId: string, destPath: string): Promise<boolean> {
