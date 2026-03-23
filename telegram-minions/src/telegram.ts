@@ -12,15 +12,6 @@ function sanitizeText(text: string): string {
   return text.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "")
 }
 
-/** Strip HTML tags and unescape entities for plain-text fallback. */
-function stripHtmlTags(html: string): string {
-  return html
-    .replace(/<[^>]+>/g, "")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-}
-
 /** Track unclosed HTML tags in a chunk and return closing/reopening strings. */
 function balanceHtmlTags(chunk: string): { closingTags: string; reopenTags: string } {
   const tagPattern = /<\/?(\w+)>/g
@@ -131,22 +122,6 @@ export class TelegramClient {
       const result = await this.call<{ message_id: number }>("sendMessage", body)
       return result.message_id
     } catch (err) {
-      const msg = String(err)
-      if (msg.includes("can't parse entities") || msg.includes("UTF-8")) {
-        try {
-          const body: Record<string, unknown> = {
-            chat_id: this.chatId,
-            text: stripHtmlTags(sanitized),
-          }
-          if (threadId !== undefined) body.message_thread_id = threadId
-          if (replyToMessageId !== undefined) body.reply_to_message_id = replyToMessageId
-          const result = await this.call<{ message_id: number }>("sendMessage", body)
-          return result.message_id
-        } catch (retryErr) {
-          process.stderr.write(`telegram: sendMessage retry failed: ${retryErr}\n`)
-          return null
-        }
-      }
       process.stderr.write(`telegram: sendMessage failed: ${err}\n`)
       return null
     }
@@ -189,24 +164,7 @@ export class TelegramClient {
       await this.call("editMessageText", body)
       return true
     } catch (err) {
-      const msg = String(err)
-      if (msg.includes("message is not modified")) return true
-      if (msg.includes("can't parse entities") || msg.includes("UTF-8")) {
-        try {
-          const body: Record<string, unknown> = {
-            chat_id: this.chatId,
-            message_id: messageId,
-            text: stripHtmlTags(sanitized),
-          }
-          if (threadId !== undefined) body.message_thread_id = threadId
-          await this.call("editMessageText", body)
-          return true
-        } catch (retryErr) {
-          if (String(retryErr).includes("message is not modified")) return true
-          process.stderr.write(`telegram: editMessage retry failed: ${retryErr}\n`)
-          return false
-        }
-      }
+      if (String(err).includes("message is not modified")) return true
       process.stderr.write(`telegram: editMessage failed: ${err}\n`)
       return false
     }

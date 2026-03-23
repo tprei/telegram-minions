@@ -5,15 +5,6 @@ function sanitizeText(text: string): string {
   return text.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "")
 }
 
-/** Strip HTML tags and unescape entities for plain-text fallback. */
-function stripHtmlTags(html: string): string {
-  return html
-    .replace(/<[^>]+>/g, "")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-}
-
 /** Track unclosed HTML tags in a chunk and return closing/reopening strings. */
 function balanceHtmlTags(chunk: string): { closingTags: string; reopenTags: string } {
   const tagPattern = /<\/?(\w+)>/g
@@ -85,10 +76,6 @@ async function sendOne(
 
     if (!res.ok) {
       const resBody = await res.text()
-      // On HTML parse error or UTF-8 error, retry as plain text
-      if (resBody.includes("can't parse entities") || resBody.includes("UTF-8")) {
-        return sendPlainFallback(token, chatId, sanitized, threadId, replyToMessageId)
-      }
       process.stderr.write(`telegram: HTTP ${res.status}: ${resBody}\n`)
       return null
     }
@@ -97,38 +84,6 @@ async function sendOne(
     return data.result.message_id
   } catch (err) {
     process.stderr.write(`telegram: fetch failed: ${err}\n`)
-    return null
-  }
-}
-
-async function sendPlainFallback(
-  token: string,
-  chatId: string,
-  html: string,
-  threadId?: number,
-  replyToMessageId?: number,
-): Promise<number | null> {
-  try {
-    const body: Record<string, unknown> = { chat_id: chatId, text: stripHtmlTags(html) }
-    if (threadId !== undefined) body.message_thread_id = threadId
-    if (replyToMessageId !== undefined) body.reply_to_message_id = replyToMessageId
-
-    const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    })
-
-    if (!res.ok) {
-      const resBody = await res.text()
-      process.stderr.write(`telegram: plaintext retry HTTP ${res.status}: ${resBody}\n`)
-      return null
-    }
-
-    const data = (await res.json()) as { ok: boolean; result: { message_id: number } }
-    return data.result.message_id
-  } catch (err) {
-    process.stderr.write(`telegram: plaintext retry failed: ${err}\n`)
     return null
   }
 }
@@ -179,9 +134,6 @@ export async function editMessage(
     if (!res.ok) {
       const resBody = await res.text()
       if (resBody.includes("message is not modified")) return true
-      if (resBody.includes("can't parse entities") || resBody.includes("UTF-8")) {
-        return editPlainFallback(token, chatId, messageId, sanitized, threadId)
-      }
       process.stderr.write(`telegram: editMessage HTTP ${res.status}: ${resBody}\n`)
       return false
     }
@@ -189,41 +141,6 @@ export async function editMessage(
     return true
   } catch (err) {
     process.stderr.write(`telegram: editMessage fetch failed: ${err}\n`)
-    return false
-  }
-}
-
-async function editPlainFallback(
-  token: string,
-  chatId: string,
-  messageId: number,
-  html: string,
-  threadId?: number,
-): Promise<boolean> {
-  try {
-    const body: Record<string, unknown> = {
-      chat_id: chatId,
-      message_id: messageId,
-      text: stripHtmlTags(html),
-    }
-    if (threadId !== undefined) body.message_thread_id = threadId
-
-    const res = await fetch(`https://api.telegram.org/bot${token}/editMessageText`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    })
-
-    if (!res.ok) {
-      const resBody = await res.text()
-      if (resBody.includes("message is not modified")) return true
-      process.stderr.write(`telegram: editMessage plaintext retry HTTP ${res.status}: ${resBody}\n`)
-      return false
-    }
-
-    return true
-  } catch (err) {
-    process.stderr.write(`telegram: editMessage plaintext retry failed: ${err}\n`)
     return false
   }
 }
