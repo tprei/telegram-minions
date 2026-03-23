@@ -134,7 +134,8 @@ export class SessionHandle {
       NODE_PATH: process.env["NODE_PATH"] ?? "",
       GITHUB_TOKEN: process.env["GITHUB_TOKEN"] ?? "",
       GIT_TERMINAL_PROMPT: "0",
-      PLAYWRIGHT_BROWSERS_PATH: process.env["PLAYWRIGHT_BROWSERS_PATH"] ?? "",
+      PLAYWRIGHT_BROWSERS_PATH:
+        process.env["PLAYWRIGHT_BROWSERS_PATH"] ?? "/opt/pw-browsers",
     }
   }
 
