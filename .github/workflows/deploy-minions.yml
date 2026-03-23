@@ -4,15 +4,16 @@ on:
   push:
     branches: [master]
     paths:
-      - "telegram-minions/**"
+      - "src/**"
+      - "Dockerfile"
+      - "entrypoint.sh"
+      - "fly.toml"
+      - "package*.json"
   workflow_dispatch:
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: telegram-minions
     steps:
       - uses: actions/checkout@v4
 

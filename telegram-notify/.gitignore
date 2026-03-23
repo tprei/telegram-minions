@@ -1,4 +1,0 @@
-.env
-node_modules/
-sessions-cache.json
-prompt-cache.json

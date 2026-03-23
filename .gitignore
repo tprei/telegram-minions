@@ -1,6 +1,8 @@
 node_modules/
 dist/
 .env
-topics-cache.json
+*.log
 .minion-images/
 .home/
+.claude/settings.local.json
+.claude/worktrees/
