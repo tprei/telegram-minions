@@ -40,6 +40,7 @@ export function writeSessionLog(
 
   const logPath = path.join(topicSession.cwd, "session-log.json")
   try {
+    fs.mkdirSync(topicSession.cwd, { recursive: true })
     fs.writeFileSync(logPath, JSON.stringify(entry, null, 2), "utf-8")
   } catch (err) {
     process.stderr.write(`session-log: failed to write ${logPath}: ${err}\n`)

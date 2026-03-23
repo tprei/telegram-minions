@@ -49,6 +49,5 @@ RUN chmod +x /app/entrypoint.sh /app/scripts/*.sh
 # Entrypoint runs as root to fix volume ownership, then drops to minion user.
 # After first deploy:
 #   fly ssh console
-#   su - minion -c 'HOME=/workspace/home claude'
-#   Complete OAuth in browser, then type /exit
+#   su -s /bin/bash -p minion -c 'claude auth login'
 CMD ["/app/entrypoint.sh"]
