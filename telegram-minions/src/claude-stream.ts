@@ -53,25 +53,23 @@ export function translateClaudeEvent(raw: ClaudeStreamEvent): GooseStreamEvent |
       const toolBlocks = msg.content.filter((b) => b.type === "tool_use")
       if (toolBlocks.length === 0) return null
 
-      const events: GooseStreamEvent[] = []
-      for (const block of toolBlocks) {
-        events.push({
-          type: "message",
-          message: {
-            role: "assistant",
-            created: Math.floor(Date.now() / 1000),
-            content: [
-              {
-                type: "toolRequest",
-                id: block.id ?? "",
-                toolCall: { name: block.name ?? "unknown", arguments: block.input ?? {} },
-              },
-            ],
-          },
-        })
-      }
+      // Return one event per tool_use block so parallel calls are all visible
+      const events: GooseStreamEvent[] = toolBlocks.map((block) => ({
+        type: "message" as const,
+        message: {
+          role: "assistant" as const,
+          created: Math.floor(Date.now() / 1000),
+          content: [
+            {
+              type: "toolRequest" as const,
+              id: block.id ?? "",
+              toolCall: { name: block.name ?? "unknown", arguments: block.input ?? {} },
+            },
+          ],
+        },
+      }))
 
-      return events.length === 1 ? events[0] : events[0]
+      return events[0]
     }
 
     case "result": {

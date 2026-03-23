@@ -1,5 +1,30 @@
 const MAX_LENGTH = 4096
 
+/** Remove control characters that Telegram rejects as invalid UTF-8. */
+function sanitizeText(text: string): string {
+  return text.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "")
+}
+
+/** Track unclosed HTML tags in a chunk and return closing/reopening strings. */
+function balanceHtmlTags(chunk: string): { closingTags: string; reopenTags: string } {
+  const tagPattern = /<\/?(\w+)>/g
+  const stack: string[] = []
+  let match: RegExpExecArray | null
+
+  while ((match = tagPattern.exec(chunk)) !== null) {
+    if (match[0].startsWith("</")) {
+      const idx = stack.lastIndexOf(match[1])
+      if (idx !== -1) stack.splice(idx, 1)
+    } else {
+      stack.push(match[1])
+    }
+  }
+
+  const closingTags = [...stack].reverse().map((t) => `</${t}>`).join("")
+  const reopenTags = stack.map((t) => `<${t}>`).join("")
+  return { closingTags, reopenTags }
+}
+
 function splitMessage(html: string): string[] {
   if (html.length <= MAX_LENGTH) return [html]
 
@@ -9,9 +34,21 @@ function splitMessage(html: string): string[] {
   while (remaining.length > MAX_LENGTH) {
     const slice = remaining.slice(0, MAX_LENGTH)
     const lastNewline = slice.lastIndexOf("\n")
-    const splitAt = lastNewline > MAX_LENGTH / 2 ? lastNewline : MAX_LENGTH
-    chunks.push(remaining.slice(0, splitAt))
+    let splitAt = lastNewline > MAX_LENGTH / 2 ? lastNewline : MAX_LENGTH
+
+    // Avoid splitting inside an HTML tag
+    const lastOpen = slice.lastIndexOf("<")
+    const lastClose = slice.lastIndexOf(">")
+    if (lastOpen > lastClose && lastOpen < splitAt) {
+      splitAt = lastOpen
+    }
+
+    const chunk = remaining.slice(0, splitAt)
     remaining = remaining.slice(splitAt).trimStart()
+
+    const { closingTags, reopenTags } = balanceHtmlTags(chunk)
+    chunks.push(chunk + closingTags)
+    if (reopenTags) remaining = reopenTags + remaining
   }
 
   if (remaining) chunks.push(remaining)
@@ -25,8 +62,9 @@ async function sendOne(
   threadId?: number,
   replyToMessageId?: number,
 ): Promise<number | null> {
+  const sanitized = sanitizeText(html)
   try {
-    const body: Record<string, unknown> = { chat_id: chatId, text: html, parse_mode: "HTML" }
+    const body: Record<string, unknown> = { chat_id: chatId, text: sanitized, parse_mode: "HTML" }
     if (threadId !== undefined) body.message_thread_id = threadId
     if (replyToMessageId !== undefined) body.reply_to_message_id = replyToMessageId
 
@@ -77,11 +115,12 @@ export async function editMessage(
   html: string,
   threadId?: number,
 ): Promise<boolean> {
+  const sanitized = sanitizeText(html)
   try {
     const body: Record<string, unknown> = {
       chat_id: chatId,
       message_id: messageId,
-      text: html,
+      text: sanitized,
       parse_mode: "HTML",
     }
     if (threadId !== undefined) body.message_thread_id = threadId

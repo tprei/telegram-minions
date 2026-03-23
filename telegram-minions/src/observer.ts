@@ -17,8 +17,8 @@ const TEXT_FLUSH_DEBOUNCE_MS = 1500
 // Maximum number of recent tool lines to keep in the activity log.
 const MAX_ACTIVITY_LINES = 6
 
-const MIN_TEXT_LENGTH = 80
-const PRE_TOOL_NARRATION_LIMIT = 200
+const MIN_TEXT_LENGTH = 20
+const PRE_TOOL_NARRATION_LIMIT = 60
 const ACTIVITY_EDIT_DEBOUNCE_MS = 2000
 
 export type TextCaptureCallback = (sessionId: string, text: string) => void
@@ -27,12 +27,14 @@ interface SessionState {
   // Text buffering: Goose streams text token-by-token; we accumulate and flush.
   textBuffer: string
   flushTimer: ReturnType<typeof setTimeout> | null
-  // Tool activity tracking
+  // Tool activity tracking (per-flush window)
   activityMessageId: number | null
   activityLastSentAt: number
   toolCount: number
   activityLog: string[]
   activityEditTimer: ReturnType<typeof setTimeout> | null
+  // Session-level stats for completion recap
+  sessionToolCount: number
   // Optional callback for capturing flushed text (used by plan mode)
   onTextCapture?: TextCaptureCallback
 }
@@ -58,6 +60,7 @@ export class Observer {
       toolCount: 0,
       activityLog: [],
       activityEditTimer: null,
+      sessionToolCount: 0,
       onTextCapture,
     })
     const msg = meta.mode === "think"
@@ -145,17 +148,25 @@ export class Observer {
     if (reason === "tool" && text.length < PRE_TOOL_NARRATION_LIMIT) return
 
     const toolLines = state.activityLog.length > 0 ? [...state.activityLog] : undefined
+    const toolCount = state.toolCount > 0 ? state.toolCount : undefined
 
     await this.telegram.sendMessage(
-      formatAssistantText(meta.topicName, text, toolLines),
+      formatAssistantText(meta.topicName, text, toolLines, toolCount),
       meta.threadId,
     )
     if (state.activityEditTimer !== null) {
       clearTimeout(state.activityEditTimer)
       state.activityEditTimer = null
     }
+    // Delete the orphaned activity message now that tools are folded into the Reply
+    if (state.activityMessageId !== null) {
+      this.telegram.deleteMessage(state.activityMessageId).catch((err) => {
+        process.stderr.write(`observer: delete activity msg error: ${err}\n`)
+      })
+    }
     state.activityMessageId = null
     state.activityLog = []
+    state.toolCount = 0
   }
 
   private async handleToolRequest(
@@ -170,6 +181,7 @@ export class Observer {
     if (!state) return
 
     state.toolCount++
+    state.sessionToolCount++
 
     // Append to rolling activity log
     const line = formatToolLine(name, args)
@@ -210,6 +222,8 @@ export class Observer {
     finalState: "completed" | "errored",
     durationMs: number,
   ): Promise<void> {
+    const state = this.sessions.get(meta.sessionId)
+    const sessionToolCount = state?.sessionToolCount ?? 0
     // Flush any remaining buffered text before posting summary
     await this.flushTextBuffer(meta, "end")
     this.sessions.delete(meta.sessionId)
@@ -221,7 +235,7 @@ export class Observer {
       )
     } else {
       await this.telegram.sendMessage(
-        formatSessionComplete(meta.topicName, durationMs, meta.totalTokens),
+        formatSessionComplete(meta.topicName, durationMs, meta.totalTokens, sessionToolCount),
         meta.threadId,
       )
     }

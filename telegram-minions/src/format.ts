@@ -93,6 +93,7 @@ export function formatSessionComplete(
   slug: string,
   durationMs: number,
   totalTokens: number | null | undefined,
+  sessionToolCount?: number,
 ): string {
   const secs = Math.round(durationMs / 1000)
   const dur = secs >= 60
@@ -100,7 +101,8 @@ export function formatSessionComplete(
     : `${secs}s`
 
   const tokenPart = totalTokens != null ? `  ·  🪙 ${totalTokens.toLocaleString()} tokens` : ""
-  return `✅ <b>Complete</b>  ·  🏷 <code>${esc(slug)}</code>  ·  ⏱ ${dur}${tokenPart}`
+  const toolPart = sessionToolCount && sessionToolCount > 0 ? `  ·  🔧 ${sessionToolCount} tool${sessionToolCount === 1 ? "" : "s"}` : ""
+  return `✅ <b>Complete</b>  ·  🏷 <code>${esc(slug)}</code>  ·  ⏱ ${dur}${tokenPart}${toolPart}`
 }
 
 export function formatSessionError(slug: string, error: string): string {
@@ -115,10 +117,11 @@ export function formatSessionInterrupted(slug: string): string {
   return `⚠️ <b>Session interrupted</b>  ·  🏷 <code>${esc(slug)}</code>\nRestart not yet supported. Create a new task.`
 }
 
-export function formatAssistantText(slug: string, text: string, toolLines?: string[]): string {
+export function formatAssistantText(slug: string, text: string, toolLines?: string[], toolCount?: number): string {
   const MAX_TEXT = 3800
+  const toolPart = toolCount && toolCount > 0 ? `  ·  🔧 ${toolCount} tool${toolCount === 1 ? "" : "s"}` : ""
   const lines: string[] = [
-    `🤖 <b>Reply</b>  ·  🏷 <code>${esc(slug)}</code>`,
+    `🤖 <b>Reply</b>  ·  🏷 <code>${esc(slug)}</code>${toolPart}`,
   ]
 
   if (toolLines && toolLines.length > 0) {

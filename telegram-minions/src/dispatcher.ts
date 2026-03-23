@@ -761,9 +761,10 @@ export class Dispatcher {
         }
 
         const branch = `minion/${slug}`
-        process.stderr.write(`dispatcher: adding worktree ${workDir} (branch ${branch})\n`)
+        const startRef = resolveDefaultBranch(bareDir, gitOpts)
+        process.stderr.write(`dispatcher: adding worktree ${workDir} (branch ${branch}) from ${startRef}\n`)
         execSync(
-          `git worktree add ${JSON.stringify(workDir)} -b ${JSON.stringify(branch)} origin/HEAD`,
+          `git worktree add ${JSON.stringify(workDir)} -b ${JSON.stringify(branch)} ${startRef}`,
           { ...gitOpts, cwd: bareDir },
         )
 
@@ -810,6 +811,25 @@ export class Dispatcher {
   activeSessions(): number {
     return this.sessions.size
   }
+}
+
+export function resolveDefaultBranch(bareDir: string, gitOpts: object): string {
+  try {
+    const ref = execSync("git symbolic-ref HEAD", { ...gitOpts, cwd: bareDir })
+      .toString().trim()
+    const branch = ref.replace("refs/heads/", "")
+    execSync(`git rev-parse --verify refs/heads/${branch}`, { ...gitOpts, cwd: bareDir })
+    return branch
+  } catch { /* detached HEAD, unborn branch, or not set */ }
+
+  for (const name of ["main", "master"]) {
+    try {
+      execSync(`git rev-parse --verify refs/heads/${name}`, { ...gitOpts, cwd: bareDir })
+      return name
+    } catch { /* doesn't exist */ }
+  }
+
+  throw new Error("cannot determine default branch")
 }
 
 export function parseTaskArgs(args: string): { repoUrl?: string; task: string } {
