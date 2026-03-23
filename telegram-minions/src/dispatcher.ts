@@ -39,7 +39,6 @@ const REPLY_PREFIX = "/reply"
 const REPLY_SHORT = "/r"
 const CLOSE_CMD = "/close"
 const HELP_CMD = "/help"
-const CLEAN_CMD = "/clean"
 
 interface ActiveSession {
   handle: SessionHandle
@@ -56,7 +55,6 @@ export class Dispatcher {
   private readonly sessions = new Map<number, ActiveSession>()
   private readonly topicSessions = new Map<number, TopicSession>()
   private readonly pendingTasks = new Map<number, PendingTask>()
-  private readonly generalMessageIds: number[] = []
   private readonly store: SessionStore
   private offset = 0
   private running = false
@@ -72,21 +70,13 @@ export class Dispatcher {
     this.stats = new StatsTracker(config.workspace.root)
   }
 
-  async loadPersistedSessions(): Promise<void> {
-    const { active, expired } = this.store.load()
-    for (const [threadId, session] of active) {
+  loadPersistedSessions(): void {
+    const persisted = this.store.load()
+    for (const [threadId, session] of persisted) {
       this.topicSessions.set(threadId, session)
     }
-    if (active.size > 0) {
-      process.stderr.write(`dispatcher: loaded ${active.size} persisted session(s)\n`)
-    }
-    if (expired.size > 0) {
-      process.stderr.write(`dispatcher: cleaning ${expired.size} expired session(s)\n`)
-      for (const [threadId, session] of expired) {
-        await this.telegram.deleteForumTopic(threadId)
-        this.removeWorkspace(session)
-        process.stderr.write(`dispatcher: cleaned expired session ${session.slug} (topic ${threadId})\n`)
-      }
+    if (persisted.size > 0) {
+      process.stderr.write(`dispatcher: loaded ${persisted.size} persisted session(s)\n`)
     }
   }
 
@@ -110,9 +100,6 @@ export class Dispatcher {
   }
 
   startCleanupTimer(): void {
-    this.cleanupStaleSessions().catch((err) => {
-      process.stderr.write(`dispatcher: startup cleanup error: ${err}\n`)
-    })
     this.cleanupTimer = setInterval(() => {
       this.cleanupStaleSessions().catch((err) => {
         process.stderr.write(`dispatcher: cleanup error: ${err}\n`)
@@ -207,10 +194,6 @@ export class Dispatcher {
       }
       if (text === STATS_CMD) {
         await this.handleStatsCommand()
-        return
-      }
-      if (text === CLEAN_CMD) {
-        await this.handleCleanCommand()
         return
       }
       if (text === HELP_CMD) {
@@ -311,42 +294,16 @@ export class Dispatcher {
     const taskSessions = [...this.sessions.values()]
     const topicSessionList = [...this.topicSessions.values()]
     const msg = formatStatus(taskSessions, topicSessionList, config.workspace.maxConcurrentSessions)
-    await this.sendToGeneral(msg)
+    await this.telegram.sendMessage(msg)
   }
 
   private async handleStatsCommand(): Promise<void> {
     const agg = this.stats.aggregate(7)
-    await this.sendToGeneral(formatStats(agg))
+    await this.telegram.sendMessage(formatStats(agg))
   }
 
   private async handleHelpCommand(): Promise<void> {
-    await this.sendToGeneral(formatHelp())
-  }
-
-  private async handleCleanCommand(): Promise<void> {
-    const idle: [number, TopicSession][] = []
-    for (const [threadId, session] of this.topicSessions) {
-      if (!session.activeSessionId) {
-        idle.push([threadId, session])
-      }
-    }
-
-    await this.clearGeneralHistory()
-
-    if (idle.length === 0) {
-      await this.sendToGeneral("🧹 No idle sessions to clean.")
-      return
-    }
-
-    for (const [threadId, session] of idle) {
-      await this.telegram.deleteForumTopic(threadId)
-      this.removeWorkspace(session)
-      this.topicSessions.delete(threadId)
-      process.stderr.write(`dispatcher: cleaned idle session ${session.slug} (topic ${threadId})\n`)
-    }
-
-    this.persistTopicSessions()
-    await this.sendToGeneral(`🧹 Cleaned ${idle.length} idle session(s).`)
+    await this.telegram.sendMessage(formatHelp())
   }
 
   private async handleTaskCommand(args: string, replyThreadId?: number, photos?: TelegramPhotoSize[]): Promise<void> {
@@ -809,18 +766,6 @@ export class Dispatcher {
         fs.rmSync(topicSession.cwd, { recursive: true, force: true })
       } catch { /* best effort */ }
     }
-  }
-
-  private async sendToGeneral(html: string): Promise<void> {
-    const { messageId } = await this.telegram.sendMessage(html)
-    if (messageId) this.generalMessageIds.push(messageId)
-  }
-
-  private async clearGeneralHistory(): Promise<void> {
-    for (const msgId of this.generalMessageIds) {
-      await this.telegram.deleteMessage(msgId)
-    }
-    this.generalMessageIds.length = 0
   }
 
   activeSessions(): number {

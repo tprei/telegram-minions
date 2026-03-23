@@ -1,3 +1,0 @@
-{"debug":"Starting connection with timeout of 30000ms","timestamp":"2026-03-23T08:58:35.405Z","sessionId":"4758cfce-962b-4ef5-9150-4900e0826a89","cwd":"/workspace/rare-tor"}
-{"debug":"Successfully connected to stdio server in 1656ms","timestamp":"2026-03-23T08:58:37.054Z","sessionId":"4758cfce-962b-4ef5-9150-4900e0826a89","cwd":"/workspace/rare-tor"}
-{"debug":"Connection established with capabilities: {\"hasTools\":true,\"hasPrompts\":false,\"hasResources\":false,\"hasResourceSubscribe\":false,\"serverVersion\":{\"name\":\"Playwright\",\"version\":\"0.0.68\"}}","timestamp":"2026-03-23T08:58:37.054Z","sessionId":"4758cfce-962b-4ef5-9150-4900e0826a89","cwd":"/workspace/rare-tor"}
