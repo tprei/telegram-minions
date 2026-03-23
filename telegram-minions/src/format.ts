@@ -14,6 +14,7 @@ const TOOL_ICONS: Record<string, string> = {
   list_directory: "📂", Glob: "📂",
   search: "🔍", Grep: "🔍",
   WebSearch: "🌐", WebFetch: "🌐",
+  browser_take_screenshot: "📸", mcp__playwright__browser_take_screenshot: "📸",
 }
 
 export function formatToolLine(
@@ -50,6 +51,9 @@ export function formatToolLine(
     summary = typeof query === "string" ? truncate(query, MAX_SUMMARY) : ""
   } else if (toolName === "WebFetch") {
     const url = args["url"]
+    summary = typeof url === "string" ? truncate(url, MAX_SUMMARY) : ""
+  } else if (toolName.includes("browser_")) {
+    const url = args["url"] ?? args["selector"] ?? args["text"] ?? args["ref"]
     summary = typeof url === "string" ? truncate(url, MAX_SUMMARY) : ""
   }
 

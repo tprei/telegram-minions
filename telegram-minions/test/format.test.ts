@@ -81,6 +81,16 @@ describe("formatToolLine", () => {
     expect(line).toContain("**/*.ts")
   })
 
+  it("formats a browser_take_screenshot tool with icon", () => {
+    const line = formatToolLine("browser_take_screenshot", {})
+    expect(line).toContain("📸")
+  })
+
+  it("formats a browser_navigate tool with URL", () => {
+    const line = formatToolLine("mcp__playwright__browser_navigate", { url: "https://example.com" })
+    expect(line).toContain("https://example.com")
+  })
+
   it("uses generic icon for unknown tools", () => {
     const line = formatToolLine("CustomTool", {})
     expect(line).toContain("🔧")

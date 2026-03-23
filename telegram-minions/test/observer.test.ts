@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
+import fs from "node:fs"
+import os from "node:os"
+import path from "node:path"
 import { Observer } from "../src/observer.js"
 import type { SessionMeta, GooseStreamEvent } from "../src/types.js"
 
@@ -13,6 +16,7 @@ function makeTelegram() {
     answerCallbackQuery: vi.fn().mockResolvedValue(undefined),
     sendMessageWithKeyboard: vi.fn().mockResolvedValue(1),
     downloadFile: vi.fn().mockResolvedValue(true),
+    sendPhoto: vi.fn().mockResolvedValue(1),
   }
 }
 
@@ -454,6 +458,151 @@ describe("Observer", () => {
 
       expect(telegram.sendMessage).toHaveBeenCalledOnce()
       expect(telegram.sendMessage.mock.calls[0][0]).toContain("Reply")
+    })
+  })
+
+  describe("screenshot detection", () => {
+    let tmpDir: string
+    let screenshotDir: string
+
+    beforeEach(() => {
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "obs-screenshot-"))
+      screenshotDir = path.join(tmpDir, ".screenshots")
+      fs.mkdirSync(screenshotDir)
+    })
+
+    afterEach(() => {
+      fs.rmSync(tmpDir, { recursive: true, force: true })
+    })
+
+    it("sends screenshot photo after detecting browser_take_screenshot tool", async () => {
+      const telegram = makeTelegram()
+      const observer = new Observer(telegram as any, 3000)
+      const meta = makeMeta({ cwd: tmpDir })
+
+      await observer.onSessionStart(meta, "task")
+      telegram.sendMessage.mockClear()
+
+      await observer.onEvent(meta, {
+        type: "message",
+        message: {
+          role: "assistant",
+          created: 0,
+          content: [{
+            type: "toolRequest",
+            id: "t1",
+            toolCall: { name: "browser_take_screenshot", arguments: {} },
+          }],
+        },
+      })
+
+      fs.writeFileSync(path.join(screenshotDir, "screenshot-1.png"), Buffer.from("fake-png"))
+
+      await observer.onEvent(meta, {
+        type: "message",
+        message: {
+          role: "assistant",
+          created: 0,
+          content: [{ type: "text", text: "Here is the screenshot result with enough text to pass" }],
+        },
+      })
+
+      expect(telegram.sendPhoto).toHaveBeenCalledOnce()
+      expect(telegram.sendPhoto).toHaveBeenCalledWith(
+        path.join(screenshotDir, "screenshot-1.png"),
+        42,
+        "📸 screenshot-1.png",
+      )
+    })
+
+    it("does not send the same screenshot twice", async () => {
+      const telegram = makeTelegram()
+      const observer = new Observer(telegram as any, 3000)
+      const meta = makeMeta({ cwd: tmpDir })
+
+      await observer.onSessionStart(meta, "task")
+      telegram.sendMessage.mockClear()
+
+      fs.writeFileSync(path.join(screenshotDir, "screenshot-1.png"), Buffer.from("fake-png"))
+
+      await observer.onEvent(meta, {
+        type: "message",
+        message: {
+          role: "assistant",
+          created: 0,
+          content: [{
+            type: "toolRequest",
+            id: "t1",
+            toolCall: { name: "browser_take_screenshot", arguments: {} },
+          }],
+        },
+      })
+
+      await observer.onEvent(meta, {
+        type: "message",
+        message: {
+          role: "assistant",
+          created: 0,
+          content: [{ type: "text", text: "first result" }],
+        },
+      })
+
+      await observer.onEvent(meta, {
+        type: "message",
+        message: {
+          role: "assistant",
+          created: 0,
+          content: [{
+            type: "toolRequest",
+            id: "t2",
+            toolCall: { name: "browser_take_screenshot", arguments: {} },
+          }],
+        },
+      })
+
+      await observer.onEvent(meta, {
+        type: "message",
+        message: {
+          role: "assistant",
+          created: 0,
+          content: [{ type: "text", text: "second result" }],
+        },
+      })
+
+      expect(telegram.sendPhoto).toHaveBeenCalledOnce()
+    })
+
+    it("sends pending screenshots on session complete", async () => {
+      const telegram = makeTelegram()
+      const observer = new Observer(telegram as any, 3000)
+      const meta = makeMeta({ cwd: tmpDir })
+
+      await observer.onSessionStart(meta, "task")
+      telegram.sendMessage.mockClear()
+
+      await observer.onEvent(meta, {
+        type: "message",
+        message: {
+          role: "assistant",
+          created: 0,
+          content: [{
+            type: "toolRequest",
+            id: "t1",
+            toolCall: { name: "mcp__playwright__browser_take_screenshot", arguments: {} },
+          }],
+        },
+      })
+
+      fs.writeFileSync(path.join(screenshotDir, "page-capture.png"), Buffer.from("fake-png"))
+
+      await observer.onSessionComplete(meta, "completed", 60000)
+
+      expect(telegram.sendPhoto).toHaveBeenCalledOnce()
+      expect(telegram.sendPhoto).toHaveBeenCalledWith(
+        path.join(screenshotDir, "page-capture.png"),
+        42,
+        "📸 page-capture.png",
+      )
     })
   })
 

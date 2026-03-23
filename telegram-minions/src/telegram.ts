@@ -1,4 +1,5 @@
 import fs from "node:fs"
+import path from "node:path"
 import { pipeline } from "node:stream/promises"
 import { Readable } from "node:stream"
 import type { TelegramUpdate, TelegramForumTopic, TelegramCallbackQuery } from "./types.js"
@@ -246,6 +247,36 @@ export class TelegramClient {
       })
     } catch (err) {
       process.stderr.write(`telegram: deleteForumTopic failed: ${err}\n`)
+    }
+  }
+
+  async sendPhoto(
+    photoPath: string,
+    threadId?: number,
+    caption?: string,
+  ): Promise<number | null> {
+    try {
+      const data = fs.readFileSync(photoPath)
+      const form = new FormData()
+      form.append("chat_id", this.chatId)
+      form.append("photo", new Blob([data]), path.basename(photoPath))
+      if (threadId !== undefined) form.append("message_thread_id", String(threadId))
+      if (caption) form.append("caption", sanitizeText(caption))
+
+      const res = await fetch(`${this.baseUrl}/sendPhoto`, { method: "POST", body: form })
+
+      if (!res.ok) {
+        const text = await res.text()
+        throw new Error(`HTTP ${res.status}: ${text}`)
+      }
+
+      const json = (await res.json()) as { ok: boolean; result: { message_id: number }; description?: string }
+      if (!json.ok) throw new Error(json.description ?? "unknown error")
+
+      return json.result.message_id
+    } catch (err) {
+      process.stderr.write(`telegram: sendPhoto failed: ${err}\n`)
+      return null
     }
   }
 

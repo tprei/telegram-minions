@@ -6,6 +6,8 @@ import { config } from "./config.js"
 import type { GooseStreamEvent, SessionMeta, SessionState } from "./types.js"
 import { translateClaudeEvents } from "./claude-stream.js"
 
+export const SCREENSHOTS_DIR = ".screenshots"
+
 export type SessionEventCallback = (event: GooseStreamEvent) => void
 export type SessionDoneCallback = (meta: SessionMeta, state: "completed" | "errored") => void
 
@@ -122,6 +124,9 @@ export class SessionHandle {
     const parentClaudeDir = path.join(parentHome, ".claude")
     const sessionHome = path.join(this.meta.cwd, ".home")
 
+    const screenshotsDir = path.join(this.meta.cwd, SCREENSHOTS_DIR)
+    fs.mkdirSync(screenshotsDir, { recursive: true })
+
     const sessionTmp = path.join(sessionHome, "tmp")
     const sessionConfig = path.join(sessionHome, ".config")
     const sessionCache = path.join(sessionHome, ".cache")
@@ -186,7 +191,7 @@ export class SessionHandle {
         "--no-profile",
         "--with-builtin", "developer",
         ...(config.mcp.browserEnabled ? [
-          "--with-extension", "playwright-mcp --browser chromium --headless --no-sandbox --isolated --caps vision",
+          "--with-extension", `playwright-mcp --browser chromium --headless --no-sandbox --isolated --caps vision --output-dir ${path.join(this.meta.cwd, SCREENSHOTS_DIR)}`,
         ] : []),
         "--quiet",
       ],
@@ -218,7 +223,7 @@ export class SessionHandle {
             mcpServers: {
               playwright: {
                 command: "playwright-mcp",
-                args: ["--browser", "chromium", "--headless", "--no-sandbox", "--isolated", "--caps", "vision"],
+                args: ["--browser", "chromium", "--headless", "--no-sandbox", "--isolated", "--caps", "vision", "--output-dir", path.join(this.meta.cwd, SCREENSHOTS_DIR)],
               },
             },
           }),
@@ -255,7 +260,7 @@ export class SessionHandle {
             mcpServers: {
               playwright: {
                 command: "playwright-mcp",
-                args: ["--browser", "chromium", "--headless", "--no-sandbox", "--isolated", "--caps", "vision"],
+                args: ["--browser", "chromium", "--headless", "--no-sandbox", "--isolated", "--caps", "vision", "--output-dir", path.join(this.meta.cwd, SCREENSHOTS_DIR)],
               },
             },
           }),

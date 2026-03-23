@@ -1,3 +1,5 @@
+import fs from "node:fs"
+import path from "node:path"
 import type { TelegramClient } from "./telegram.js"
 import type { GooseStreamEvent, GooseMessage, GooseToolRequestContent, SessionMeta } from "./types.js"
 import {
@@ -17,6 +19,7 @@ const TEXT_FLUSH_DEBOUNCE_MS = 1500
 // Maximum number of recent tool lines to keep in the activity log.
 const MAX_ACTIVITY_LINES = 6
 
+const SCREENSHOTS_DIR = ".screenshots"
 const MIN_TEXT_LENGTH = 20
 const PRE_TOOL_NARRATION_LIMIT = 60
 const ACTIVITY_EDIT_DEBOUNCE_MS = 2000
@@ -35,6 +38,9 @@ interface SessionState {
   activityEditTimer: ReturnType<typeof setTimeout> | null
   // Session-level stats for completion recap
   sessionToolCount: number
+  // Screenshot tracking
+  screenshotPending: boolean
+  sentScreenshots: Set<string>
   // Optional callback for capturing flushed text (used by plan mode)
   onTextCapture?: TextCaptureCallback
 }
@@ -61,6 +67,8 @@ export class Observer {
       activityLog: [],
       activityEditTimer: null,
       sessionToolCount: 0,
+      screenshotPending: false,
+      sentScreenshots: new Set(),
       onTextCapture,
     })
     const msg = meta.mode === "think"
@@ -91,8 +99,32 @@ export class Observer {
     }
   }
 
+  private async scanAndSendScreenshots(meta: SessionMeta): Promise<void> {
+    const state = this.sessions.get(meta.sessionId)
+    if (!state?.screenshotPending) return
+
+    state.screenshotPending = false
+    const dir = path.join(meta.cwd, SCREENSHOTS_DIR)
+
+    try {
+      const entries = fs.readdirSync(dir)
+      for (const entry of entries) {
+        if (!entry.endsWith(".png")) continue
+        if (state.sentScreenshots.has(entry)) continue
+
+        const filePath = path.join(dir, entry)
+        state.sentScreenshots.add(entry)
+        await this.telegram.sendPhoto(filePath, meta.threadId, `📸 ${entry}`)
+      }
+    } catch {
+      // Directory may not exist yet
+    }
+  }
+
   private async handleMessage(meta: SessionMeta, message: GooseMessage): Promise<void> {
     if (message.role !== "assistant") return
+
+    await this.scanAndSendScreenshots(meta)
 
     for (const block of message.content) {
       if (block.type === "text") {
@@ -183,6 +215,10 @@ export class Observer {
     state.toolCount++
     state.sessionToolCount++
 
+    if (name.includes("browser_take_screenshot")) {
+      state.screenshotPending = true
+    }
+
     // Append to rolling activity log
     const line = formatToolLine(name, args)
     state.activityLog.push(line)
@@ -224,6 +260,9 @@ export class Observer {
   ): Promise<void> {
     const state = this.sessions.get(meta.sessionId)
     const sessionToolCount = state?.sessionToolCount ?? 0
+    // Send any pending screenshots before posting summary
+    if (state) state.screenshotPending = true
+    await this.scanAndSendScreenshots(meta)
     // Flush any remaining buffered text before posting summary
     await this.flushTextBuffer(meta, "end")
     this.sessions.delete(meta.sessionId)
