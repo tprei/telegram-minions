@@ -3,6 +3,7 @@ import path from "node:path"
 import { pipeline } from "node:stream/promises"
 import { Readable } from "node:stream"
 import type { TelegramUpdate, TelegramForumTopic, TelegramCallbackQuery } from "./types.js"
+import { captureException } from "./sentry.js"
 
 const MAX_LENGTH = 4096
 const BASE = "https://api.telegram.org"
@@ -101,6 +102,7 @@ export class TelegramClient {
       return result
     } catch (err) {
       process.stderr.write(`telegram: getUpdates failed: ${err}\n`)
+      captureException(err, { method: "getUpdates" })
       return []
     }
   }
@@ -124,6 +126,7 @@ export class TelegramClient {
       return result.message_id
     } catch (err) {
       process.stderr.write(`telegram: sendMessage failed: ${err}\n`)
+      captureException(err, { method: "sendMessage" })
       return null
     }
   }
@@ -167,6 +170,7 @@ export class TelegramClient {
     } catch (err) {
       if (String(err).includes("message is not modified")) return true
       process.stderr.write(`telegram: editMessage failed: ${err}\n`)
+      captureException(err, { method: "editMessage" })
       return false
     }
   }
@@ -276,6 +280,7 @@ export class TelegramClient {
       return json.result.message_id
     } catch (err) {
       process.stderr.write(`telegram: sendPhoto failed: ${err}\n`)
+      captureException(err, { method: "sendPhoto" })
       return null
     }
   }
@@ -292,6 +297,7 @@ export class TelegramClient {
       return true
     } catch (err) {
       process.stderr.write(`telegram: downloadFile failed: ${err}\n`)
+      captureException(err, { method: "downloadFile" })
       return false
     }
   }

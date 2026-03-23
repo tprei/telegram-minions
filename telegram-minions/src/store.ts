@@ -1,6 +1,7 @@
 import fs from "node:fs"
 import path from "node:path"
 import type { TopicSession } from "./types.js"
+import { captureException } from "./sentry.js"
 
 const STORE_FILENAME = ".sessions.json"
 const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000 // 24 hours
@@ -20,6 +21,7 @@ export class SessionStore {
       fs.writeFileSync(this.filePath, JSON.stringify(entries), "utf-8")
     } catch (err) {
       process.stderr.write(`store: failed to save sessions: ${err}\n`)
+      captureException(err, { operation: "store.save" })
     }
   }
 
@@ -41,6 +43,7 @@ export class SessionStore {
       }
     } catch (err) {
       process.stderr.write(`store: failed to load sessions: ${err}\n`)
+      captureException(err, { operation: "store.load" })
     }
     return { active, expired }
   }

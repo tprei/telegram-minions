@@ -2,6 +2,7 @@ import fs from "node:fs"
 import path from "node:path"
 import type { TelegramClient } from "./telegram.js"
 import type { GooseStreamEvent, GooseMessage, GooseToolRequestContent, SessionMeta } from "./types.js"
+import { captureException } from "./sentry.js"
 import {
   formatToolLine,
   formatActivityLog,
@@ -151,6 +152,7 @@ export class Observer {
     state.flushTimer = setTimeout(() => {
       this.flushTextBuffer(meta).catch((err) => {
         process.stderr.write(`observer: flush error: ${err}\n`)
+        captureException(err, { operation: "observer.flush", sessionId: meta.sessionId })
       })
     }, TEXT_FLUSH_DEBOUNCE_MS)
   }
