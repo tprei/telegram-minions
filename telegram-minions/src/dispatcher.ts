@@ -1,7 +1,4 @@
-import { execFile } from "node:child_process"
-import { promisify } from "node:util"
-
-const execFileAsync = promisify(execFile)
+import { execSync } from "node:child_process"
 import os from "node:os"
 import path from "node:path"
 import fs from "node:fs"
@@ -23,7 +20,13 @@ import {
   formatTaskComplete,
   formatFollowUpIteration,
   formatHelp,
+  formatQualityReport,
+  formatBudgetWarning,
+  formatStats,
 } from "./format.js"
+import { runQualityGates } from "./quality-gates.js"
+import { StatsTracker } from "./stats.js"
+import { writeSessionLog } from "./session-log.js"
 
 const POLL_TIMEOUT = 30
 const TASK_PREFIX = "/task"
@@ -31,6 +34,7 @@ const PLAN_PREFIX = "/plan"
 const THINK_PREFIX = "/think"
 const EXECUTE_CMD = "/execute"
 const STATUS_CMD = "/status"
+const STATS_CMD = "/stats"
 const REPLY_PREFIX = "/reply"
 const REPLY_SHORT = "/r"
 const CLOSE_CMD = "/close"
@@ -56,11 +60,14 @@ export class Dispatcher {
   private running = false
   private cleanupTimer: ReturnType<typeof setInterval> | null = null
 
+  private readonly stats: StatsTracker
+
   constructor(
     private readonly telegram: TelegramClient,
     private readonly observer: Observer,
   ) {
     this.store = new SessionStore(config.workspace.root)
+    this.stats = new StatsTracker(config.workspace.root)
   }
 
   loadPersistedSessions(): void {
@@ -127,16 +134,7 @@ export class Dispatcher {
 
     for (const [threadId, session] of stale) {
       await this.telegram.deleteForumTopic(threadId)
-
-      if (session.cwd && fs.existsSync(session.cwd)) {
-        try {
-          fs.rmSync(session.cwd, { recursive: true, force: true })
-          process.stderr.write(`dispatcher: removed workspace ${session.cwd}\n`)
-        } catch (err) {
-          process.stderr.write(`dispatcher: failed to remove workspace ${session.cwd}: ${err}\n`)
-        }
-      }
-
+      this.removeWorkspace(session)
       this.topicSessions.delete(threadId)
       process.stderr.write(`dispatcher: cleaned up stale session ${session.slug} (topic ${threadId})\n`)
     }
@@ -192,6 +190,10 @@ export class Dispatcher {
     if (message.message_thread_id === undefined) {
       if (text === STATUS_CMD) {
         await this.handleStatusCommand()
+        return
+      }
+      if (text === STATS_CMD) {
+        await this.handleStatsCommand()
         return
       }
       if (text === HELP_CMD) {
@@ -293,6 +295,11 @@ export class Dispatcher {
     const topicSessionList = [...this.topicSessions.values()]
     const msg = formatStatus(taskSessions, topicSessionList, config.workspace.maxConcurrentSessions)
     await this.telegram.sendMessage(msg)
+  }
+
+  private async handleStatsCommand(): Promise<void> {
+    const agg = this.stats.aggregate(7)
+    await this.telegram.sendMessage(formatStats(agg))
   }
 
   private async handleHelpCommand(): Promise<void> {
@@ -491,12 +498,34 @@ export class Dispatcher {
         this.observer.onEvent(meta, event).catch((err) => {
           process.stderr.write(`observer: onEvent error: ${err}\n`)
         })
+
+
+        if (event.type === "complete" && meta.totalTokens != null && meta.totalTokens > config.workspace.sessionTokenBudget) {
+          process.stderr.write(
+            `dispatcher: session ${sessionId} exceeded token budget (${meta.totalTokens} > ${config.workspace.sessionTokenBudget})\n`,
+          )
+          this.telegram.sendMessage(
+            formatBudgetWarning(topicSession.slug, meta.totalTokens, config.workspace.sessionTokenBudget),
+            topicSession.threadId,
+          ).catch(() => {})
+          handle.interrupt()
+        }
       },
       (m, state) => {
         const durationMs = Date.now() - m.startedAt
         this.sessions.delete(topicSession.threadId)
         topicSession.activeSessionId = undefined
         topicSession.lastActivityAt = Date.now()
+
+        this.stats.record({
+          slug: topicSession.slug,
+          repo: topicSession.repo,
+          mode: topicSession.mode,
+          state,
+          durationMs,
+          totalTokens: m.totalTokens ?? 0,
+          timestamp: Date.now(),
+        })
 
         if (topicSession.mode === "think") {
           this.observer.onSessionComplete(m, state, durationMs).catch((err) => {
@@ -506,6 +535,7 @@ export class Dispatcher {
             formatThinkComplete(topicSession.slug),
             topicSession.threadId,
           ).catch(() => {})
+          writeSessionLog(topicSession, m, state, durationMs)
         } else if (topicSession.mode === "plan") {
           this.observer.onSessionComplete(m, state, durationMs).catch((err) => {
             process.stderr.write(`observer: onSessionComplete error: ${err}\n`)
@@ -514,17 +544,33 @@ export class Dispatcher {
             formatPlanComplete(topicSession.slug),
             topicSession.threadId,
           ).catch(() => {})
+          writeSessionLog(topicSession, m, state, durationMs)
         } else if (state === "errored") {
           this.observer.onSessionComplete(m, state, durationMs).catch((err) => {
             process.stderr.write(`observer: onSessionComplete error: ${err}\n`)
           })
+          writeSessionLog(topicSession, m, state, durationMs)
         } else {
-          // Task mode completed: flush text then send completion with follow-up hint
-          this.observer.flushAndComplete(m, state, durationMs).then(() => {
-            this.telegram.sendMessage(
+          this.observer.flushAndComplete(m, state, durationMs).then(async () => {
+            await this.telegram.sendMessage(
               formatTaskComplete(topicSession.slug, durationMs, m.totalTokens),
               topicSession.threadId,
-            ).catch(() => {})
+            )
+
+            let qualityReport
+            try {
+              qualityReport = runQualityGates(topicSession.cwd)
+              if (qualityReport.results.length > 0) {
+                await this.telegram.sendMessage(
+                  formatQualityReport(qualityReport.results),
+                  topicSession.threadId,
+                )
+              }
+            } catch (err) {
+              process.stderr.write(`dispatcher: quality gates error: ${err}\n`)
+            }
+
+            writeSessionLog(topicSession, m, state, durationMs, qualityReport)
           }).catch((err) => {
             process.stderr.write(`observer: flushAndComplete error: ${err}\n`)
           })
@@ -629,15 +675,7 @@ export class Dispatcher {
       this.sessions.delete(threadId)
     }
 
-    if (topicSession.cwd && fs.existsSync(topicSession.cwd)) {
-      try {
-        fs.rmSync(topicSession.cwd, { recursive: true, force: true })
-        process.stderr.write(`dispatcher: removed workspace ${topicSession.cwd}\n`)
-      } catch (err) {
-        process.stderr.write(`dispatcher: failed to remove workspace ${topicSession.cwd}: ${err}\n`)
-      }
-    }
-
+    this.removeWorkspace(topicSession)
     this.topicSessions.delete(threadId)
     this.persistTopicSessions()
     await this.telegram.deleteForumTopic(threadId)
@@ -664,21 +702,68 @@ export class Dispatcher {
     const workDir = path.join(config.workspace.root, slug)
 
     try {
-      fs.mkdirSync(workDir, { recursive: true })
-
       if (repoUrl) {
-        process.stderr.write(`dispatcher: cloning ${repoUrl} into ${workDir}\n`)
-        await execFileAsync("git", ["clone", "--depth=1", repoUrl, workDir], {
-          timeout: 120_000,
-          killSignal: "SIGKILL",
-          env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
-        })
+        const reposDir = path.join(config.workspace.root, ".repos")
+        fs.mkdirSync(reposDir, { recursive: true })
+
+        const repoName = extractRepoName(repoUrl)
+        const bareDir = path.join(reposDir, `${repoName}.git`)
+        const gitEnv = { ...process.env, GIT_TERMINAL_PROMPT: "0" }
+        const stdio: import("node:child_process").StdioOptions = ["ignore", "pipe", "pipe"]
+        const gitOpts = { stdio, timeout: 120_000, env: gitEnv }
+
+        if (fs.existsSync(bareDir)) {
+          process.stderr.write(`dispatcher: fetching ${repoUrl} in ${bareDir}\n`)
+          execSync(`git fetch --prune origin`, { ...gitOpts, cwd: bareDir })
+        } else {
+          process.stderr.write(`dispatcher: cloning bare ${repoUrl} into ${bareDir}\n`)
+          execSync(`git clone --bare ${JSON.stringify(repoUrl)} ${JSON.stringify(bareDir)}`, gitOpts)
+        }
+
+        const branch = `minion/${slug}`
+        process.stderr.write(`dispatcher: adding worktree ${workDir} (branch ${branch})\n`)
+        execSync(
+          `git worktree add ${JSON.stringify(workDir)} -b ${JSON.stringify(branch)} origin/HEAD`,
+          { ...gitOpts, cwd: bareDir },
+        )
+
+        execSync(`git remote set-url origin ${JSON.stringify(repoUrl)}`, { ...gitOpts, cwd: workDir })
+      } else {
+        fs.mkdirSync(workDir, { recursive: true })
       }
 
       return workDir
     } catch (err) {
       process.stderr.write(`dispatcher: prepareWorkspace failed: ${err}\n`)
       return null
+    }
+  }
+
+  private removeWorkspace(topicSession: TopicSession): void {
+    if (!topicSession.cwd || !fs.existsSync(topicSession.cwd)) return
+
+    try {
+      if (topicSession.repoUrl) {
+        const repoName = extractRepoName(topicSession.repoUrl)
+        const bareDir = path.join(config.workspace.root, ".repos", `${repoName}.git`)
+        if (fs.existsSync(bareDir)) {
+          execSync(`git worktree remove --force ${JSON.stringify(topicSession.cwd)}`, {
+            cwd: bareDir,
+            stdio: ["ignore", "pipe", "pipe"],
+            timeout: 30_000,
+          })
+          process.stderr.write(`dispatcher: removed worktree ${topicSession.cwd}\n`)
+          return
+        }
+      }
+
+      fs.rmSync(topicSession.cwd, { recursive: true, force: true })
+      process.stderr.write(`dispatcher: removed workspace ${topicSession.cwd}\n`)
+    } catch (err) {
+      process.stderr.write(`dispatcher: failed to remove workspace ${topicSession.cwd}: ${err}\n`)
+      try {
+        fs.rmSync(topicSession.cwd, { recursive: true, force: true })
+      } catch { /* best effort */ }
     }
   }
 

@@ -1,5 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process"
 import { createInterface } from "node:readline"
+import fs from "node:fs"
+import path from "node:path"
 import { config } from "./config.js"
 import type { GooseStreamEvent, SessionMeta, SessionState } from "./types.js"
 import { translateClaudeEvents } from "./claude-stream.js"
@@ -106,9 +108,39 @@ export class SessionHandle {
     }
   }
 
+  private buildIsolatedEnv(): Record<string, string> {
+    const parentHome = process.env["HOME"] ?? "/root"
+    const sessionHome = path.join(this.meta.cwd, ".home")
+
+    fs.mkdirSync(path.join(sessionHome, ".claude"), { recursive: true })
+
+    const credSrc = path.join(parentHome, ".claude", ".credentials.json")
+    const credDst = path.join(sessionHome, ".claude", ".credentials.json")
+    if (fs.existsSync(credSrc) && !fs.existsSync(credDst)) {
+      fs.copyFileSync(credSrc, credDst)
+    }
+
+    const settingsSrc = path.join(parentHome, ".claude", "settings.json")
+    const settingsDst = path.join(sessionHome, ".claude", "settings.json")
+    if (fs.existsSync(settingsSrc) && !fs.existsSync(settingsDst)) {
+      fs.copyFileSync(settingsSrc, settingsDst)
+    }
+
+    return {
+      PATH: process.env["PATH"] ?? "/usr/local/bin:/usr/bin:/bin",
+      HOME: sessionHome,
+      LANG: process.env["LANG"] ?? "C.UTF-8",
+      TERM: process.env["TERM"] ?? "xterm",
+      NODE_PATH: process.env["NODE_PATH"] ?? "",
+      GITHUB_TOKEN: process.env["GITHUB_TOKEN"] ?? "",
+      GIT_TERMINAL_PROMPT: "0",
+    }
+  }
+
   private startGoose(task: string, systemPrompt?: string): void {
+    const baseEnv = this.buildIsolatedEnv()
     const env: Record<string, string> = {
-      ...process.env as Record<string, string>,
+      ...baseEnv,
       GOOSE_MODE: "auto",
       GOOSE_MAX_TURNS: "200",
       GOOSE_CONTEXT_STRATEGY: "summarize",
@@ -116,7 +148,6 @@ export class SessionHandle {
       GOOSE_CLI_SHOW_COST: "false",
       CLAUDE_THINKING_TYPE: "enabled",
       CLAUDE_THINKING_BUDGET: "16000",
-      HOME: process.env["HOME"] ?? "/root",
     }
 
     const prompt = systemPrompt ?? TASK_SYSTEM_PROMPT
@@ -149,10 +180,7 @@ export class SessionHandle {
   }
 
   private startClaude(task: string): void {
-    const env: Record<string, string> = {
-      ...process.env as Record<string, string>,
-      HOME: process.env["HOME"] ?? "/root",
-    }
+    const env = this.buildIsolatedEnv()
 
     this.process = spawn(
       "claude",
@@ -189,10 +217,7 @@ export class SessionHandle {
   }
 
   private startClaudeThink(task: string): void {
-    const env: Record<string, string> = {
-      ...process.env as Record<string, string>,
-      HOME: process.env["HOME"] ?? "/root",
-    }
+    const env = this.buildIsolatedEnv()
 
     this.process = spawn(
       "claude",

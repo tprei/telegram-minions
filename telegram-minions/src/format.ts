@@ -247,14 +247,64 @@ export function formatHelp(): string {
     ``,
     `<code>/task [repo] description</code> — start a one-shot coding task`,
     `<code>/plan [repo] description</code> — start a multi-turn planning session`,
+    `<code>/think [repo] question</code> — start a deep research session`,
     `<code>/status</code> — show active sessions`,
+    `<code>/stats</code> — show aggregate usage statistics`,
     `<code>/help</code> — show this message`,
     ``,
     `<b>Inside a thread</b>`,
     ``,
     `<code>/reply text</code> (or <code>/r text</code>) — give feedback to the agent`,
-    `<code>/execute</code> — finalize plan and start implementation (plan mode)`,
+    `<code>/execute</code> — finalize plan and start implementation (plan/think mode)`,
     `<code>/close</code> — stop the session, wipe data, and delete the topic`,
+  ].join("\n")
+}
+
+export function formatQualityReport(
+  results: { gate: string; passed: boolean; output: string }[],
+): string {
+  if (results.length === 0) return ""
+
+  const allPassed = results.every((r) => r.passed)
+  const icon = allPassed ? "✅" : "⚠️"
+  const lines: string[] = [`${icon} <b>Quality gates</b>`]
+
+  for (const r of results) {
+    const status = r.passed ? "✅" : "❌"
+    lines.push(`${status} ${esc(r.gate)}`)
+    if (!r.passed) {
+      const trimmed = r.output.slice(-500).trim()
+      if (trimmed) {
+        lines.push(`<pre>${esc(trimmed)}</pre>`)
+      }
+    }
+  }
+
+  return lines.join("\n")
+}
+
+export function formatBudgetWarning(slug: string, tokens: number, budget: number): string {
+  return `💰 <b>Token budget exceeded</b>  ·  🏷 <code>${esc(slug)}</code>  ·  ${tokens.toLocaleString()} / ${budget.toLocaleString()} tokens\nSession terminated to limit context usage.`
+}
+
+export function formatStats(
+  stats: {
+    totalSessions: number
+    completedSessions: number
+    erroredSessions: number
+    totalTokens: number
+    totalDurationMs: number
+    avgDurationMs: number
+  },
+): string {
+  const dur = formatElapsed(stats.totalDurationMs)
+  const avgDur = stats.completedSessions > 0 ? formatElapsed(stats.avgDurationMs) : "n/a"
+  return [
+    `📊 <b>Aggregate stats</b>`,
+    ``,
+    `Sessions: ${stats.totalSessions} total · ${stats.completedSessions} completed · ${stats.erroredSessions} errored`,
+    `Tokens: ${stats.totalTokens.toLocaleString()}`,
+    `Time: ${dur} total · ${avgDur} avg`,
   ].join("\n")
 }
 
