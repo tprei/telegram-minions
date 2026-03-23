@@ -125,6 +125,7 @@ export interface SessionMeta {
   startedAt: number
   totalTokens?: number
   mode: SessionMode
+  screenshotDir?: string
 }
 
 // Topic session types (used for both plan and task modes)

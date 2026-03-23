@@ -147,6 +147,7 @@ export class SessionHandle {
     const sessionCache = path.join(sessionHome, ".cache")
     const sessionDataDir = path.join(sessionHome, ".local", "share")
     const sessionStateDir = path.join(sessionHome, ".local", "state")
+    const screenshotDir = path.join(sessionHome, "screenshots")
 
     fs.mkdirSync(path.join(sessionHome, ".claude"), { recursive: true })
     fs.mkdirSync(sessionTmp, { recursive: true })
@@ -154,6 +155,9 @@ export class SessionHandle {
     fs.mkdirSync(sessionCache, { recursive: true })
     fs.mkdirSync(sessionDataDir, { recursive: true })
     fs.mkdirSync(sessionStateDir, { recursive: true })
+    fs.mkdirSync(screenshotDir, { recursive: true })
+
+    this.meta.screenshotDir = screenshotDir
 
     const settingsSrc = path.join(parentClaudeDir, "settings.json")
     const settingsDst = path.join(sessionHome, ".claude", "settings.json")
@@ -224,6 +228,7 @@ export class SessionHandle {
   private startClaude(task: string): void {
     const env = this.buildIsolatedEnv()
 
+
     this.process = spawn(
       "claude",
       [
@@ -260,6 +265,7 @@ export class SessionHandle {
 
   private startClaudeThink(task: string): void {
     const env = this.buildIsolatedEnv()
+
 
     this.process = spawn(
       "claude",

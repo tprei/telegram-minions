@@ -167,6 +167,8 @@ export class Observer {
       state.flushTimer = null
     }
 
+    await this.scanAndSendScreenshots(meta)
+
     const text = state.textBuffer.trim()
     state.textBuffer = ""
 
@@ -212,12 +214,12 @@ export class Observer {
     const state = this.sessions.get(meta.sessionId)
     if (!state) return
 
-    state.toolCount++
-    state.sessionToolCount++
-
     if (name.includes("browser_take_screenshot")) {
       state.screenshotPending = true
     }
+
+    state.toolCount++
+    state.sessionToolCount++
 
     // Append to rolling activity log
     const line = formatToolLine(name, args)

@@ -22,7 +22,9 @@ export function formatToolLine(
   args: Record<string, unknown>,
 ): string {
   const MAX_SUMMARY = 60
-  const icon = TOOL_ICONS[toolName] ?? "🔧"
+  const icon = TOOL_ICONS[toolName]
+    ?? Object.entries(TOOL_ICONS).find(([k]) => toolName.endsWith(k))?.[1]
+    ?? "🔧"
   let summary = ""
 
   if (toolName === "write_file" || toolName === "edit_file" || toolName === "Edit" || toolName === "Write") {
