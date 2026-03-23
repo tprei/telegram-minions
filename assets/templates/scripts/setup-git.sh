@@ -1,5 +1,9 @@
 #!/bin/bash
 git config --global user.name "telegram-minion"
 git config --global user.email "minion@noreply"
-git config --global credential.helper "/app/scripts/git-credential-multi.sh"
-git config --global credential.useHttpPath true
+
+if [ -n "$GITHUB_TOKEN" ]; then
+  git config --global credential.helper store
+  echo "https://x-access-token:${GITHUB_TOKEN}@github.com" > "$HOME/.git-credentials"
+  chmod 600 "$HOME/.git-credentials"
+fi
