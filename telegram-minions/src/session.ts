@@ -119,7 +119,14 @@ export class SessionHandle {
     const parentClaudeDir = path.join(parentHome, ".claude")
     const sessionHome = path.join(this.meta.cwd, ".home")
 
+    const sessionTmp = path.join(sessionHome, "tmp")
+    const sessionConfig = path.join(sessionHome, ".config")
+    const sessionCache = path.join(sessionHome, ".cache")
+
     fs.mkdirSync(path.join(sessionHome, ".claude"), { recursive: true })
+    fs.mkdirSync(sessionTmp, { recursive: true })
+    fs.mkdirSync(sessionConfig, { recursive: true })
+    fs.mkdirSync(sessionCache, { recursive: true })
 
     const settingsSrc = path.join(parentClaudeDir, "settings.json")
     const settingsDst = path.join(sessionHome, ".claude", "settings.json")
@@ -136,6 +143,9 @@ export class SessionHandle {
       NODE_PATH: process.env["NODE_PATH"] ?? "",
       GITHUB_TOKEN: process.env["GITHUB_TOKEN"] ?? "",
       GIT_TERMINAL_PROMPT: "0",
+      TMPDIR: sessionTmp,
+      XDG_CONFIG_HOME: sessionConfig,
+      XDG_CACHE_HOME: sessionCache,
       PLAYWRIGHT_BROWSERS_PATH:
         process.env["PLAYWRIGHT_BROWSERS_PATH"] ?? "/opt/pw-browsers",
     }
@@ -169,7 +179,7 @@ export class SessionHandle {
         "--no-profile",
         "--with-builtin", "developer",
         ...(config.mcp.browserEnabled ? [
-          "--with-extension", "npx -y @playwright/mcp --headless --no-sandbox --caps vision",
+          "--with-extension", "npx -y @playwright/mcp --headless --no-sandbox --isolated --caps vision",
         ] : []),
         "--quiet",
       ],
@@ -201,7 +211,7 @@ export class SessionHandle {
             mcpServers: {
               playwright: {
                 command: "npx",
-                args: ["-y", "@playwright/mcp", "--headless", "--no-sandbox", "--caps", "vision"],
+                args: ["-y", "@playwright/mcp", "--headless", "--no-sandbox", "--isolated", "--caps", "vision"],
               },
             },
           }),
@@ -238,7 +248,7 @@ export class SessionHandle {
             mcpServers: {
               playwright: {
                 command: "npx",
-                args: ["-y", "@playwright/mcp", "--headless", "--no-sandbox", "--caps", "vision"],
+                args: ["-y", "@playwright/mcp", "--headless", "--no-sandbox", "--isolated", "--caps", "vision"],
               },
             },
           }),
