@@ -93,6 +93,19 @@ Content block types in `message.content`:
 - `{"type":"toolRequest","id":"...","toolCall":{"name":"...","arguments":{...}}}` — tool calls
 - `{"type":"toolResponse","id":"...","toolResult":{...}}` — tool results
 
+## MCP servers
+
+All MCPs are installed globally in the Docker image and enabled by default via env vars. Each can be toggled independently.
+
+| MCP | Env var | Purpose | Requirements |
+|---|---|---|---|
+| **Playwright** | `ENABLE_BROWSER_MCP` | Headless Chromium for web browsing | Pre-installed browsers at `PLAYWRIGHT_BROWSERS_PATH` |
+| **GitHub** | `ENABLE_GITHUB_MCP` | PRs, issues, reviews, code search via GitHub API | `GITHUB_TOKEN` must be set (logs warning if missing) |
+| **Context7** | `ENABLE_CONTEXT7_MCP` | Up-to-date library/framework documentation lookup | None (uses public docs) |
+| **Sentry** | `ENABLE_SENTRY_MCP` | Error tracking, issue search, stack traces via Sentry API | `SENTRY_ACCESS_TOKEN` must be set as a Fly secret. Optional: `SENTRY_ORG_SLUG`, `SENTRY_PROJECT_SLUG` to scope queries |
+
+MCP config is built dynamically in `src/session.ts` via `buildMcpServers()`. For Goose sessions it generates `--with-extension` flags; for Claude sessions it generates `--mcp-config` JSON. If an MCP's prerequisites aren't met (e.g., missing `GITHUB_TOKEN`), it's skipped with a stderr warning rather than crashing.
+
 ## Fly.io deployment
 
 ```sh
@@ -101,7 +114,12 @@ fly secrets set \
   TELEGRAM_BOT_TOKEN=... \
   TELEGRAM_CHAT_ID=... \
   ALLOWED_USER_IDS=... \
-  GITHUB_TOKEN=...
+  GITHUB_TOKEN=... \
+  SENTRY_ACCESS_TOKEN=sntrys_...
+
+# Optional: scope Sentry to a specific org/project (set in fly.toml [env] or as secrets)
+# SENTRY_ORG_SLUG=your-org
+# SENTRY_PROJECT_SLUG=your-project
 
 # Create persistent volume (stores cloned repos + claude auth)
 fly volumes create workspace_data --size 10

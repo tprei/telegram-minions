@@ -19,7 +19,16 @@ RUN curl -fsSL -o /tmp/goose.tar.bz2 \
     && rm /tmp/goose.tar.bz2
 
 # Install Claude Code CLI (needed for claude auth login + claude-agent-acp)
-RUN npm install -g @anthropic-ai/claude-code @zed-industries/claude-agent-acp @playwright/mcp
+RUN npm install -g @anthropic-ai/claude-code @zed-industries/claude-agent-acp @playwright/mcp \
+    @upstash/context7-mcp
+
+# Install GitHub MCP server (official Go binary)
+RUN curl -fsSL -o /tmp/github-mcp-server.tar.gz \
+      https://github.com/github/github-mcp-server/releases/latest/download/github-mcp-server_Linux_x86_64.tar.gz \
+    && tar -xzf /tmp/github-mcp-server.tar.gz -C /tmp \
+    && mv /tmp/github-mcp-server /usr/local/bin/github-mcp-server \
+    && chmod +x /usr/local/bin/github-mcp-server \
+    && rm /tmp/github-mcp-server.tar.gz
 
 # Install Playwright browsers to a shared path accessible by non-root users
 ENV PLAYWRIGHT_BROWSERS_PATH="/opt/pw-browsers"

@@ -22,3 +22,24 @@ extensions:
     args: ["--browser", "chromium", "--headless", "--no-sandbox", "--isolated", "--caps", "vision"]
     enabled: true
     timeout: 300
+  github:
+    name: github
+    type: stdio
+    cmd: github-mcp-server
+    args: ["stdio"]
+    enabled: true
+    timeout: 300
+  context7:
+    name: context7
+    type: stdio
+    cmd: context7-mcp
+    args: []
+    enabled: true
+    timeout: 300
+  sentry:
+    name: sentry
+    type: stdio
+    cmd: npx
+    args: ["-y", "@sentry/mcp-server@latest", "--access-token", "${SENTRY_ACCESS_TOKEN}"]
+    enabled: true
+    timeout: 300

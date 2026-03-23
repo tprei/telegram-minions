@@ -940,6 +940,7 @@ export class Dispatcher {
         if (fs.existsSync(bareDir)) {
           process.stderr.write(`dispatcher: fetching ${repoUrl} in ${bareDir}\n`)
           execSync(`git fetch --prune origin`, { ...gitOpts, cwd: bareDir })
+          updateLocalHead(bareDir, gitOpts)
         } else {
           process.stderr.write(`dispatcher: cloning bare ${repoUrl} into ${bareDir}\n`)
           execSync(`git clone --bare ${JSON.stringify(repoUrl)} ${JSON.stringify(bareDir)}`, gitOpts)
@@ -997,6 +998,16 @@ export class Dispatcher {
   activeSessions(): number {
     return this.sessions.size
   }
+}
+
+export function updateLocalHead(bareDir: string, gitOpts: object): void {
+  const defaultBranch = resolveDefaultBranch(bareDir, gitOpts)
+  try {
+    execSync(
+      `git update-ref refs/heads/${defaultBranch} refs/remotes/origin/${defaultBranch}`,
+      { ...gitOpts, cwd: bareDir },
+    )
+  } catch { /* remote ref may not exist yet */ }
 }
 
 export function resolveDefaultBranch(bareDir: string, gitOpts: object): string {

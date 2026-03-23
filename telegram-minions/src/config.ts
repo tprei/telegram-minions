@@ -61,6 +61,11 @@ export const config = {
   },
   mcp: {
     browserEnabled: optional("ENABLE_BROWSER_MCP", "true") === "true",
+    githubEnabled: optional("ENABLE_GITHUB_MCP", "true") === "true",
+    context7Enabled: optional("ENABLE_CONTEXT7_MCP", "true") === "true",
+    sentryEnabled: optional("ENABLE_SENTRY_MCP", "true") === "true",
+    sentryOrgSlug: process.env["SENTRY_ORG_SLUG"] ?? "",
+    sentryProjectSlug: process.env["SENTRY_PROJECT_SLUG"] ?? "",
   },
   observer: {
     activityThrottleMs: optionalNumber("ACTIVITY_THROTTLE_MS", 3000),

@@ -1,5 +1,5 @@
 #!/bin/bash
-mkdir -p /workspace/home/.claude
+mkdir -p /workspace/home/.claude /workspace/home/.memory
 chown -R minion:minion /workspace
 
 cp -r /app/.claude/agents /workspace/home/.claude/
