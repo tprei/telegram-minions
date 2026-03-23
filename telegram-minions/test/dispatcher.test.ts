@@ -348,4 +348,15 @@ describe("buildExecutionPrompt", () => {
     expect(prompt).toContain("[earlier output truncated]")
     expect(prompt).not.toContain("x".repeat(5000))
   })
+
+  it("uses directive instead of default instruction when provided", () => {
+    const prompt = buildExecutionPrompt(makeTopicSession(), "Only implement step 1 for now")
+    expect(prompt).toContain("Only implement step 1 for now")
+    expect(prompt).not.toContain("Follow the plan closely")
+  })
+
+  it("uses default instruction when no directive is provided", () => {
+    const prompt = buildExecutionPrompt(makeTopicSession())
+    expect(prompt).toContain("Follow the plan closely")
+  })
 })

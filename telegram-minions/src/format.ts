@@ -263,7 +263,7 @@ export function formatHelp(): string {
     `<b>Inside a thread</b>`,
     ``,
     `<code>/reply text</code> (or <code>/r text</code>) — give feedback to the agent`,
-    `<code>/execute</code> — finalize plan and start implementation (plan/think mode)`,
+    `<code>/execute [directive]</code> — finalize plan and start implementation (plan/think mode)`,
     `<code>/close</code> — stop the session, wipe data, and delete the topic`,
   ].join("\n")
 }
