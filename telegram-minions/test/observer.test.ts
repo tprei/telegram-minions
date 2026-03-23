@@ -194,7 +194,7 @@ describe("Observer", () => {
       expect(msg).toContain("Activity")
     })
 
-    it("edits existing activity message within throttle window", async () => {
+    it("debounces edits to existing activity message within throttle window", async () => {
       const telegram = makeTelegram()
       const observer = new Observer(telegram as any, 3000)
       const meta = makeMeta()
@@ -229,6 +229,10 @@ describe("Observer", () => {
       })
 
       expect(telegram.sendMessage).toHaveBeenCalledOnce()
+      expect(telegram.editMessage).not.toHaveBeenCalled()
+
+      await vi.advanceTimersByTimeAsync(2000)
+
       expect(telegram.editMessage).toHaveBeenCalledOnce()
     })
 

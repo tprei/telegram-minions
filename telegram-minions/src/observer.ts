@@ -19,6 +19,7 @@ const MAX_ACTIVITY_LINES = 6
 
 const MIN_TEXT_LENGTH = 80
 const PRE_TOOL_NARRATION_LIMIT = 200
+const ACTIVITY_EDIT_DEBOUNCE_MS = 2000
 
 export type TextCaptureCallback = (sessionId: string, text: string) => void
 
@@ -31,6 +32,7 @@ interface SessionState {
   activityLastSentAt: number
   toolCount: number
   activityLog: string[]
+  activityEditTimer: ReturnType<typeof setTimeout> | null
   // Optional callback for capturing flushed text (used by plan mode)
   onTextCapture?: TextCaptureCallback
 }
@@ -55,6 +57,7 @@ export class Observer {
       activityLastSentAt: 0,
       toolCount: 0,
       activityLog: [],
+      activityEditTimer: null,
       onTextCapture,
     })
     const msg = meta.mode === "think"
@@ -147,7 +150,10 @@ export class Observer {
       formatAssistantText(meta.topicName, text, toolLines),
       meta.threadId,
     )
-    // Reset activity tracking so the next tool burst gets a fresh message
+    if (state.activityEditTimer !== null) {
+      clearTimeout(state.activityEditTimer)
+      state.activityEditTimer = null
+    }
     state.activityMessageId = null
     state.activityLog = []
   }
@@ -175,10 +181,22 @@ export class Observer {
     const html = formatActivityLog(state.activityLog, state.toolCount)
 
     if (now - state.activityLastSentAt < this.throttleMs && state.activityMessageId !== null) {
-      // Within throttle window: edit existing activity message
       state.activityLastSentAt = now
-      await this.telegram.editMessage(state.activityMessageId, html, meta.threadId)
+      if (state.activityEditTimer !== null) clearTimeout(state.activityEditTimer)
+      const messageId = state.activityMessageId
+      state.activityEditTimer = setTimeout(() => {
+        state.activityEditTimer = null
+        const latestHtml = formatActivityLog(state.activityLog, state.toolCount)
+        this.telegram.editMessage(messageId, latestHtml, meta.threadId).catch((err) => {
+          process.stderr.write(`observer: edit error: ${err}\n`)
+        })
+      }, ACTIVITY_EDIT_DEBOUNCE_MS)
       return
+    }
+
+    if (state.activityEditTimer !== null) {
+      clearTimeout(state.activityEditTimer)
+      state.activityEditTimer = null
     }
 
     // Outside throttle window or no existing message: send new activity message
@@ -221,6 +239,7 @@ export class Observer {
   clearSession(sessionId: string): void {
     const state = this.sessions.get(sessionId)
     if (state?.flushTimer !== null) clearTimeout(state!.flushTimer)
+    if (state?.activityEditTimer !== null) clearTimeout(state!.activityEditTimer)
     this.sessions.delete(sessionId)
   }
 }
