@@ -160,6 +160,7 @@ export class SessionHandle {
       XDG_CACHE_HOME: sessionCache,
       PLAYWRIGHT_BROWSERS_PATH:
         process.env["PLAYWRIGHT_BROWSERS_PATH"] ?? "/opt/pw-browsers",
+      CLAUDE_CODE_STREAM_CLOSE_TIMEOUT: "30000",
     }
   }
 
