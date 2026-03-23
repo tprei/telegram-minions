@@ -230,7 +230,7 @@ export function formatStatus(
     const state = handle.getState()
     const icon = handle.isActive() ? "🟢" : "🔴"
     const elapsed = formatElapsed(Date.now() - meta.startedAt)
-    const mode = meta.mode === "think" ? "🧠 think" : meta.mode === "plan" ? "📋 plan" : "⚡ task"
+    const mode = meta.mode === "think" ? "🧠 think" : meta.mode === "plan" ? "📋 plan" : meta.mode === "ci-fix" ? "🔧 ci-fix" : "⚡ task"
     lines.push(`${icon} <b>${esc(meta.topicName)}</b>  ·  📦 ${esc(meta.repo)}  ·  ${mode}  ·  ${state}  ·  ⏱ ${elapsed}`)
     lines.push(`   <blockquote>${esc(truncate(task, 120))}</blockquote>`)
     lines.push("")
@@ -314,6 +314,33 @@ export function formatStats(
     `Tokens: ${stats.totalTokens.toLocaleString()}`,
     `Time: ${dur} total · ${avgDur} avg`,
   ].join("\n")
+}
+
+export function formatCIWatching(slug: string, prUrl: string): string {
+  const prNum = prUrl.match(/\/pull\/(\d+)/)?.[1] ?? prUrl
+  return `👀 <b>Watching CI</b>  ·  🏷 <code>${esc(slug)}</code>  ·  PR #${esc(prNum)}`
+}
+
+export function formatCIFailed(slug: string, failedChecks: string[], attempt: number, maxAttempts: number): string {
+  const checkList = failedChecks.map((c) => `  ❌ ${esc(c)}`).join("\n")
+  return [
+    `❌ <b>CI failed</b>  ·  🏷 <code>${esc(slug)}</code>  ·  attempt ${attempt}/${maxAttempts}`,
+    ``,
+    checkList,
+  ].join("\n")
+}
+
+export function formatCIFixing(slug: string, attempt: number, maxAttempts: number): string {
+  return `🔧 <b>Fixing CI</b>  ·  🏷 <code>${esc(slug)}</code>  ·  attempt ${attempt}/${maxAttempts}`
+}
+
+export function formatCIPassed(slug: string, prUrl: string): string {
+  const prNum = prUrl.match(/\/pull\/(\d+)/)?.[1] ?? prUrl
+  return `✅ <b>CI passed</b>  ·  🏷 <code>${esc(slug)}</code>  ·  PR #${esc(prNum)}`
+}
+
+export function formatCIGaveUp(slug: string, maxAttempts: number): string {
+  return `🛑 <b>CI still failing</b>  ·  🏷 <code>${esc(slug)}</code>  ·  gave up after ${maxAttempts} attempt${maxAttempts === 1 ? "" : "s"}`
 }
 
 function formatElapsed(ms: number): string {

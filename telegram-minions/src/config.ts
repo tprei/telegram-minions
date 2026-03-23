@@ -53,6 +53,12 @@ export const config = {
     staleTtlMs: optionalNumber("SESSION_STALE_TTL_MS", 2 * 24 * 60 * 60 * 1000),
     cleanupIntervalMs: optionalNumber("CLEANUP_INTERVAL_MS", 60 * 60 * 1000),
   },
+  ci: {
+    babysitEnabled: optional("CI_BABYSIT_ENABLED", "true") === "true",
+    maxRetries: optionalNumber("CI_BABYSIT_MAX_RETRIES", 2),
+    pollIntervalMs: optionalNumber("CI_POLL_INTERVAL_MS", 30_000),
+    pollTimeoutMs: optionalNumber("CI_POLL_TIMEOUT_MS", 600_000),
+  },
   mcp: {
     browserEnabled: optional("ENABLE_BROWSER_MCP", "true") === "true",
   },

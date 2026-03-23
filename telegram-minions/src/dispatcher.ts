@@ -23,10 +23,17 @@ import {
   formatQualityReport,
   formatBudgetWarning,
   formatStats,
+  formatCIWatching,
+  formatCIFailed,
+  formatCIFixing,
+  formatCIPassed,
+  formatCIGaveUp,
 } from "./format.js"
 import { runQualityGates } from "./quality-gates.js"
 import { StatsTracker } from "./stats.js"
 import { writeSessionLog } from "./session-log.js"
+import { extractPRUrl, waitForCI, getFailedCheckLogs, buildCIFixPrompt } from "./ci-babysit.js"
+import { CI_FIX_SYSTEM_PROMPT } from "./session.js"
 
 const POLL_TIMEOUT = 30
 const TASK_PREFIX = "/task"
@@ -611,6 +618,15 @@ export class Dispatcher {
             }
 
             writeSessionLog(topicSession, m, state, durationMs, qualityReport)
+
+            if (config.ci.babysitEnabled && topicSession.mode === "task") {
+              const prUrl = this.extractPRFromConversation(topicSession)
+              if (prUrl) {
+                this.babysitPR(topicSession, prUrl).catch((err) => {
+                  process.stderr.write(`dispatcher: babysitPR error: ${err}\n`)
+                })
+              }
+            }
           }).catch((err) => {
             process.stderr.write(`observer: flushAndComplete error: ${err}\n`)
           })
@@ -633,6 +649,159 @@ export class Dispatcher {
 
     await this.observer.onSessionStart(meta, task, onTextCapture)
     handle.start(task)
+  }
+
+  private extractPRFromConversation(topicSession: TopicSession): string | null {
+    for (let i = topicSession.conversation.length - 1; i >= 0; i--) {
+      const msg = topicSession.conversation[i]
+      if (msg.role === "assistant") {
+        const url = extractPRUrl(msg.text)
+        if (url) return url
+      }
+    }
+    return null
+  }
+
+  private async babysitPR(topicSession: TopicSession, prUrl: string): Promise<void> {
+    const maxRetries = config.ci.maxRetries
+
+    await this.telegram.sendMessage(
+      formatCIWatching(topicSession.slug, prUrl),
+      topicSession.threadId,
+    )
+
+    process.stderr.write(`dispatcher: watching CI for PR ${prUrl} (max ${maxRetries} retries)\n`)
+
+    const result = await waitForCI(prUrl, topicSession.cwd)
+
+    if (result.passed) {
+      await this.telegram.sendMessage(
+        formatCIPassed(topicSession.slug, prUrl),
+        topicSession.threadId,
+      )
+      process.stderr.write(`dispatcher: CI passed for PR ${prUrl}\n`)
+      return
+    }
+
+    if (result.timedOut && result.checks.length === 0) {
+      process.stderr.write(`dispatcher: no CI checks found for PR ${prUrl}, skipping babysit\n`)
+      return
+    }
+
+    const failedChecks = result.checks.filter((c) => c.state !== "success")
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      await this.telegram.sendMessage(
+        formatCIFailed(topicSession.slug, failedChecks.map((c) => c.name), attempt, maxRetries),
+        topicSession.threadId,
+      )
+
+      const failureDetails = getFailedCheckLogs(prUrl, topicSession.cwd)
+      const fixPrompt = buildCIFixPrompt(prUrl, failedChecks, failureDetails, attempt, maxRetries)
+
+      await this.telegram.sendMessage(
+        formatCIFixing(topicSession.slug, attempt, maxRetries),
+        topicSession.threadId,
+      )
+
+      process.stderr.write(`dispatcher: spawning CI fix session (attempt ${attempt}/${maxRetries}) for PR ${prUrl}\n`)
+
+      topicSession.mode = "ci-fix"
+      topicSession.conversation.push({ role: "user", text: fixPrompt })
+
+      await new Promise<void>((resolve) => {
+        this.spawnCIFixAgent(topicSession, fixPrompt, () => resolve())
+      })
+
+      process.stderr.write(`dispatcher: CI fix session completed (attempt ${attempt}/${maxRetries})\n`)
+
+      const recheck = await waitForCI(prUrl, topicSession.cwd)
+
+      if (recheck.passed) {
+        await this.telegram.sendMessage(
+          formatCIPassed(topicSession.slug, prUrl),
+          topicSession.threadId,
+        )
+        process.stderr.write(`dispatcher: CI passed after fix attempt ${attempt}\n`)
+        topicSession.mode = "task"
+        return
+      }
+
+      const newFailed = recheck.checks.filter((c) => c.state !== "success")
+      if (newFailed.length > failedChecks.length) {
+        process.stderr.write(`dispatcher: CI failures grew from ${failedChecks.length} to ${newFailed.length}, aborting\n`)
+        break
+      }
+    }
+
+    await this.telegram.sendMessage(
+      formatCIGaveUp(topicSession.slug, maxRetries),
+      topicSession.threadId,
+    )
+    topicSession.mode = "task"
+  }
+
+  private async spawnCIFixAgent(
+    topicSession: TopicSession,
+    task: string,
+    onComplete: () => void,
+  ): Promise<void> {
+    if (this.sessions.size >= config.workspace.maxConcurrentSessions) {
+      process.stderr.write(`dispatcher: no session slots for CI fix, skipping\n`)
+      onComplete()
+      return
+    }
+
+    const sessionId = crypto.randomUUID()
+    topicSession.activeSessionId = sessionId
+
+    const meta: SessionMeta = {
+      sessionId,
+      threadId: topicSession.threadId,
+      topicName: topicSession.slug,
+      repo: topicSession.repo,
+      cwd: topicSession.cwd,
+      startedAt: Date.now(),
+      mode: "ci-fix",
+    }
+
+    const handle = new SessionHandle(
+      meta,
+      (event) => {
+        this.observer.onEvent(meta, event).catch((err) => {
+          process.stderr.write(`observer: CI fix onEvent error: ${err}\n`)
+        })
+      },
+      (m, state) => {
+        const durationMs = Date.now() - m.startedAt
+        this.sessions.delete(topicSession.threadId)
+        topicSession.activeSessionId = undefined
+        topicSession.lastActivityAt = Date.now()
+
+        this.stats.record({
+          slug: topicSession.slug,
+          repo: topicSession.repo,
+          mode: "ci-fix",
+          state,
+          durationMs,
+          totalTokens: m.totalTokens ?? 0,
+          timestamp: Date.now(),
+        })
+
+        this.observer.flushAndComplete(m, state, durationMs).then(() => {
+          writeSessionLog(topicSession, m, state, durationMs)
+          onComplete()
+        }).catch(() => {
+          onComplete()
+        })
+      },
+      config.workspace.sessionTimeoutMs,
+    )
+
+    this.sessions.set(topicSession.threadId, { handle, meta, task })
+
+    await this.observer.onSessionStart(meta, task)
+    handle.start(task, CI_FIX_SYSTEM_PROMPT)
   }
 
   private async handleTopicFeedback(topicSession: TopicSession, feedback: string, photos?: TelegramPhotoSize[]): Promise<void> {

@@ -25,6 +25,7 @@ Telegram-controlled Goose coding agents on fly.io. The Dispatcher polls Telegram
 | `src/config.ts` | Centralized config from env vars |
 | `src/slugs.ts` | Deterministic adjective-noun slug generator |
 | `src/types.ts` | TypeScript types for Goose events and Telegram API |
+| `src/ci-babysit.ts` | CI polling, failure log parsing, fix prompt builder |
 | `goose/config.yaml` | Goose agent configuration (mode, extensions, limits) |
 
 ## Claude authentication (ACP provider)

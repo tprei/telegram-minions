@@ -54,3 +54,11 @@ How the changes were verified
 - Never push to `main` or `master` directly
 - Keep commits focused — one logical change per commit
 - Use `gh pr create` (not manual PR creation)
+
+## CI fix sessions
+
+When invoked during a CI-fix session (the branch already has a PR open):
+- Do NOT create a new branch or PR — push to the existing branch
+- Check for an existing PR with `gh pr list --head <branch>` before creating one
+- Use `fix:` prefix for CI-fix commits (e.g., `fix: resolve typecheck errors`)
+- Only commit changes that address the CI failures
