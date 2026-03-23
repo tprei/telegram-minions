@@ -34,7 +34,8 @@ COPY . .
 RUN npm run build && npm prune --production
 
 # Non-root user (claude-agent-acp SIGKILL's under root)
-RUN useradd -m -s /bin/bash minion
+RUN useradd -m -s /bin/bash minion \
+    && chown -R minion:minion /opt/pw-browsers
 
 RUN chmod +x /app/entrypoint.sh /app/scripts/*.sh
 

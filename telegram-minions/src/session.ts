@@ -29,6 +29,9 @@ export const TASK_SYSTEM_PROMPT = [
   "Use the `git-commit-specialist` agent after making significant changes.",
   "If no tests exist for the area you're modifying, note this in the PR description.",
   "Document assumptions in your PR description since there's no human to ask.",
+  "",
+  "A headless Chromium browser is pre-installed. Use the Playwright MCP tools (browser_navigate, browser_snapshot, browser_screenshot, browser_click, etc.) for any web browsing tasks. Do NOT attempt to install a browser — it is already available.",
+  "When browsing pages, wait for the page to fully load before taking snapshots or screenshots. Use browser_wait_for_navigation or browser_wait after navigating, clicking links, or submitting forms. Pages with JavaScript-heavy content (SPAs, dynamic dashboards) need extra time to render — wait for network requests to settle before capturing.",
 ].join("\n")
 
 export const PLAN_SYSTEM_PROMPT = [
@@ -47,6 +50,9 @@ export const PLAN_SYSTEM_PROMPT = [
   "",
   "Present your plan in a clear, structured format with file paths and specific changes.",
   "When the user gives feedback, refine the plan accordingly.",
+  "",
+  "A headless Chromium browser is pre-installed. Use the Playwright MCP tools (browser_navigate, browser_snapshot, browser_screenshot, browser_click, etc.) for any web browsing tasks. Do NOT attempt to install a browser — it is already available.",
+  "When browsing pages, wait for the page to fully load before taking snapshots or screenshots. Use browser_wait_for_navigation or browser_wait after navigating, clicking links, or submitting forms. Pages with JavaScript-heavy content (SPAs, dynamic dashboards) need extra time to render — wait for network requests to settle before capturing.",
 ].join("\n")
 
 const PLAN_DISALLOWED_TOOLS = ["Edit", "Write", "NotebookEdit"]
@@ -82,6 +88,9 @@ export const THINK_SYSTEM_PROMPT = [
   "- Surface non-obvious insights, risks, and connections",
   "- Present findings in a structured, readable format",
   "- When the user gives follow-up questions, dig deeper",
+  "",
+  "A headless Chromium browser is pre-installed. Use the Playwright MCP tools (browser_navigate, browser_snapshot, browser_screenshot, browser_click, etc.) for any web browsing tasks. Do NOT attempt to install a browser — it is already available.",
+  "When browsing pages, wait for the page to fully load before taking snapshots or screenshots. Use browser_wait_for_navigation or browser_wait after navigating, clicking links, or submitting forms. Pages with JavaScript-heavy content (SPAs, dynamic dashboards) need extra time to render — wait for network requests to settle before capturing.",
 ].join("\n")
 
 const THINK_DISALLOWED_TOOLS = ["Edit", "Write", "NotebookEdit"]
@@ -110,17 +119,23 @@ export class SessionHandle {
 
   private buildIsolatedEnv(): Record<string, string> {
     const parentHome = process.env["HOME"] ?? "/root"
+    const parentClaudeDir = path.join(parentHome, ".claude")
     const sessionHome = path.join(this.meta.cwd, ".home")
 
+    const sessionTmp = path.join(sessionHome, "tmp")
+    const sessionConfig = path.join(sessionHome, ".config")
+    const sessionCache = path.join(sessionHome, ".cache")
+    const sessionDataDir = path.join(sessionHome, ".local", "share")
+    const sessionStateDir = path.join(sessionHome, ".local", "state")
+
     fs.mkdirSync(path.join(sessionHome, ".claude"), { recursive: true })
+    fs.mkdirSync(sessionTmp, { recursive: true })
+    fs.mkdirSync(sessionConfig, { recursive: true })
+    fs.mkdirSync(sessionCache, { recursive: true })
+    fs.mkdirSync(sessionDataDir, { recursive: true })
+    fs.mkdirSync(sessionStateDir, { recursive: true })
 
-    const credSrc = path.join(parentHome, ".claude", ".credentials.json")
-    const credDst = path.join(sessionHome, ".claude", ".credentials.json")
-    if (fs.existsSync(credSrc) && !fs.existsSync(credDst)) {
-      fs.copyFileSync(credSrc, credDst)
-    }
-
-    const settingsSrc = path.join(parentHome, ".claude", "settings.json")
+    const settingsSrc = path.join(parentClaudeDir, "settings.json")
     const settingsDst = path.join(sessionHome, ".claude", "settings.json")
     if (fs.existsSync(settingsSrc) && !fs.existsSync(settingsDst)) {
       fs.copyFileSync(settingsSrc, settingsDst)
@@ -129,12 +144,17 @@ export class SessionHandle {
     return {
       PATH: process.env["PATH"] ?? "/usr/local/bin:/usr/bin:/bin",
       HOME: sessionHome,
+      CLAUDE_CONFIG_DIR: parentClaudeDir,
       LANG: process.env["LANG"] ?? "C.UTF-8",
       TERM: process.env["TERM"] ?? "xterm",
       NODE_PATH: process.env["NODE_PATH"] ?? "",
       GITHUB_TOKEN: process.env["GITHUB_TOKEN"] ?? "",
       GIT_TERMINAL_PROMPT: "0",
-      PLAYWRIGHT_BROWSERS_PATH: process.env["PLAYWRIGHT_BROWSERS_PATH"] ?? "",
+      TMPDIR: sessionTmp,
+      XDG_CONFIG_HOME: sessionConfig,
+      XDG_CACHE_HOME: sessionCache,
+      PLAYWRIGHT_BROWSERS_PATH:
+        process.env["PLAYWRIGHT_BROWSERS_PATH"] ?? "/opt/pw-browsers",
     }
   }
 
@@ -166,7 +186,7 @@ export class SessionHandle {
         "--no-profile",
         "--with-builtin", "developer",
         ...(config.mcp.browserEnabled ? [
-          "--with-extension", "npx -y @playwright/mcp --headless --no-sandbox --caps vision",
+          "--with-extension", "playwright-mcp --browser chromium --headless --no-sandbox --isolated --caps vision",
         ] : []),
         "--quiet",
       ],
@@ -197,8 +217,8 @@ export class SessionHandle {
           "--mcp-config", JSON.stringify({
             mcpServers: {
               playwright: {
-                command: "npx",
-                args: ["-y", "@playwright/mcp", "--headless", "--no-sandbox", "--caps", "vision"],
+                command: "playwright-mcp",
+                args: ["--browser", "chromium", "--headless", "--no-sandbox", "--isolated", "--caps", "vision"],
               },
             },
           }),
@@ -234,8 +254,8 @@ export class SessionHandle {
           "--mcp-config", JSON.stringify({
             mcpServers: {
               playwright: {
-                command: "npx",
-                args: ["-y", "@playwright/mcp", "--headless", "--no-sandbox", "--caps", "vision"],
+                command: "playwright-mcp",
+                args: ["--browser", "chromium", "--headless", "--no-sandbox", "--isolated", "--caps", "vision"],
               },
             },
           }),
