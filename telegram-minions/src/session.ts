@@ -166,7 +166,7 @@ export class SessionHandle {
         "--no-profile",
         "--with-builtin", "developer",
         ...(config.mcp.browserEnabled ? [
-          "--with-extension", "npx -y @playwright/mcp --headless --caps vision",
+          "--with-extension", "npx -y @playwright/mcp --headless --no-sandbox --caps vision",
         ] : []),
         "--quiet",
       ],
@@ -198,7 +198,7 @@ export class SessionHandle {
             mcpServers: {
               playwright: {
                 command: "npx",
-                args: ["-y", "@playwright/mcp", "--headless", "--caps", "vision"],
+                args: ["-y", "@playwright/mcp", "--headless", "--no-sandbox", "--caps", "vision"],
               },
             },
           }),
@@ -235,7 +235,7 @@ export class SessionHandle {
             mcpServers: {
               playwright: {
                 command: "npx",
-                args: ["-y", "@playwright/mcp", "--headless", "--caps", "vision"],
+                args: ["-y", "@playwright/mcp", "--headless", "--no-sandbox", "--caps", "vision"],
               },
             },
           }),
