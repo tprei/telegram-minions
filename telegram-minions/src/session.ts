@@ -179,7 +179,7 @@ export class SessionHandle {
         "--no-profile",
         "--with-builtin", "developer",
         ...(config.mcp.browserEnabled ? [
-          "--with-extension", "playwright-mcp --headless --no-sandbox --isolated --caps vision",
+          "--with-extension", "playwright-mcp --browser chromium --headless --no-sandbox --isolated --caps vision",
         ] : []),
         "--quiet",
       ],
@@ -211,7 +211,7 @@ export class SessionHandle {
             mcpServers: {
               playwright: {
                 command: "playwright-mcp",
-                args: ["--headless", "--no-sandbox", "--isolated", "--caps", "vision"],
+                args: ["--browser", "chromium", "--headless", "--no-sandbox", "--isolated", "--caps", "vision"],
               },
             },
           }),
@@ -248,7 +248,7 @@ export class SessionHandle {
             mcpServers: {
               playwright: {
                 command: "playwright-mcp",
-                args: ["--headless", "--no-sandbox", "--isolated", "--caps", "vision"],
+                args: ["--browser", "chromium", "--headless", "--no-sandbox", "--isolated", "--caps", "vision"],
               },
             },
           }),

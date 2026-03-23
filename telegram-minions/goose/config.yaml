@@ -19,6 +19,6 @@ extensions:
     name: playwright
     type: stdio
     cmd: playwright-mcp
-    args: ["--headless", "--no-sandbox", "--isolated", "--caps", "vision"]
+    args: ["--browser", "chromium", "--headless", "--no-sandbox", "--isolated", "--caps", "vision"]
     enabled: true
     timeout: 300
