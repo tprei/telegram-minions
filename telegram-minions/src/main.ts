@@ -35,10 +35,10 @@ process.stderr.write(`main: allowedUsers=${config.telegram.allowedUserIds.join("
 process.stderr.write(`main: workspace=${config.workspace.root}\n`)
 process.stderr.write(`main: maxSessions=${config.workspace.maxConcurrentSessions}\n`)
 
-dispatcher.loadPersistedSessions()
-dispatcher.startCleanupTimer()
-
-dispatcher.start().catch((err) => {
+dispatcher.loadPersistedSessions().then(() => {
+  dispatcher.startCleanupTimer()
+  return dispatcher.start()
+}).catch((err) => {
   process.stderr.write(`main: dispatcher crashed: ${err}\n`)
   process.exit(1)
 })

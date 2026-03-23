@@ -23,23 +23,25 @@ export class SessionStore {
     }
   }
 
-  load(): Map<number, TopicSession> {
-    const result = new Map<number, TopicSession>()
+  load(): { active: Map<number, TopicSession>; expired: Map<number, TopicSession> } {
+    const active = new Map<number, TopicSession>()
+    const expired = new Map<number, TopicSession>()
     try {
-      if (!fs.existsSync(this.filePath)) return result
+      if (!fs.existsSync(this.filePath)) return { active, expired }
       const raw = fs.readFileSync(this.filePath, "utf-8")
       const entries = JSON.parse(raw) as [number, TopicSession][]
       const now = Date.now()
       for (const [threadId, session] of entries) {
+        session.activeSessionId = undefined
         if (now - session.lastActivityAt < this.ttlMs) {
-          // Persisted sessions are never actively running
-          session.activeSessionId = undefined
-          result.set(threadId, session)
+          active.set(threadId, session)
+        } else {
+          expired.set(threadId, session)
         }
       }
     } catch (err) {
       process.stderr.write(`store: failed to load sessions: ${err}\n`)
     }
-    return result
+    return { active, expired }
   }
 }
