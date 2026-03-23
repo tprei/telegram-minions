@@ -506,6 +506,11 @@ export class Dispatcher {
     await this.spawnTopicAgent(topicSession, fullTask)
   }
 
+  private async updateTopicTitle(topicSession: TopicSession, stateEmoji: string): Promise<void> {
+    const name = `${stateEmoji} ${topicSession.repo} · ${topicSession.slug}`
+    await this.telegram.editForumTopic(topicSession.threadId, name).catch(() => {})
+  }
+
   private async spawnTopicAgent(topicSession: TopicSession, task: string): Promise<void> {
     if (this.sessions.size >= config.workspace.maxConcurrentSessions) {
       await this.telegram.sendMessage(
@@ -568,6 +573,7 @@ export class Dispatcher {
         })
 
         if (topicSession.mode === "think") {
+          this.updateTopicTitle(topicSession, "💬").catch(() => {})
           this.observer.onSessionComplete(m, state, durationMs).catch((err) => {
             process.stderr.write(`observer: onSessionComplete error: ${err}\n`)
           })
@@ -577,6 +583,7 @@ export class Dispatcher {
           ).catch(() => {})
           writeSessionLog(topicSession, m, state, durationMs)
         } else if (topicSession.mode === "plan") {
+          this.updateTopicTitle(topicSession, "💬").catch(() => {})
           this.observer.onSessionComplete(m, state, durationMs).catch((err) => {
             process.stderr.write(`observer: onSessionComplete error: ${err}\n`)
           })
@@ -586,11 +593,13 @@ export class Dispatcher {
           ).catch(() => {})
           writeSessionLog(topicSession, m, state, durationMs)
         } else if (state === "errored") {
+          this.updateTopicTitle(topicSession, "❌").catch(() => {})
           this.observer.onSessionComplete(m, state, durationMs).catch((err) => {
             process.stderr.write(`observer: onSessionComplete error: ${err}\n`)
           })
           writeSessionLog(topicSession, m, state, durationMs)
         } else {
+          this.updateTopicTitle(topicSession, "✅").catch(() => {})
           this.observer.flushAndComplete(m, state, durationMs).then(async () => {
             await this.telegram.sendMessage(
               formatTaskComplete(topicSession.slug, durationMs, m.totalTokens),
@@ -631,6 +640,7 @@ export class Dispatcher {
 
     this.sessions.set(topicSession.threadId, { handle, meta, task })
 
+    await this.updateTopicTitle(topicSession, "⚡")
     await this.observer.onSessionStart(meta, task, onTextCapture)
     handle.start(task)
   }
