@@ -31,6 +31,7 @@ export const TASK_SYSTEM_PROMPT = [
   "Document assumptions in your PR description since there's no human to ask.",
   "",
   "A headless Chromium browser is pre-installed. Use the Playwright MCP tools (browser_navigate, browser_snapshot, browser_screenshot, browser_click, etc.) for any web browsing tasks. Do NOT attempt to install a browser — it is already available.",
+  "When browsing pages, wait for the page to fully load before taking snapshots or screenshots. Use browser_wait_for_navigation or browser_wait after navigating, clicking links, or submitting forms. Pages with JavaScript-heavy content (SPAs, dynamic dashboards) need extra time to render — wait for network requests to settle before capturing.",
 ].join("\n")
 
 export const PLAN_SYSTEM_PROMPT = [
@@ -51,6 +52,7 @@ export const PLAN_SYSTEM_PROMPT = [
   "When the user gives feedback, refine the plan accordingly.",
   "",
   "A headless Chromium browser is pre-installed. Use the Playwright MCP tools (browser_navigate, browser_snapshot, browser_screenshot, browser_click, etc.) for any web browsing tasks. Do NOT attempt to install a browser — it is already available.",
+  "When browsing pages, wait for the page to fully load before taking snapshots or screenshots. Use browser_wait_for_navigation or browser_wait after navigating, clicking links, or submitting forms. Pages with JavaScript-heavy content (SPAs, dynamic dashboards) need extra time to render — wait for network requests to settle before capturing.",
 ].join("\n")
 
 const PLAN_DISALLOWED_TOOLS = ["Edit", "Write", "NotebookEdit"]
@@ -88,6 +90,7 @@ export const THINK_SYSTEM_PROMPT = [
   "- When the user gives follow-up questions, dig deeper",
   "",
   "A headless Chromium browser is pre-installed. Use the Playwright MCP tools (browser_navigate, browser_snapshot, browser_screenshot, browser_click, etc.) for any web browsing tasks. Do NOT attempt to install a browser — it is already available.",
+  "When browsing pages, wait for the page to fully load before taking snapshots or screenshots. Use browser_wait_for_navigation or browser_wait after navigating, clicking links, or submitting forms. Pages with JavaScript-heavy content (SPAs, dynamic dashboards) need extra time to render — wait for network requests to settle before capturing.",
 ].join("\n")
 
 const THINK_DISALLOWED_TOOLS = ["Edit", "Write", "NotebookEdit"]
