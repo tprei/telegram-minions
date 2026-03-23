@@ -90,10 +90,9 @@ This project is designed to run continuously in a cloud environment like Fly.io 
    If using `claude-acp`, you must authenticate the container once.
    ```bash
    fly ssh console
-   # Inside the container:
-   claude auth login
+   su - minion -c 'HOME=/workspace/home claude'
    ```
-   Follow the CLI prompt to paste the authorization URL into your local browser.
+   Complete OAuth in your browser, then type `/exit` to leave Claude.
 
 ## Local Development
 
@@ -128,3 +127,23 @@ const minion = createMinion({
 
 await minion.start()
 ```
+
+## Quick Setup Wizard
+
+To create a new minion instance for a different repository, use the setup wizard:
+
+```bash
+npx @tprei/telegram-minions setup
+```
+
+Or download and run directly:
+```bash
+curl -fsSL https://raw.githubusercontent.com/tprei/telegram-minions/main/assets/scripts/setup-wizard.sh | bash
+```
+
+The wizard will:
+- Prompt for minion name, target repo, Telegram credentials
+- Generate all config files (Dockerfile, fly.toml, etc.)
+- Create the fly app and volume
+- Deploy to fly.io
+- Print next steps for Claude authentication

@@ -1,0 +1,50 @@
+name: Bump version on push to master
+
+on:
+  push:
+    branches:
+      - master
+    paths-ignore:
+      - "package.json"
+      - "package-lock.json"
+  workflow_dispatch:
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.VERSION_BUMP_TOKEN }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Determine version bump
+        id: bump
+        run: |
+          COMMITS=$(git log $(git describe --tags --abbrev=0 2>/dev/null || git rev-list --max-parents=0 HEAD)..HEAD --pretty=%s)
+          if echo "$COMMITS" | grep -qiE '^feat(\(.+\))?!:|^BREAKING CHANGE:'; then
+            echo "type=major" >> "$GITHUB_OUTPUT"
+          elif echo "$COMMITS" | grep -qiE '^feat(\(.+\))?:'; then
+            echo "type=minor" >> "$GITHUB_OUTPUT"
+          else
+            echo "type=patch" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Bump version and tag
+        run: |
+          NEW_VERSION=$(npm version ${{ steps.bump.outputs.type }} --no-git-tag-version)
+          git add package.json package-lock.json
+          git commit -m "chore: bump version to ${NEW_VERSION}"
+          git tag "${NEW_VERSION}"
+          git push origin master --tags

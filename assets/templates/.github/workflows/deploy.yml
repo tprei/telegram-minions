@@ -1,4 +1,4 @@
-name: Deploy telegram-minions
+name: Deploy minion
 
 on:
   push:

@@ -1,7 +1,7 @@
 import fs from "node:fs"
 import path from "node:path"
 import type { TelegramClient } from "./telegram.js"
-import type { GooseStreamEvent, GooseMessage, GooseToolRequestContent, SessionMeta } from "./types.js"
+import type { GooseStreamEvent, GooseMessage, GooseToolRequestContent, GooseToolResponseContent, SessionMeta } from "./types.js"
 import { captureException } from "./sentry.js"
 import {
   formatToolLine,
@@ -123,6 +123,13 @@ export class Observer {
   }
 
   private async handleMessage(meta: SessionMeta, message: GooseMessage): Promise<void> {
+    // Process tool responses from any role (user messages carry toolResponse blocks)
+    for (const block of message.content) {
+      if (block.type === "toolResponse") {
+        await this.handleToolResponse(meta, block as GooseToolResponseContent)
+      }
+    }
+
     if (message.role !== "assistant") return
 
     await this.scanAndSendScreenshots(meta)
@@ -137,6 +144,33 @@ export class Observer {
         // Flush buffered text before showing tool activity
         await this.flushTextBuffer(meta, "tool")
         await this.handleToolRequest(meta, block as GooseToolRequestContent)
+      }
+    }
+  }
+
+  private async handleToolResponse(meta: SessionMeta, block: GooseToolResponseContent): Promise<void> {
+    const result = block.toolResult
+    if (!result) return
+
+    // toolResult can be an array of content blocks or a single object
+    const items = Array.isArray(result) ? result : [result]
+
+    for (const item of items) {
+      if (
+        typeof item === "object" &&
+        item !== null &&
+        "type" in item &&
+        (item as { type: string }).type === "image" &&
+        "data" in item
+      ) {
+        const imageItem = item as { type: string; data: string; mimeType?: string }
+        try {
+          const buffer = Buffer.from(imageItem.data, "base64")
+          const ext = imageItem.mimeType === "image/jpeg" ? "jpg" : "png"
+          await this.telegram.sendPhotoBuffer(buffer, `screenshot.${ext}`, meta.threadId)
+        } catch (err) {
+          process.stderr.write(`observer: failed to send base64 screenshot: ${err}\n`)
+        }
       }
     }
   }

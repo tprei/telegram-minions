@@ -87,6 +87,13 @@ function detectLintCommand(cwd: string): string | null {
 export function runQualityGates(cwd: string): QualityReport {
   const results: GateResult[] = []
 
+  // Ensure dependencies are installed
+  const pkgPath = path.join(cwd, "package.json")
+  const nodeModulesPath = path.join(cwd, "node_modules")
+  if (fs.existsSync(pkgPath) && !fs.existsSync(nodeModulesPath)) {
+    run("npm install", cwd)
+  }
+
   const testCmd = detectTestCommand(cwd)
   if (testCmd) {
     const { ok, output } = run(testCmd, cwd)
