@@ -37,10 +37,10 @@ describe("SessionStore", () => {
 
     store.save(sessions)
 
-    const loaded = store.load()
-    expect(loaded.size).toBe(1)
-    expect(loaded.get(100)?.slug).toBe("bold-arc")
-    expect(loaded.get(100)?.repo).toBe("test-repo")
+    const { active } = store.load()
+    expect(active.size).toBe(1)
+    expect(active.get(100)?.slug).toBe("bold-arc")
+    expect(active.get(100)?.repo).toBe("test-repo")
   })
 
   it("clears activeSessionId on load", () => {
@@ -49,8 +49,8 @@ describe("SessionStore", () => {
     sessions.set(100, makeSession({ activeSessionId: "some-uuid" }))
 
     store.save(sessions)
-    const loaded = store.load()
-    expect(loaded.get(100)?.activeSessionId).toBeUndefined()
+    const { active } = store.load()
+    expect(active.get(100)?.activeSessionId).toBeUndefined()
   })
 
   it("filters out sessions older than TTL", () => {
@@ -60,23 +60,27 @@ describe("SessionStore", () => {
     sessions.set(200, makeSession({ threadId: 200, lastActivityAt: Date.now() }))
 
     store.save(sessions)
-    const loaded = store.load()
-    expect(loaded.size).toBe(1)
-    expect(loaded.has(200)).toBe(true)
-    expect(loaded.has(100)).toBe(false)
+    const { active, expired } = store.load()
+    expect(active.size).toBe(1)
+    expect(active.has(200)).toBe(true)
+    expect(active.has(100)).toBe(false)
+    expect(expired.size).toBe(1)
+    expect(expired.has(100)).toBe(true)
   })
 
-  it("returns empty map when no file exists", () => {
+  it("returns empty maps when no file exists", () => {
     const store = new SessionStore(tmpDir)
-    const loaded = store.load()
-    expect(loaded.size).toBe(0)
+    const { active, expired } = store.load()
+    expect(active.size).toBe(0)
+    expect(expired.size).toBe(0)
   })
 
-  it("returns empty map on corrupted file", () => {
+  it("returns empty maps on corrupted file", () => {
     const store = new SessionStore(tmpDir)
     fs.writeFileSync(path.join(tmpDir, ".sessions.json"), "not json", "utf-8")
-    const loaded = store.load()
-    expect(loaded.size).toBe(0)
+    const { active, expired } = store.load()
+    expect(active.size).toBe(0)
+    expect(expired.size).toBe(0)
   })
 
   it("preserves conversation history through save/load", () => {
@@ -92,9 +96,9 @@ describe("SessionStore", () => {
     sessions.set(100, session)
 
     store.save(sessions)
-    const loaded = store.load()
-    expect(loaded.get(100)?.conversation).toHaveLength(3)
-    expect(loaded.get(100)?.conversation[1].text).toBe("done!")
+    const { active } = store.load()
+    expect(active.get(100)?.conversation).toHaveLength(3)
+    expect(active.get(100)?.conversation[1].text).toBe("done!")
   })
 
   it("preserves pending feedback through save/load", () => {
@@ -104,8 +108,8 @@ describe("SessionStore", () => {
     sessions.set(100, session)
 
     store.save(sessions)
-    const loaded = store.load()
-    expect(loaded.get(100)?.pendingFeedback).toEqual(["feedback 1", "feedback 2"])
+    const { active } = store.load()
+    expect(active.get(100)?.pendingFeedback).toEqual(["feedback 1", "feedback 2"])
   })
 
   it("handles multiple sessions", () => {
@@ -116,7 +120,7 @@ describe("SessionStore", () => {
     sessions.set(300, makeSession({ threadId: 300, slug: "deep-fjord" }))
 
     store.save(sessions)
-    const loaded = store.load()
-    expect(loaded.size).toBe(3)
+    const { active } = store.load()
+    expect(active.size).toBe(3)
   })
 })

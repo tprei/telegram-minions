@@ -1,0 +1,36 @@
+0 verbose cli /usr/local/bin/node /usr/local/lib/node_modules/npm/bin/npm-cli.js
+1 info using npm@10.9.4
+2 info using node@v22.22.1
+3 silly config load:file:/usr/local/lib/node_modules/npm/npmrc
+4 silly config load:file:/workspace/rare-tor/.home/tmp/qg-test-dZk3Xe/.npmrc
+5 silly config load:file:/workspace/rare-tor/.home/.npmrc
+6 silly config load:file:/usr/local/etc/npmrc
+7 verbose title npm exec tsc --noEmit
+8 verbose argv "exec" "--" "tsc" "--noEmit"
+9 verbose logfile logs-max:10 dir:/workspace/rare-tor/.home/.npm/_logs/2026-03-23T08_59_18_513Z-
+10 verbose logfile /workspace/rare-tor/.home/.npm/_logs/2026-03-23T08_59_18_513Z-debug-0.log
+11 silly logfile done cleaning log files
+12 silly packumentCache heap:2103705600 maxSize:525926400 maxEntrySize:262963200
+13 http fetch GET 200 https://registry.npmjs.org/tsc 81ms (cache miss)
+14 silly packumentCache heap:2103705600 maxSize:525926400 maxEntrySize:262963200
+15 silly packumentCache heap:2103705600 maxSize:525926400 maxEntrySize:262963200
+16 warn exec The following package was not found and will be installed: tsc@2.0.4
+17 silly idealTree buildDeps
+18 silly fetch manifest tsc@2.0.4
+19 silly packumentCache full:https://registry.npmjs.org/tsc cache-miss
+20 http fetch GET 200 https://registry.npmjs.org/tsc 32ms (cache miss)
+21 silly packumentCache full:https://registry.npmjs.org/tsc set size:undefined disposed:false
+22 silly placeDep ROOT tsc@2.0.4 OK for:  want: 2.0.4
+23 silly reify moves {}
+24 silly audit bulk request { tsc: [ '2.0.4' ] }
+25 http cache tsc@https://registry.npmjs.org/tsc/-/tsc-2.0.4.tgz 0ms (cache hit)
+26 silly tarball no local data for tsc@https://registry.npmjs.org/tsc/-/tsc-2.0.4.tgz. Extracting by manifest.
+27 http fetch GET 200 https://registry.npmjs.org/tsc/-/tsc-2.0.4.tgz 51ms (cache miss)
+28 http fetch POST 200 https://registry.npmjs.org/-/npm/v1/security/advisories/bulk 94ms
+29 silly audit report {}
+30 verbose cwd /workspace/rare-tor/.home/tmp/qg-test-dZk3Xe
+31 verbose os Linux 6.12.47-fly
+32 verbose node v22.22.1
+33 verbose npm  v10.9.4
+34 verbose exit 1
+35 verbose code 1

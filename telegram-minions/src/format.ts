@@ -253,6 +253,7 @@ export function formatHelp(): string {
     `<code>/think [repo] question</code> — start a deep research session`,
     `<code>/status</code> — show active sessions`,
     `<code>/stats</code> — show aggregate usage statistics`,
+    `<code>/clean</code> — remove all idle sessions and their topics`,
     `<code>/help</code> — show this message`,
     ``,
     `<b>Inside a thread</b>`,

@@ -1,0 +1,4 @@
+{"timestamp":"2026-03-23T08:58:25.833165Z","level":"INFO","fields":{"message":"CLI command executed","monotonic_counter.goose.cli_commands":1,"command":"run"},"target":"goose_cli::cli"}
+{"timestamp":"2026-03-23T08:58:28.623184Z","level":"INFO","fields":{"message":"🤖 Using model: default"},"target":"goose_cli::session::builder"}
+{"timestamp":"2026-03-23T08:58:29.497295Z","level":"INFO","fields":{"message":"Setting MCP process working directory: \"/workspace/rare-tor\""},"target":"goose::agents::extension_manager"}
+{"timestamp":"2026-03-23T08:58:32.131314Z","level":"INFO","fields":{"message":"Headless session started","monotonic_counter.goose.session_starts":1,"session_type":"run","interactive":false},"target":"goose_cli::cli"}
