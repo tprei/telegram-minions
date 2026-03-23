@@ -2,192 +2,30 @@ import { spawn, type ChildProcess } from "node:child_process"
 import { createInterface } from "node:readline"
 import fs from "node:fs"
 import path from "node:path"
-import { config } from "./config.js"
+import type { GooseConfig, ClaudeConfig, McpConfig } from "./config-types.js"
 import type { GooseStreamEvent, SessionMeta, SessionState } from "./types.js"
 import { translateClaudeEvents } from "./claude-stream.js"
 import { captureException, setContext, addBreadcrumb } from "./sentry.js"
+import { DEFAULT_TASK_PROMPT, DEFAULT_PLAN_PROMPT, DEFAULT_THINK_PROMPT } from "./prompts.js"
 
 export const SCREENSHOTS_DIR = ".screenshots"
 
 export type SessionEventCallback = (event: GooseStreamEvent) => void
 export type SessionDoneCallback = (meta: SessionMeta, state: "completed" | "errored") => void
 
-export const TASK_SYSTEM_PROMPT = [
-  "You are a coding minion running in a sandboxed environment.",
-  "Your working directory is a fresh clone — local changes do not persist after this session ends.",
-  "",
-  "To deliver your work, you MUST:",
-  "1. Create a new branch from the current HEAD",
-  "2. Commit your changes to that branch",
-  "3. Push the branch and open a pull request using `gh pr create`",
-  "If you skip the PR, your work is lost.",
-  "",
-  "The `gh` CLI is available and authenticated via GITHUB_TOKEN.",
-  "Use conventional commit messages: `feat:`, `fix:`, `refactor:`, `docs:`, `test:`, `chore:`.",
-  "Keep commits focused — one logical change per commit.",
-  "Stage specific files, not `git add .`.",
-  "Never commit `.env`, credentials, or secrets.",
-  "Never push to `main` or `master` directly.",
-  "PR descriptions should explain what changed and why, not how.",
-  "When your coding work is complete, use the `post-task-router` agent to classify the next action and delegate appropriately.",
-  "If no tests exist for the area you're modifying, note this in the PR description.",
-  "Document assumptions in your PR description since there's no human to ask.",
-  "",
-  "A headless Chromium browser is pre-installed. Use the Playwright MCP tools (browser_navigate, browser_snapshot, browser_screenshot, browser_click, etc.) for any web browsing tasks. Do NOT attempt to install a browser — it is already available.",
-  "When browsing pages, wait for the page to fully load before taking snapshots or screenshots. Use browser_wait_for_navigation or browser_wait after navigating, clicking links, or submitting forms. Pages with JavaScript-heavy content (SPAs, dynamic dashboards) need extra time to render — wait for network requests to settle before capturing.",
-].join("\n")
-
-export const CI_FIX_SYSTEM_PROMPT = [
-  "You are a CI-fix minion running in a sandboxed environment.",
-  "A previous task session opened a pull request, but CI checks failed.",
-  "Your ONLY job is to fix the CI failures described below and push the fixes.",
-  "",
-  "Follow the `ci-fix` agent guidelines: reproduce failures locally, fix root causes, verify fixes, then use `post-task-router` to commit and push.",
-  "",
-  "The `gh` CLI is available and authenticated via GITHUB_TOKEN.",
-  "Never commit `.env`, credentials, or secrets.",
-  "Never push to `main` or `master` directly.",
-  "",
-  "A headless Chromium browser is pre-installed. Use the Playwright MCP tools (browser_navigate, browser_snapshot, browser_screenshot, browser_click, etc.) for any web browsing tasks. Do NOT attempt to install a browser — it is already available.",
-  "When browsing pages, wait for the page to fully load before taking snapshots or screenshots. Use browser_wait_for_navigation or browser_wait after navigating, clicking links, or submitting forms. Pages with JavaScript-heavy content (SPAs, dynamic dashboards) need extra time to render — wait for network requests to settle before capturing.",
-].join("\n")
-
-export const PLAN_SYSTEM_PROMPT = [
-  "You are a planning minion running in a sandboxed environment.",
-  "Your job is to explore the codebase, understand the architecture, and produce a detailed implementation plan.",
-  "",
-  "This is a READ-ONLY exploration phase. The Edit, Write, and NotebookEdit tools have been disabled.",
-  "Do NOT use Bash to modify, create, or delete files. Use Bash only for read-only commands (git log, rg, find, ls, cat, etc.).",
-  "Do NOT create branches, commits, or pull requests.",
-  "",
-  "Your workflow:",
-  "1. Read and explore the relevant code to understand the architecture",
-  "2. Identify files, functions, and dependencies that need changes",
-  "3. Produce a detailed, step-by-step implementation plan",
-  "4. Flag risks, edge cases, and open questions",
-  "",
-  "Present your plan in a clear, structured format with file paths and specific changes.",
-  "When the user gives feedback, refine the plan accordingly.",
-  "",
-  "A headless Chromium browser is pre-installed. Use the Playwright MCP tools (browser_navigate, browser_snapshot, browser_screenshot, browser_click, etc.) for any web browsing tasks. Do NOT attempt to install a browser — it is already available.",
-  "When browsing pages, wait for the page to fully load before taking snapshots or screenshots. Use browser_wait_for_navigation or browser_wait after navigating, clicking links, or submitting forms. Pages with JavaScript-heavy content (SPAs, dynamic dashboards) need extra time to render — wait for network requests to settle before capturing.",
-].join("\n")
+export interface SessionConfig {
+  goose: GooseConfig
+  claude: ClaudeConfig
+  mcp: McpConfig
+}
 
 const PLAN_DISALLOWED_TOOLS = ["Edit", "Write", "NotebookEdit"]
-
-export const THINK_SYSTEM_PROMPT = [
-  "You are a deep-research minion running in a sandboxed environment.",
-  "Your job is to THINK deeply, search broadly, and understand thoroughly. You make NO changes whatsoever.",
-  "",
-  "This is a READ-ONLY research phase. The Edit, Write, and NotebookEdit tools have been disabled.",
-  "Do NOT use Bash to modify, create, or delete files. Do NOT create branches, commits, or pull requests.",
-  "",
-  "## Web search specialist",
-  "",
-  "You have access to WebSearch and WebFetch tools. Use them aggressively:",
-  "- Search the web for documentation, blog posts, GitHub issues, Stack Overflow threads, RFCs, and any relevant sources",
-  "- Fetch and read full pages when search results look promising",
-  "- Cross-reference multiple sources to validate findings",
-  "- Search for known issues, CVEs, deprecation notices, and migration guides when relevant",
-  "- Look up library changelogs, API documentation, and community discussions",
-  "",
-  "## Research workflow",
-  "",
-  "1. Deeply explore the codebase to build a thorough understanding of the architecture",
-  "2. Search the web extensively for relevant context, documentation, and prior art",
-  "3. Cross-reference codebase findings with external knowledge",
-  "4. Synthesize everything into a clear, comprehensive analysis",
-  "",
-  "## Output expectations",
-  "",
-  "- Think step by step. Use extended thinking to reason through complex problems.",
-  "- Be thorough — explore every relevant angle before drawing conclusions",
-  "- Cite sources when referencing external information",
-  "- Surface non-obvious insights, risks, and connections",
-  "- Present findings in a structured, readable format",
-  "- When the user gives follow-up questions, dig deeper",
-  "",
-  "A headless Chromium browser is pre-installed. Use the Playwright MCP tools (browser_navigate, browser_snapshot, browser_screenshot, browser_click, etc.) for any web browsing tasks. Do NOT attempt to install a browser — it is already available.",
-  "When browsing pages, wait for the page to fully load before taking snapshots or screenshots. Use browser_wait_for_navigation or browser_wait after navigating, clicking links, or submitting forms. Pages with JavaScript-heavy content (SPAs, dynamic dashboards) need extra time to render — wait for network requests to settle before capturing.",
-].join("\n")
-
 const THINK_DISALLOWED_TOOLS = ["Edit", "Write", "NotebookEdit"]
 
 type McpServerConfig = {
   command: string
   args: string[]
   env?: Record<string, string>
-}
-
-function buildMcpServers(): Record<string, McpServerConfig> {
-  const servers: Record<string, McpServerConfig> = {}
-
-  if (config.mcp.browserEnabled) {
-    servers.playwright = {
-      command: "playwright-mcp",
-      args: ["--browser", "chromium", "--headless", "--no-sandbox", "--isolated", "--caps", "vision"],
-    }
-  }
-
-  if (config.mcp.githubEnabled) {
-    const token = process.env["GITHUB_TOKEN"]
-    if (token) {
-      servers.github = {
-        command: "github-mcp-server",
-        args: ["stdio"],
-        env: { GITHUB_PERSONAL_ACCESS_TOKEN: token },
-      }
-    } else {
-      process.stderr.write("MCP: GitHub MCP enabled but GITHUB_TOKEN is not set — skipping\n")
-    }
-  }
-
-  if (config.mcp.context7Enabled) {
-    servers.context7 = {
-      command: "context7-mcp",
-      args: [],
-    }
-  }
-
-  if (config.mcp.sentryEnabled) {
-    const sentryToken = process.env["SENTRY_ACCESS_TOKEN"]
-    if (sentryToken) {
-      const sentryArgs = ["-y", "@sentry/mcp-server@latest", "--access-token", sentryToken]
-      if (config.mcp.sentryOrgSlug) {
-        sentryArgs.push("--organization-slug", config.mcp.sentryOrgSlug)
-      }
-      if (config.mcp.sentryProjectSlug) {
-        sentryArgs.push("--project-slug", config.mcp.sentryProjectSlug)
-      }
-      servers.sentry = {
-        command: "npx",
-        args: sentryArgs,
-      }
-    } else {
-      process.stderr.write("MCP: Sentry MCP enabled but SENTRY_ACCESS_TOKEN is not set — skipping\n")
-    }
-  }
-
-  return servers
-}
-
-function buildGooseExtensionArgs(): string[] {
-  const args: string[] = []
-  const servers = buildMcpServers()
-
-  for (const [, server] of Object.entries(servers)) {
-    const cmdWithArgs = [server.command, ...server.args].join(" ")
-    args.push("--with-extension", cmdWithArgs)
-  }
-
-  return args
-}
-
-function buildClaudeMcpConfigArgs(): string[] {
-  const servers = buildMcpServers()
-  if (Object.keys(servers).length === 0) return []
-
-  return ["--mcp-config", JSON.stringify({ mcpServers: servers })]
 }
 
 export class SessionHandle {
@@ -200,6 +38,7 @@ export class SessionHandle {
     private readonly onEvent: SessionEventCallback,
     private readonly onDone: SessionDoneCallback,
     private readonly timeoutMs: number,
+    private readonly sessionConfig: SessionConfig,
   ) {}
 
   start(task: string, systemPrompt?: string): void {
@@ -223,6 +62,77 @@ export class SessionHandle {
     } else {
       this.startGoose(task, systemPrompt)
     }
+  }
+
+  private buildMcpServers(): Record<string, McpServerConfig> {
+    const servers: Record<string, McpServerConfig> = {}
+
+    if (this.sessionConfig.mcp.browserEnabled) {
+      servers.playwright = {
+        command: "playwright-mcp",
+        args: ["--browser", "chromium", "--headless", "--no-sandbox", "--isolated", "--caps", "vision"],
+      }
+    }
+
+    if (this.sessionConfig.mcp.githubEnabled) {
+      const token = process.env["GITHUB_TOKEN"]
+      if (token) {
+        servers.github = {
+          command: "github-mcp-server",
+          args: ["stdio"],
+          env: { GITHUB_PERSONAL_ACCESS_TOKEN: token },
+        }
+      } else {
+        process.stderr.write("MCP: GitHub MCP enabled but GITHUB_TOKEN is not set — skipping\n")
+      }
+    }
+
+    if (this.sessionConfig.mcp.context7Enabled) {
+      servers.context7 = {
+        command: "context7-mcp",
+        args: [],
+      }
+    }
+
+    if (this.sessionConfig.mcp.sentryEnabled) {
+      const sentryToken = process.env["SENTRY_ACCESS_TOKEN"]
+      if (sentryToken) {
+        const sentryArgs = ["-y", "@sentry/mcp-server@latest", "--access-token", sentryToken]
+        if (this.sessionConfig.mcp.sentryOrgSlug) {
+          sentryArgs.push("--organization-slug", this.sessionConfig.mcp.sentryOrgSlug)
+        }
+        if (this.sessionConfig.mcp.sentryProjectSlug) {
+          sentryArgs.push("--project-slug", this.sessionConfig.mcp.sentryProjectSlug)
+        }
+        servers.sentry = {
+          command: "npx",
+          args: sentryArgs,
+        }
+      } else {
+        process.stderr.write("MCP: Sentry MCP enabled but SENTRY_ACCESS_TOKEN is not set — skipping\n")
+      }
+    }
+
+    return servers
+  }
+
+  private buildGooseExtensionArgs(): string[] {
+    const args: string[] = []
+    const servers = this.buildMcpServers()
+
+    for (const [, server] of Object.entries(servers)) {
+      const cmdWithArgs = [server.command, ...server.args].join(" ")
+      args.push("--with-extension", cmdWithArgs)
+    }
+
+    return args
+  }
+
+  private buildClaudeMcpConfigArgs(): string[] {
+    const servers = this.buildMcpServers()
+    if (Object.keys(servers).length === 0) return []
+
+    return ["--mcp-config", JSON.stringify({ mcpServers: servers })]
   }
 
   private buildIsolatedEnv(): Record<string, string> {
@@ -289,7 +199,7 @@ export class SessionHandle {
       CLAUDE_THINKING_BUDGET: "16000",
     }
 
-    const prompt = systemPrompt ?? TASK_SYSTEM_PROMPT
+    const prompt = systemPrompt ?? DEFAULT_TASK_PROMPT
 
     this.process = spawn(
       "goose",
@@ -298,12 +208,12 @@ export class SessionHandle {
         "--text", task,
         "--output-format", "stream-json",
         "--name", this.meta.topicName,
-        "--provider", config.goose.provider,
-        "--model", config.goose.model,
+        "--provider", this.sessionConfig.goose.provider,
+        "--model", this.sessionConfig.goose.model,
         "--system", prompt,
         "--no-profile",
         "--with-builtin", "developer",
-        ...buildGooseExtensionArgs(),
+        ...this.buildGooseExtensionArgs(),
         "--quiet",
       ],
       {
@@ -319,7 +229,6 @@ export class SessionHandle {
   private startClaude(task: string): void {
     const env = this.buildIsolatedEnv()
 
-
     this.process = spawn(
       "claude",
       [
@@ -330,9 +239,9 @@ export class SessionHandle {
         "--dangerously-skip-permissions",
         "--no-session-persistence",
         "--disallowed-tools", ...PLAN_DISALLOWED_TOOLS,
-        ...buildClaudeMcpConfigArgs(),
-        "--append-system-prompt", PLAN_SYSTEM_PROMPT,
-        "--model", config.claude.planModel,
+        ...this.buildClaudeMcpConfigArgs(),
+        "--append-system-prompt", DEFAULT_PLAN_PROMPT,
+        "--model", this.sessionConfig.claude.planModel,
         task,
       ],
       {
@@ -348,7 +257,6 @@ export class SessionHandle {
   private startClaudeThink(task: string): void {
     const env = this.buildIsolatedEnv()
 
-
     this.process = spawn(
       "claude",
       [
@@ -359,9 +267,9 @@ export class SessionHandle {
         "--dangerously-skip-permissions",
         "--no-session-persistence",
         "--disallowed-tools", ...THINK_DISALLOWED_TOOLS,
-        ...buildClaudeMcpConfigArgs(),
-        "--append-system-prompt", THINK_SYSTEM_PROMPT,
-        "--model", config.claude.thinkModel,
+        ...this.buildClaudeMcpConfigArgs(),
+        "--append-system-prompt", DEFAULT_THINK_PROMPT,
+        "--model", this.sessionConfig.claude.thinkModel,
         task,
       ],
       {

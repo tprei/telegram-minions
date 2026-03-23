@@ -1,0 +1,76 @@
+export interface TelegramConfig {
+  botToken: string
+  chatId: string
+  allowedUserIds: number[]
+}
+
+export interface GooseConfig {
+  provider: string
+  model: string
+}
+
+export interface ClaudeConfig {
+  planModel: string
+  thinkModel: string
+}
+
+export interface WorkspaceConfig {
+  root: string
+  maxConcurrentSessions: number
+  sessionTokenBudget: number
+  sessionBudgetUsd: number
+  sessionTimeoutMs: number
+  staleTtlMs: number
+  cleanupIntervalMs: number
+}
+
+export interface CiConfig {
+  babysitEnabled: boolean
+  maxRetries: number
+  pollIntervalMs: number
+  pollTimeoutMs: number
+}
+
+export interface McpConfig {
+  browserEnabled: boolean
+  githubEnabled: boolean
+  context7Enabled: boolean
+  sentryEnabled: boolean
+  sentryOrgSlug: string
+  sentryProjectSlug: string
+}
+
+export interface ObserverConfig {
+  activityThrottleMs: number
+}
+
+export interface SentryConfig {
+  dsn?: string
+}
+
+export interface AgentDefinitions {
+  agentsDir?: string
+  claudeMd?: string
+  settingsJson?: object
+}
+
+export interface MinionConfig {
+  telegram: TelegramConfig
+  goose: GooseConfig
+  claude: ClaudeConfig
+  workspace: WorkspaceConfig
+  ci: CiConfig
+  mcp: McpConfig
+  observer: ObserverConfig
+  sentry?: SentryConfig
+  repos: Record<string, string>
+  prompts?: Partial<SystemPrompts>
+  agentDefs?: AgentDefinitions
+}
+
+export interface SystemPrompts {
+  task: string
+  ci_fix: string
+  plan: string
+  think: string
+}

@@ -1,14 +1,16 @@
-import { config } from "./config.js"
+import { configFromEnv } from "./config-env.js"
 import { initSentry, captureException, flush as flushSentry } from "./sentry.js"
 import { TelegramClient } from "./telegram.js"
 import { Observer } from "./observer.js"
 import { Dispatcher } from "./dispatcher.js"
 
-initSentry(config.sentry.dsn)
+const config = configFromEnv()
+
+initSentry(config.sentry?.dsn)
 
 const telegram = new TelegramClient(config.telegram.botToken, config.telegram.chatId)
 const observer = new Observer(telegram, config.observer.activityThrottleMs)
-const dispatcher = new Dispatcher(telegram, observer)
+const dispatcher = new Dispatcher(telegram, observer, config)
 
 process.on("SIGTERM", () => {
   process.stderr.write("main: received SIGTERM, shutting down\n")

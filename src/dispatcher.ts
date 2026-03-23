@@ -5,11 +5,12 @@ import fs from "node:fs"
 import crypto from "node:crypto"
 import type { TelegramClient } from "./telegram.js"
 import { captureException, addBreadcrumb } from "./sentry.js"
-import { SessionHandle } from "./session.js"
+import { SessionHandle, type SessionConfig } from "./session.js"
 import { Observer } from "./observer.js"
 import type { TelegramUpdate, TelegramCallbackQuery, TelegramPhotoSize, SessionMeta, TopicSession } from "./types.js"
 import { generateSlug } from "./slugs.js"
-import { config } from "./config.js"
+import type { MinionConfig } from "./config-types.js"
+import { DEFAULT_PROMPTS } from "./prompts.js"
 import { SessionStore } from "./store.js"
 import {
   formatPlanIteration,
@@ -34,7 +35,7 @@ import { runQualityGates } from "./quality-gates.js"
 import { StatsTracker } from "./stats.js"
 import { writeSessionLog } from "./session-log.js"
 import { extractPRUrl, waitForCI, getFailedCheckLogs, buildCIFixPrompt } from "./ci-babysit.js"
-import { CI_FIX_SYSTEM_PROMPT } from "./session.js"
+import { DEFAULT_CI_FIX_PROMPT } from "./prompts.js"
 
 const POLL_TIMEOUT = 30
 const TASK_PREFIX = "/task"
@@ -74,9 +75,10 @@ export class Dispatcher {
   constructor(
     private readonly telegram: TelegramClient,
     private readonly observer: Observer,
+    private readonly config: MinionConfig,
   ) {
-    this.store = new SessionStore(config.workspace.root)
-    this.stats = new StatsTracker(config.workspace.root)
+    this.store = new SessionStore(this.config.workspace.root)
+    this.stats = new StatsTracker(this.config.workspace.root)
   }
 
   async loadPersistedSessions(): Promise<void> {
@@ -124,9 +126,9 @@ export class Dispatcher {
       this.cleanupStaleSessions().catch((err) => {
         process.stderr.write(`dispatcher: cleanup error: ${err}\n`)
       })
-    }, config.workspace.cleanupIntervalMs)
+    }, this.config.workspace.cleanupIntervalMs)
     process.stderr.write(
-      `dispatcher: cleanup timer started (interval=${Math.round(config.workspace.cleanupIntervalMs / 60000)}m, ttl=${Math.round(config.workspace.staleTtlMs / 86400000)}d)\n`,
+      `dispatcher: cleanup timer started (interval=${Math.round(this.config.workspace.cleanupIntervalMs / 60000)}m, ttl=${Math.round(this.config.workspace.staleTtlMs / 86400000)}d)\n`,
     )
   }
 
@@ -143,7 +145,7 @@ export class Dispatcher {
 
     for (const [threadId, session] of this.topicSessions) {
       if (session.activeSessionId) continue
-      if (now - session.lastActivityAt > config.workspace.staleTtlMs) {
+      if (now - session.lastActivityAt > this.config.workspace.staleTtlMs) {
         stale.push([threadId, session])
       }
     }
@@ -199,10 +201,10 @@ export class Dispatcher {
     const message = update.message
     if (!message) return
 
-    if (message.chat.id.toString() !== config.telegram.chatId) return
+    if (message.chat.id.toString() !== this.config.telegram.chatId) return
 
     const userId = message.from?.id ?? -1
-    if (!config.telegram.allowedUserIds.includes(userId)) return
+    if (!this.config.telegram.allowedUserIds.includes(userId)) return
 
     const text = (message.text ?? message.caption)?.trim()
     const photos = message.photo
@@ -269,7 +271,7 @@ export class Dispatcher {
   }
 
   private async handleCallbackQuery(query: TelegramCallbackQuery): Promise<void> {
-    if (!config.telegram.allowedUserIds.includes(query.from.id)) {
+    if (!this.config.telegram.allowedUserIds.includes(query.from.id)) {
       await this.telegram.answerCallbackQuery(query.id, "Not authorized")
       return
     }
@@ -287,7 +289,7 @@ export class Dispatcher {
       : isPlan
       ? data.slice("plan-repo:".length)
       : data.slice("repo:".length)
-    const repoUrl = config.repos[repoSlug]
+    const repoUrl = this.config.repos[repoSlug]
     if (!repoUrl) {
       await this.telegram.answerCallbackQuery(query.id, "Unknown repo")
       return
@@ -319,7 +321,7 @@ export class Dispatcher {
   private async handleStatusCommand(): Promise<void> {
     const taskSessions = [...this.sessions.values()]
     const topicSessionList = [...this.topicSessions.values()]
-    const msg = formatStatus(taskSessions, topicSessionList, config.workspace.maxConcurrentSessions)
+    const msg = formatStatus(taskSessions, topicSessionList, this.config.workspace.maxConcurrentSessions)
     await this.telegram.sendMessage(msg)
   }
 
@@ -357,23 +359,23 @@ export class Dispatcher {
   }
 
   private async handleTaskCommand(args: string, replyThreadId?: number, photos?: TelegramPhotoSize[]): Promise<void> {
-    if (this.sessions.size >= config.workspace.maxConcurrentSessions) {
+    if (this.sessions.size >= this.config.workspace.maxConcurrentSessions) {
       if (replyThreadId !== undefined) {
         await this.telegram.sendMessage(
-          `⚠️ Max concurrent sessions (${config.workspace.maxConcurrentSessions}) reached. Wait for one to finish.`,
+          `⚠️ Max concurrent sessions (${this.config.workspace.maxConcurrentSessions}) reached. Wait for one to finish.`,
           replyThreadId,
         )
       }
       return
     }
 
-    const { repoUrl, task } = parseTaskArgs(args)
+    const { repoUrl, task } = parseTaskArgs(this.config.repos, args)
 
     if (!task) {
       if (replyThreadId !== undefined) {
         await this.telegram.sendMessage(
           `Usage: <code>/task [repo] description of the task</code>\n` +
-          `Repos: ${Object.keys(config.repos).map((s) => `<code>${s}</code>`).join(", ")}\n` +
+          `Repos: ${Object.keys(this.config.repos).map((s) => `<code>${s}</code>`).join(", ")}\n` +
           `Or use a full URL or omit repo entirely.`,
           replyThreadId,
         )
@@ -382,7 +384,7 @@ export class Dispatcher {
     }
 
     if (!repoUrl) {
-      const repoKeys = Object.keys(config.repos)
+      const repoKeys = Object.keys(this.config.repos)
       if (repoKeys.length > 0) {
         const keyboard = buildRepoKeyboard(repoKeys)
         const msgId = await this.telegram.sendMessageWithKeyboard(
@@ -401,7 +403,7 @@ export class Dispatcher {
   }
 
   private async handlePlanCommand(args: string, replyThreadId?: number, photos?: TelegramPhotoSize[]): Promise<void> {
-    const { repoUrl, task } = parseTaskArgs(args)
+    const { repoUrl, task } = parseTaskArgs(this.config.repos, args)
 
     if (!task) {
       if (replyThreadId !== undefined) {
@@ -414,7 +416,7 @@ export class Dispatcher {
     }
 
     if (!repoUrl) {
-      const repoKeys = Object.keys(config.repos)
+      const repoKeys = Object.keys(this.config.repos)
       if (repoKeys.length > 0) {
         const keyboard = buildRepoKeyboard(repoKeys, "plan")
         const msgId = await this.telegram.sendMessageWithKeyboard(
@@ -433,7 +435,7 @@ export class Dispatcher {
   }
 
   private async handleThinkCommand(args: string, replyThreadId?: number, photos?: TelegramPhotoSize[]): Promise<void> {
-    const { repoUrl, task } = parseTaskArgs(args)
+    const { repoUrl, task } = parseTaskArgs(this.config.repos, args)
 
     if (!task) {
       if (replyThreadId !== undefined) {
@@ -446,7 +448,7 @@ export class Dispatcher {
     }
 
     if (!repoUrl) {
-      const repoKeys = Object.keys(config.repos)
+      const repoKeys = Object.keys(this.config.repos)
       if (repoKeys.length > 0) {
         const keyboard = buildRepoKeyboard(repoKeys, "think")
         const msgId = await this.telegram.sendMessageWithKeyboard(
@@ -523,7 +525,7 @@ export class Dispatcher {
   }
 
   private async spawnTopicAgent(topicSession: TopicSession, task: string): Promise<void> {
-    if (this.sessions.size >= config.workspace.maxConcurrentSessions) {
+    if (this.sessions.size >= this.config.workspace.maxConcurrentSessions) {
       await this.telegram.sendMessage(
         `⚠️ Max concurrent sessions reached. Try again later.`,
         topicSession.threadId,
@@ -548,6 +550,13 @@ export class Dispatcher {
       topicSession.conversation.push({ role: "assistant", text })
     }
 
+    const prompts = { ...DEFAULT_PROMPTS, ...this.config.prompts }
+    const sessionConfig: SessionConfig = {
+      goose: this.config.goose,
+      claude: this.config.claude,
+      mcp: this.config.mcp,
+    }
+
     const handle = new SessionHandle(
       meta,
       (event) => {
@@ -555,13 +564,12 @@ export class Dispatcher {
           process.stderr.write(`observer: onEvent error: ${err}\n`)
         })
 
-
-        if (event.type === "complete" && meta.totalTokens != null && meta.totalTokens > config.workspace.sessionTokenBudget) {
+        if (event.type === "complete" && meta.totalTokens != null && meta.totalTokens > this.config.workspace.sessionTokenBudget) {
           process.stderr.write(
-            `dispatcher: session ${sessionId} exceeded token budget (${meta.totalTokens} > ${config.workspace.sessionTokenBudget})\n`,
+            `dispatcher: session ${sessionId} exceeded token budget (${meta.totalTokens} > ${this.config.workspace.sessionTokenBudget})\n`,
           )
           this.telegram.sendMessage(
-            formatBudgetWarning(topicSession.slug, meta.totalTokens, config.workspace.sessionTokenBudget),
+            formatBudgetWarning(topicSession.slug, meta.totalTokens, this.config.workspace.sessionTokenBudget),
             topicSession.threadId,
           ).catch(() => {})
           handle.interrupt()
@@ -633,7 +641,7 @@ export class Dispatcher {
 
             writeSessionLog(topicSession, m, state, durationMs, qualityReport)
 
-            if (config.ci.babysitEnabled && topicSession.mode === "task") {
+            if (this.config.ci.babysitEnabled && topicSession.mode === "task") {
               const prUrl = this.extractPRFromConversation(topicSession)
               if (prUrl) {
                 this.babysitPR(topicSession, prUrl).catch((err) => {
@@ -657,14 +665,15 @@ export class Dispatcher {
           })
         }
       },
-      config.workspace.sessionTimeoutMs,
+      this.config.workspace.sessionTimeoutMs,
+      sessionConfig,
     )
 
     this.sessions.set(topicSession.threadId, { handle, meta, task })
 
     await this.updateTopicTitle(topicSession, "⚡")
     await this.observer.onSessionStart(meta, task, onTextCapture)
-    handle.start(task)
+    handle.start(task, topicSession.mode === "task" ? prompts.task : undefined)
   }
 
   private extractPRFromConversation(topicSession: TopicSession): string | null {
@@ -679,7 +688,7 @@ export class Dispatcher {
   }
 
   private async babysitPR(topicSession: TopicSession, prUrl: string): Promise<void> {
-    const maxRetries = config.ci.maxRetries
+    const maxRetries = this.config.ci.maxRetries
 
     await this.telegram.sendMessage(
       formatCIWatching(topicSession.slug, prUrl),
@@ -688,7 +697,7 @@ export class Dispatcher {
 
     process.stderr.write(`dispatcher: watching CI for PR ${prUrl} (max ${maxRetries} retries)\n`)
 
-    const result = await waitForCI(prUrl, topicSession.cwd)
+    const result = await waitForCI(prUrl, topicSession.cwd, this.config.ci)
 
     if (result.passed) {
       await this.telegram.sendMessage(
@@ -731,7 +740,7 @@ export class Dispatcher {
 
       process.stderr.write(`dispatcher: CI fix session completed (attempt ${attempt}/${maxRetries})\n`)
 
-      const recheck = await waitForCI(prUrl, topicSession.cwd)
+      const recheck = await waitForCI(prUrl, topicSession.cwd, this.config.ci)
 
       if (recheck.passed) {
         await this.telegram.sendMessage(
@@ -762,7 +771,7 @@ export class Dispatcher {
     task: string,
     onComplete: () => void,
   ): Promise<void> {
-    if (this.sessions.size >= config.workspace.maxConcurrentSessions) {
+    if (this.sessions.size >= this.config.workspace.maxConcurrentSessions) {
       process.stderr.write(`dispatcher: no session slots for CI fix, skipping\n`)
       onComplete()
       return
@@ -779,6 +788,12 @@ export class Dispatcher {
       cwd: topicSession.cwd,
       startedAt: Date.now(),
       mode: "ci-fix",
+    }
+
+    const sessionConfig: SessionConfig = {
+      goose: this.config.goose,
+      claude: this.config.claude,
+      mcp: this.config.mcp,
     }
 
     const handle = new SessionHandle(
@@ -811,13 +826,14 @@ export class Dispatcher {
           onComplete()
         })
       },
-      config.workspace.sessionTimeoutMs,
+      this.config.workspace.sessionTimeoutMs,
+      sessionConfig,
     )
 
     this.sessions.set(topicSession.threadId, { handle, meta, task })
 
     await this.observer.onSessionStart(meta, task)
-    handle.start(task, CI_FIX_SYSTEM_PROMPT)
+    handle.start(task, DEFAULT_CI_FIX_PROMPT)
   }
 
   private async handleTopicFeedback(topicSession: TopicSession, feedback: string, photos?: TelegramPhotoSize[]): Promise<void> {
@@ -924,11 +940,11 @@ export class Dispatcher {
   }
 
   private async prepareWorkspace(slug: string, repoUrl?: string): Promise<string | null> {
-    const workDir = path.join(config.workspace.root, slug)
+    const workDir = path.join(this.config.workspace.root, slug)
 
     try {
       if (repoUrl) {
-        const reposDir = path.join(config.workspace.root, ".repos")
+        const reposDir = path.join(this.config.workspace.root, ".repos")
         fs.mkdirSync(reposDir, { recursive: true })
 
         const repoName = extractRepoName(repoUrl)
@@ -973,7 +989,7 @@ export class Dispatcher {
     try {
       if (topicSession.repoUrl) {
         const repoName = extractRepoName(topicSession.repoUrl)
-        const bareDir = path.join(config.workspace.root, ".repos", `${repoName}.git`)
+        const bareDir = path.join(this.config.workspace.root, ".repos", `${repoName}.git`)
         if (fs.existsSync(bareDir)) {
           execSync(`git worktree remove --force ${JSON.stringify(topicSession.cwd)}`, {
             cwd: bareDir,
@@ -1029,7 +1045,7 @@ export function resolveDefaultBranch(bareDir: string, gitOpts: object): string {
   throw new Error("cannot determine default branch")
 }
 
-export function parseTaskArgs(args: string): { repoUrl?: string; task: string } {
+export function parseTaskArgs(repos: Record<string, string>, args: string): { repoUrl?: string; task: string } {
   const urlPattern = /^(https?:\/\/[^\s]+)\s+([\s\S]+)$/
   const match = urlPattern.exec(args)
 
@@ -1041,7 +1057,7 @@ export function parseTaskArgs(args: string): { repoUrl?: string; task: string } 
   const spaceIdx = args.indexOf(" ")
   if (spaceIdx > 0) {
     const firstWord = args.slice(0, spaceIdx)
-    const aliasUrl = config.repos[firstWord]
+    const aliasUrl = repos[firstWord]
     if (aliasUrl) {
       return { repoUrl: aliasUrl, task: args.slice(spaceIdx + 1).trim() }
     }

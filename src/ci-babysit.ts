@@ -1,5 +1,5 @@
 import { execSync } from "node:child_process"
-import { config } from "./config.js"
+import type { CiConfig } from "./config-types.js"
 
 export interface CICheckResult {
   name: string
@@ -25,9 +25,9 @@ export function extractPRUrl(conversationText: string): string | null {
   return match ? match[0] : null
 }
 
-export async function waitForCI(prUrl: string, cwd: string): Promise<CIWaitResult> {
-  const intervalMs = config.ci.pollIntervalMs
-  const timeoutMs = config.ci.pollTimeoutMs
+export async function waitForCI(prUrl: string, cwd: string, ciConfig: CiConfig): Promise<CIWaitResult> {
+  const intervalMs = ciConfig.pollIntervalMs
+  const timeoutMs = ciConfig.pollTimeoutMs
   const startedAt = Date.now()
 
   while (Date.now() - startedAt < timeoutMs) {

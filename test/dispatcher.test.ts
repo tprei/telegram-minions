@@ -1,29 +1,4 @@
-import { describe, it, expect, vi } from "vitest"
-
-vi.mock("../src/config.js", () => ({
-  config: {
-    telegram: {
-      botToken: "fake-token",
-      chatId: "12345",
-      allowedUserIds: [1001],
-    },
-    goose: { provider: "claude-acp", model: "default" },
-    claude: { planModel: "sonnet" },
-    workspace: {
-      root: "/tmp/test-workspace",
-      maxConcurrentSessions: 5,
-      sessionBudgetUsd: 10,
-      sessionTimeoutMs: 3600000,
-      staleTtlMs: 2 * 24 * 60 * 60 * 1000,
-      cleanupIntervalMs: 60 * 60 * 1000,
-    },
-    observer: { activityThrottleMs: 3000 },
-    repos: {
-      scripts: "https://github.com/tprei/scripts",
-      pinoquio: "https://github.com/retirers/pinoquio-na-web",
-    },
-  },
-}))
+import { describe, it, expect } from "vitest"
 
 import {
   parseTaskArgs,
@@ -36,9 +11,14 @@ import {
 } from "../src/dispatcher.js"
 import type { TopicSession } from "../src/types.js"
 
+const testRepos = {
+  scripts: "https://github.com/tprei/scripts",
+  pinoquio: "https://github.com/retirers/pinoquio-na-web",
+}
+
 describe("parseTaskArgs", () => {
   it("parses URL + task", () => {
-    const result = parseTaskArgs("https://github.com/org/repo fix the bug")
+    const result = parseTaskArgs({}, "https://github.com/org/repo fix the bug")
     expect(result).toEqual({
       repoUrl: "https://github.com/org/repo",
       task: "fix the bug",
@@ -46,7 +26,7 @@ describe("parseTaskArgs", () => {
   })
 
   it("parses repo alias + task", () => {
-    const result = parseTaskArgs("scripts add a new feature")
+    const result = parseTaskArgs(testRepos, "scripts add a new feature")
     expect(result).toEqual({
       repoUrl: "https://github.com/tprei/scripts",
       task: "add a new feature",
@@ -54,37 +34,37 @@ describe("parseTaskArgs", () => {
   })
 
   it("returns task only when no URL or alias", () => {
-    const result = parseTaskArgs("just do the thing")
+    const result = parseTaskArgs({}, "just do the thing")
     expect(result).toEqual({ task: "just do the thing" })
   })
 
   it("returns empty task for empty input", () => {
-    const result = parseTaskArgs("")
+    const result = parseTaskArgs({}, "")
     expect(result).toEqual({ task: "" })
   })
 
   it("trims whitespace from task", () => {
-    const result = parseTaskArgs("  some task  ")
+    const result = parseTaskArgs({}, "  some task  ")
     expect(result).toEqual({ task: "some task" })
   })
 
   it("handles URL without trailing task (no space after URL)", () => {
-    const result = parseTaskArgs("https://github.com/org/repo")
+    const result = parseTaskArgs({}, "https://github.com/org/repo")
     expect(result).toEqual({ task: "https://github.com/org/repo" })
   })
 
   it("handles alias without trailing task", () => {
-    const result = parseTaskArgs("scripts")
+    const result = parseTaskArgs(testRepos, "scripts")
     expect(result).toEqual({ task: "scripts" })
   })
 
   it("preserves multiline task text with URL", () => {
-    const result = parseTaskArgs("https://github.com/org/repo line1\nline2\nline3")
+    const result = parseTaskArgs({}, "https://github.com/org/repo line1\nline2\nline3")
     expect(result.task).toBe("line1\nline2\nline3")
   })
 
   it("does not match unknown aliases", () => {
-    const result = parseTaskArgs("unknown-alias do stuff")
+    const result = parseTaskArgs(testRepos, "unknown-alias do stuff")
     expect(result).toEqual({ task: "unknown-alias do stuff" })
     expect(result.repoUrl).toBeUndefined()
   })
