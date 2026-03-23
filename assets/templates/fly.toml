@@ -1,0 +1,24 @@
+app = "my-minion-app"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  NODE_ENV = "production"
+  WORKSPACE_ROOT = "/workspace"
+  GOOSE_PROVIDER = "claude-acp"
+  GOOSE_MODEL = "default"
+  HOME = "/workspace/home"
+  IS_SANDBOX = "true"
+  ENABLE_BROWSER_MCP = "true"
+  PLAYWRIGHT_BROWSERS_PATH = "/opt/pw-browsers"
+
+[[mounts]]
+  source = "workspace_data"
+  destination = "/workspace"
+
+[[vm]]
+  size = "shared-cpu-4x"
+  memory = "4gb"
+  auto_stop = false
