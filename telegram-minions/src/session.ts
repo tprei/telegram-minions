@@ -5,6 +5,7 @@ import path from "node:path"
 import { config } from "./config.js"
 import type { GooseStreamEvent, SessionMeta, SessionState } from "./types.js"
 import { translateClaudeEvents } from "./claude-stream.js"
+import { captureException, setContext, addBreadcrumb } from "./sentry.js"
 
 export const SCREENSHOTS_DIR = ".screenshots"
 
@@ -202,6 +203,19 @@ export class SessionHandle {
   ) {}
 
   start(task: string, systemPrompt?: string): void {
+    setContext("session", {
+      sessionId: this.meta.sessionId,
+      repo: this.meta.repo,
+      mode: this.meta.mode,
+      topicName: this.meta.topicName,
+    })
+    addBreadcrumb({
+      category: "session",
+      message: `Starting ${this.meta.mode} session: ${this.meta.topicName}`,
+      level: "info",
+      data: { repo: this.meta.repo, sessionId: this.meta.sessionId },
+    })
+
     if (this.meta.mode === "think" && !systemPrompt) {
       this.startClaudeThink(task)
     } else if (this.meta.mode === "plan" && !systemPrompt) {
@@ -405,6 +419,14 @@ export class SessionHandle {
 
     proc.on("close", (code) => {
       this.clearTimeout()
+      if (code !== 0 && code !== null) {
+        captureException(new Error(`Session process exited with code ${code}`), {
+          sessionId: this.meta.sessionId,
+          repo: this.meta.repo,
+          mode: this.meta.mode,
+          exitCode: code,
+        })
+      }
       const finalState: "completed" | "errored" = code === 0 ? "completed" : "errored"
       this.state = finalState
       this.onDone(this.meta, finalState)
@@ -412,6 +434,11 @@ export class SessionHandle {
 
     proc.on("error", (err) => {
       process.stderr.write(`session ${this.meta.sessionId}: process error: ${err}\n`)
+      captureException(err, {
+        sessionId: this.meta.sessionId,
+        repo: this.meta.repo,
+        mode: this.meta.mode,
+      })
       this.clearTimeout()
       this.state = "errored"
       this.onEvent({ type: "error", error: err.message })
@@ -420,6 +447,12 @@ export class SessionHandle {
 
     this.timeoutHandle = setTimeout(() => {
       process.stderr.write(`session ${this.meta.sessionId}: timeout after ${this.timeoutMs}ms\n`)
+      captureException(new Error("Session timed out"), {
+        sessionId: this.meta.sessionId,
+        repo: this.meta.repo,
+        mode: this.meta.mode,
+        timeoutMs: this.timeoutMs,
+      })
       this.interrupt()
     }, this.timeoutMs)
   }

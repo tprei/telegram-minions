@@ -1,5 +1,6 @@
 import fs from "node:fs"
 import path from "node:path"
+import { captureException } from "./sentry.js"
 
 const STATS_FILENAME = ".stats.json"
 const MAX_RECORDS = 500
@@ -40,6 +41,7 @@ export class StatsTracker {
       fs.writeFileSync(this.filePath, JSON.stringify(records), "utf-8")
     } catch (err) {
       process.stderr.write(`stats: failed to save: ${err}\n`)
+      captureException(err, { operation: "stats.save" })
     }
   }
 

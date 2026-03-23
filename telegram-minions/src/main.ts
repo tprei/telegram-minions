@@ -1,7 +1,10 @@
 import { config } from "./config.js"
+import { initSentry, captureException, flush as flushSentry } from "./sentry.js"
 import { TelegramClient } from "./telegram.js"
 import { Observer } from "./observer.js"
 import { Dispatcher } from "./dispatcher.js"
+
+initSentry(config.sentry.dsn)
 
 const telegram = new TelegramClient(config.telegram.botToken, config.telegram.chatId)
 const observer = new Observer(telegram, config.observer.activityThrottleMs)
@@ -10,23 +13,25 @@ const dispatcher = new Dispatcher(telegram, observer)
 process.on("SIGTERM", () => {
   process.stderr.write("main: received SIGTERM, shutting down\n")
   dispatcher.stop()
-  process.exit(0)
+  flushSentry().finally(() => process.exit(0))
 })
 
 process.on("SIGINT", () => {
   process.stderr.write("main: received SIGINT, shutting down\n")
   dispatcher.stop()
-  process.exit(0)
+  flushSentry().finally(() => process.exit(0))
 })
 
 process.on("uncaughtException", (err) => {
   process.stderr.write(`main: uncaught exception: ${err}\n`)
-  process.exit(1)
+  captureException(err, { handler: "uncaughtException" })
+  flushSentry().finally(() => process.exit(1))
 })
 
 process.on("unhandledRejection", (reason) => {
   process.stderr.write(`main: unhandled rejection: ${reason}\n`)
-  process.exit(1)
+  captureException(reason, { handler: "unhandledRejection" })
+  flushSentry().finally(() => process.exit(1))
 })
 
 process.stderr.write(`main: starting telegram-minions\n`)
@@ -40,5 +45,6 @@ dispatcher.loadPersistedSessions().then(() => {
   return dispatcher.start()
 }).catch((err) => {
   process.stderr.write(`main: dispatcher crashed: ${err}\n`)
-  process.exit(1)
+  captureException(err, { handler: "dispatcher.start" })
+  flushSentry().finally(() => process.exit(1))
 })

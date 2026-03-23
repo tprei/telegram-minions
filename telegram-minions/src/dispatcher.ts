@@ -4,6 +4,7 @@ import path from "node:path"
 import fs from "node:fs"
 import crypto from "node:crypto"
 import type { TelegramClient } from "./telegram.js"
+import { captureException, addBreadcrumb } from "./sentry.js"
 import { SessionHandle } from "./session.js"
 import { Observer } from "./observer.js"
 import type { TelegramUpdate, TelegramCallbackQuery, TelegramPhotoSize, SessionMeta, TopicSession } from "./types.js"
@@ -180,6 +181,7 @@ export class Dispatcher {
         await this.handleUpdate(update)
       } catch (err) {
         process.stderr.write(`dispatcher: error handling update ${update.update_id}: ${err}\n`)
+        captureException(err, { updateId: update.update_id })
       }
     }
 
@@ -482,6 +484,7 @@ export class Dispatcher {
       topic = await this.telegram.createForumTopic(topicName)
     } catch (err) {
       process.stderr.write(`dispatcher: failed to create topic: ${err}\n`)
+      captureException(err, { operation: "createForumTopic" })
       return
     }
 
@@ -625,6 +628,7 @@ export class Dispatcher {
               }
             } catch (err) {
               process.stderr.write(`dispatcher: quality gates error: ${err}\n`)
+              captureException(err, { operation: "qualityGates" })
             }
 
             writeSessionLog(topicSession, m, state, durationMs, qualityReport)
@@ -634,6 +638,7 @@ export class Dispatcher {
               if (prUrl) {
                 this.babysitPR(topicSession, prUrl).catch((err) => {
                   process.stderr.write(`dispatcher: babysitPR error: ${err}\n`)
+                  captureException(err, { operation: "babysitPR", prUrl })
                 })
               }
             }
@@ -957,6 +962,7 @@ export class Dispatcher {
       return workDir
     } catch (err) {
       process.stderr.write(`dispatcher: prepareWorkspace failed: ${err}\n`)
+      captureException(err, { operation: "prepareWorkspace" })
       return null
     }
   }
