@@ -775,14 +775,16 @@ export class Dispatcher {
 
 export function resolveDefaultBranch(bareDir: string, gitOpts: object): string {
   try {
-    const ref = execSync("git symbolic-ref refs/remotes/origin/HEAD", { ...gitOpts, cwd: bareDir })
+    const ref = execSync("git symbolic-ref HEAD", { ...gitOpts, cwd: bareDir })
       .toString().trim()
-    return ref.replace("refs/remotes/", "")
-  } catch { /* not set */ }
+    const branch = ref.replace("refs/heads/", "")
+    execSync(`git rev-parse --verify refs/heads/${branch}`, { ...gitOpts, cwd: bareDir })
+    return branch
+  } catch { /* detached HEAD, unborn branch, or not set */ }
 
-  for (const name of ["origin/main", "origin/master"]) {
+  for (const name of ["main", "master"]) {
     try {
-      execSync(`git rev-parse --verify ${name}`, { ...gitOpts, cwd: bareDir })
+      execSync(`git rev-parse --verify refs/heads/${name}`, { ...gitOpts, cwd: bareDir })
       return name
     } catch { /* doesn't exist */ }
   }

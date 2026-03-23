@@ -376,26 +376,27 @@ describe("resolveDefaultBranch", () => {
     execSync(`git update-ref ${refName} ${commitHash}`, { cwd: bareDir })
   }
 
-  it("resolves via symbolic-ref when origin/HEAD is set", () => {
-    createRef("refs/remotes/origin/main")
-    execSync("git symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main", { cwd: bareDir })
-    expect(resolveDefaultBranch(bareDir, gitOpts)).toBe("origin/main")
+  it("resolves via symbolic-ref when HEAD is set", () => {
+    createRef("refs/heads/main")
+    execSync("git symbolic-ref HEAD refs/heads/main", { cwd: bareDir })
+    expect(resolveDefaultBranch(bareDir, gitOpts)).toBe("main")
   })
 
-  it("falls back to origin/main when origin/HEAD is missing", () => {
-    createRef("refs/remotes/origin/main")
-    expect(resolveDefaultBranch(bareDir, gitOpts)).toBe("origin/main")
+  it("falls back to main when HEAD is missing", () => {
+    createRef("refs/heads/main")
+    expect(resolveDefaultBranch(bareDir, gitOpts)).toBe("main")
   })
 
-  it("falls back to origin/master when origin/main is missing", () => {
-    createRef("refs/remotes/origin/master")
-    expect(resolveDefaultBranch(bareDir, gitOpts)).toBe("origin/master")
+  it("falls back to master when main is missing", () => {
+    createRef("refs/heads/master")
+    expect(resolveDefaultBranch(bareDir, gitOpts)).toBe("master")
   })
 
-  it("prefers origin/main over origin/master when both exist", () => {
-    createRef("refs/remotes/origin/main")
-    createRef("refs/remotes/origin/master")
-    expect(resolveDefaultBranch(bareDir, gitOpts)).toBe("origin/main")
+  it("prefers HEAD over refs/heads/* when both exist", () => {
+    createRef("refs/heads/main")
+    createRef("refs/heads/master")
+    execSync("git symbolic-ref HEAD refs/heads/master", { cwd: bareDir })
+    expect(resolveDefaultBranch(bareDir, gitOpts)).toBe("master")
   })
 
   it("throws when no default branch can be found", () => {
