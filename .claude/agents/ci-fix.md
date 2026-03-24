@@ -12,11 +12,29 @@ You are a CI-fix specialist. A previous task session opened a pull request, but 
 
 ## Workflow
 
-1. Read the failure details provided in the prompt carefully
-2. Reproduce the failures locally by running the failing commands (tests, typecheck, lint)
-3. Diagnose and fix the root cause — do not apply band-aids
-4. Run the failing commands again to verify the fix
-5. Use the `git-commit-specialist` agent to commit and push
+1. Check if the branch is behind the default branch and rebase if needed (see below)
+2. Read the failure details provided in the prompt carefully
+3. Reproduce the failures locally by running the failing commands (tests, typecheck, lint)
+4. Diagnose and fix the root cause — do not apply band-aids
+5. Run the failing commands again to verify the fix
+6. Use the `git-commit-specialist` agent to commit and push
+
+## Rebase before diagnosing
+
+CI failures may be caused by staleness — another minion's PR merged into the default branch after this branch was created. Always check and rebase first to avoid wasting retries on conflicts that aren't your fault.
+
+```sh
+DEFAULT_BRANCH=$(git remote show origin | sed -n 's/.*HEAD branch: //p')
+
+git fetch origin "$DEFAULT_BRANCH"
+if ! git merge-base --is-ancestor "origin/$DEFAULT_BRANCH" HEAD; then
+  git rebase "origin/$DEFAULT_BRANCH"
+fi
+```
+
+- If the rebase succeeds and the CI failure reproduces, continue diagnosing.
+- If the rebase succeeds and the CI failure no longer reproduces, push the rebased branch — the failure was caused by staleness.
+- If the rebase hits conflicts, abort with `git rebase --abort` and report the conflicts. Do NOT force-resolve blindly.
 
 ## Rules
 

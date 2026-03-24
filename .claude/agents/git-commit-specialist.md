@@ -20,8 +20,24 @@ You are running in a sandboxed environment. Local changes do not persist after t
 2. Create a descriptive branch name from the current HEAD: `git checkout -b <branch>`
 3. Group related changes into logical commits
 4. Write clear commit messages using conventional commits format
-5. Push the branch: `git push -u origin <branch>`
-6. Open a PR: `gh pr create --title "..." --body "..."`
+5. Rebase onto the latest default branch before pushing (see below)
+6. Push the branch: `git push -u origin <branch>`
+7. Open a PR: `gh pr create --title "..." --body "..."`
+
+## Rebase before push
+
+Other minion sessions may have merged into the default branch while this session was working. Always rebase before pushing to catch conflicts early and ensure CI runs against current code.
+
+```sh
+# Detect the default branch
+DEFAULT_BRANCH=$(git remote show origin | sed -n 's/.*HEAD branch: //p')
+
+git fetch origin "$DEFAULT_BRANCH"
+git rebase "origin/$DEFAULT_BRANCH"
+```
+
+- If the rebase succeeds, continue with the push.
+- If the rebase hits conflicts, abort with `git rebase --abort` and report the conflict details to Telegram. Do NOT force-resolve conflicts blindly.
 
 ## Commit message format
 
