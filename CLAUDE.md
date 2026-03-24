@@ -106,6 +106,35 @@ All MCPs are installed globally in the Docker image and enabled by default via e
 
 MCP config is built dynamically in `src/session.ts` via `buildMcpServers()`. For Goose sessions it generates `--with-extension` flags; for Claude sessions it generates `--mcp-config` JSON. If an MCP's prerequisites aren't met (e.g., missing `GITHUB_TOKEN`), it's skipped with a stderr warning rather than crashing.
 
+## Session environment passthrough
+
+By default, minion sessions run in an isolated environment with only essential vars (`PATH`, `HOME`, etc.) and a few hardcoded secrets (`GITHUB_TOKEN`, `SENTRY_ACCESS_TOKEN`). To pass additional secrets to sessions, use the explicit passthrough list.
+
+### Via environment variable (CLI/Fly.io)
+
+```sh
+# Set the env var with a comma-separated list of var names to pass through
+fly secrets set SESSION_ENV_PASSTHROUGH="MY_API_KEY,DATABASE_URL,CUSTOM_SECRET_TOKEN"
+```
+
+### As a library user
+
+```typescript
+import { createMinion, configFromEnv } from 'telegram-minions'
+
+const config = configFromEnv({
+  sessionEnvPassthrough: [
+    'MY_API_KEY',
+    'DATABASE_URL',
+    'CUSTOM_SECRET_TOKEN',
+  ]
+})
+
+createMinion(config).start()
+```
+
+Only vars that exist in the parent process environment will be passed through. Missing vars are silently skipped.
+
 ## Fly.io deployment
 
 ```sh

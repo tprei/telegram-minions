@@ -66,6 +66,8 @@ export interface MinionConfig {
   repos: Record<string, string>
   prompts?: Partial<SystemPrompts>
   agentDefs?: AgentDefinitions
+  /** List of environment variable names to pass through to minion sessions */
+  sessionEnvPassthrough?: string[]
 }
 
 export interface SystemPrompts {

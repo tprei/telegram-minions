@@ -18,6 +18,8 @@ export interface SessionConfig {
   claude: ClaudeConfig
   mcp: McpConfig
   profile?: ProviderProfile
+  /** List of environment variable names to pass through to minion sessions */
+  sessionEnvPassthrough?: string[]
 }
 
 const PLAN_DISALLOWED_TOOLS = ["Edit", "Write", "NotebookEdit"]
@@ -193,6 +195,15 @@ export class SessionHandle {
       if (profile.opusModel) baseEnv["ANTHROPIC_DEFAULT_OPUS_MODEL"] = profile.opusModel
       if (profile.sonnetModel) baseEnv["ANTHROPIC_DEFAULT_SONNET_MODEL"] = profile.sonnetModel
       if (profile.haikuModel) baseEnv["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = profile.haikuModel
+    }
+
+    // Add passthrough env vars from config
+    const passthrough = this.sessionConfig.sessionEnvPassthrough ?? []
+    for (const varName of passthrough) {
+      const value = process.env[varName]
+      if (value !== undefined) {
+        baseEnv[varName] = value
+      }
     }
 
     return baseEnv

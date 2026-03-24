@@ -67,6 +67,9 @@ export function configFromEnv(overrides?: Partial<MinionConfig>): MinionConfig {
       dsn: process.env["SENTRY_DSN"] ?? undefined,
     },
     repos: {},
+    sessionEnvPassthrough: process.env["SESSION_ENV_PASSTHROUGH"]
+      ? process.env["SESSION_ENV_PASSTHROUGH"].split(",").map((s) => s.trim()).filter((s) => s.length > 0)
+      : undefined,
     ...overrides,
   }
 
