@@ -18,6 +18,8 @@ import {
   formatFollowUpIteration,
   formatStatus,
   formatHelp,
+  formatQualityReport,
+  formatQualityReportForContext,
 } from "../src/format.js"
 
 describe("esc", () => {
@@ -318,6 +320,114 @@ describe("formatStatus", () => {
     }]
     const msg = formatStatus([], topicSessions, 5)
     expect(msg).not.toContain("calm-bay")
+  })
+})
+
+describe("formatQualityReport", () => {
+  it("returns empty string for no results", () => {
+    expect(formatQualityReport([])).toBe("")
+  })
+
+  it("shows check icon when all pass", () => {
+    const msg = formatQualityReport([
+      { gate: "tests", passed: true, output: "" },
+      { gate: "lint", passed: true, output: "" },
+    ])
+    expect(msg).toContain("✅")
+    expect(msg).toContain("Quality gates")
+  })
+
+  it("shows warning icon when some fail", () => {
+    const msg = formatQualityReport([
+      { gate: "tests", passed: false, output: "FAIL src/app.test.ts" },
+      { gate: "lint", passed: true, output: "" },
+    ])
+    expect(msg).toContain("⚠️")
+    expect(msg).toContain("❌ tests")
+    expect(msg).toContain("✅ lint")
+  })
+
+  it("includes failure output", () => {
+    const msg = formatQualityReport([
+      { gate: "tests", passed: false, output: "Expected 2 but got 3" },
+    ])
+    expect(msg).toContain("Expected 2 but got 3")
+  })
+
+  it("trims long failure output to last 500 chars", () => {
+    const longOutput = "x".repeat(800)
+    const msg = formatQualityReport([
+      { gate: "tests", passed: false, output: longOutput },
+    ])
+    expect(msg).not.toContain("x".repeat(800))
+  })
+})
+
+describe("formatQualityReportForContext", () => {
+  it("includes header", () => {
+    const msg = formatQualityReportForContext([
+      { gate: "tests", passed: true, output: "" },
+    ])
+    expect(msg).toContain("## Quality gate results")
+  })
+
+  it("labels passing gates as PASSED", () => {
+    const msg = formatQualityReportForContext([
+      { gate: "lint", passed: true, output: "" },
+    ])
+    expect(msg).toContain("### lint: PASSED")
+  })
+
+  it("labels failing gates as FAILED", () => {
+    const msg = formatQualityReportForContext([
+      { gate: "tests", passed: false, output: "test error" },
+    ])
+    expect(msg).toContain("### tests: FAILED")
+  })
+
+  it("includes failure output in code blocks", () => {
+    const msg = formatQualityReportForContext([
+      { gate: "tests", passed: false, output: "Expected 2 got 3" },
+    ])
+    expect(msg).toContain("```")
+    expect(msg).toContain("Expected 2 got 3")
+  })
+
+  it("does not include output for passing gates", () => {
+    const msg = formatQualityReportForContext([
+      { gate: "lint", passed: true, output: "all good" },
+    ])
+    expect(msg).not.toContain("all good")
+    expect(msg).not.toContain("```")
+  })
+
+  it("trims long failure output to last 1500 chars", () => {
+    const longOutput = "a".repeat(2000)
+    const msg = formatQualityReportForContext([
+      { gate: "tests", passed: false, output: longOutput },
+    ])
+    expect(msg).not.toContain("a".repeat(2000))
+    expect(msg).toContain("a".repeat(1500))
+  })
+
+  it("includes fix instruction at the end", () => {
+    const msg = formatQualityReportForContext([
+      { gate: "tests", passed: false, output: "error" },
+    ])
+    expect(msg).toContain("Fix the failing quality gates before proceeding.")
+  })
+
+  it("handles mixed results", () => {
+    const msg = formatQualityReportForContext([
+      { gate: "tests", passed: false, output: "fail output" },
+      { gate: "typecheck", passed: true, output: "" },
+      { gate: "lint", passed: false, output: "lint error" },
+    ])
+    expect(msg).toContain("### tests: FAILED")
+    expect(msg).toContain("### typecheck: PASSED")
+    expect(msg).toContain("### lint: FAILED")
+    expect(msg).toContain("fail output")
+    expect(msg).toContain("lint error")
   })
 })
 

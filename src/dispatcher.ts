@@ -24,6 +24,7 @@ import {
   formatFollowUpIteration,
   formatHelp,
   formatQualityReport,
+  formatQualityReportForContext,
   formatBudgetWarning,
   formatStats,
   formatCIWatching,
@@ -34,10 +35,10 @@ import {
   formatProfileList,
   formatConfigHelp,
 } from "./format.js"
-import { runQualityGates } from "./quality-gates.js"
+import { runQualityGates, type QualityReport } from "./quality-gates.js"
 import { StatsTracker } from "./stats.js"
 import { writeSessionLog } from "./session-log.js"
-import { extractPRUrl, waitForCI, getFailedCheckLogs, buildCIFixPrompt } from "./ci-babysit.js"
+import { extractPRUrl, waitForCI, getFailedCheckLogs, buildCIFixPrompt, buildQualityGateFixPrompt } from "./ci-babysit.js"
 import { DEFAULT_CI_FIX_PROMPT } from "./prompts.js"
 
 const POLL_TIMEOUT = 30
@@ -853,6 +854,12 @@ export class Dispatcher {
                   topicSession.threadId,
                 )
               }
+              if (qualityReport && !qualityReport.allPassed) {
+                topicSession.conversation.push({
+                  role: "user",
+                  text: formatQualityReportForContext(qualityReport.results),
+                })
+              }
             } catch (err) {
               process.stderr.write(`dispatcher: quality gates error: ${err}\n`)
               captureException(err, { operation: "qualityGates" })
@@ -863,7 +870,7 @@ export class Dispatcher {
             if (this.config.ci.babysitEnabled && topicSession.mode === "task") {
               const prUrl = this.extractPRFromConversation(topicSession)
               if (prUrl) {
-                this.babysitPR(topicSession, prUrl).catch((err) => {
+                this.babysitPR(topicSession, prUrl, qualityReport).catch((err) => {
                   process.stderr.write(`dispatcher: babysitPR error: ${err}\n`)
                   captureException(err, { operation: "babysitPR", prUrl })
                 })
@@ -906,8 +913,11 @@ export class Dispatcher {
     return null
   }
 
-  private async babysitPR(topicSession: TopicSession, prUrl: string): Promise<void> {
+  private async babysitPR(topicSession: TopicSession, prUrl: string, initialQualityReport?: QualityReport): Promise<void> {
     const maxRetries = this.config.ci.maxRetries
+    let localReport: QualityReport | undefined = initialQualityReport && !initialQualityReport.allPassed
+      ? initialQualityReport
+      : undefined
 
     await this.telegram.sendMessage(
       formatCIWatching(topicSession.slug, prUrl),
@@ -918,7 +928,7 @@ export class Dispatcher {
 
     const result = await waitForCI(prUrl, topicSession.cwd, this.config.ci)
 
-    if (result.passed) {
+    if (result.passed && localReport == null) {
       await this.telegram.sendMessage(
         formatCIPassed(topicSession.slug, prUrl),
         topicSession.threadId,
@@ -927,21 +937,38 @@ export class Dispatcher {
       return
     }
 
-    if (result.timedOut && result.checks.length === 0) {
+    if (result.timedOut && result.checks.length === 0 && localReport == null) {
       process.stderr.write(`dispatcher: no CI checks found for PR ${prUrl}, skipping babysit\n`)
       return
     }
 
     const failedChecks = result.checks.filter((c) => c.bucket === "fail")
+    const hasRemoteFailures = failedChecks.length > 0
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      const failedGateNames = localReport != null
+        ? localReport.results.filter((r) => !r.passed).map((r) => r.gate)
+        : []
+      const allFailedNames = [
+        ...failedChecks.map((c) => c.name),
+        ...failedGateNames.map((g) => `local:${g}`),
+      ]
+
       await this.telegram.sendMessage(
-        formatCIFailed(topicSession.slug, failedChecks.map((c) => c.name), attempt, maxRetries),
+        formatCIFailed(topicSession.slug, allFailedNames, attempt, maxRetries),
         topicSession.threadId,
       )
 
-      const failureDetails = getFailedCheckLogs(prUrl, topicSession.cwd)
-      const fixPrompt = buildCIFixPrompt(prUrl, failedChecks, failureDetails, attempt, maxRetries)
+      let fixPrompt: string
+      if (hasRemoteFailures) {
+        const failureDetails = getFailedCheckLogs(prUrl, topicSession.cwd)
+        fixPrompt = buildCIFixPrompt(prUrl, failedChecks, failureDetails, attempt, maxRetries)
+        if (localReport != null) {
+          fixPrompt += "\n\n" + buildQualityGateFixPrompt(prUrl, localReport, attempt, maxRetries)
+        }
+      } else {
+        fixPrompt = buildQualityGateFixPrompt(prUrl, localReport!, attempt, maxRetries)
+      }
 
       await this.telegram.sendMessage(
         formatCIFixing(topicSession.slug, attempt, maxRetries),
@@ -959,9 +986,25 @@ export class Dispatcher {
 
       process.stderr.write(`dispatcher: CI fix session completed (attempt ${attempt}/${maxRetries})\n`)
 
+      // Re-run local quality gates after fix attempt
+      let localFixed = true
+      if (localReport != null) {
+        try {
+          localReport = runQualityGates(topicSession.cwd)
+          localFixed = localReport.allPassed
+          if (!localFixed) {
+            process.stderr.write(`dispatcher: local quality gates still failing after fix attempt ${attempt}\n`)
+          } else {
+            localReport = undefined
+          }
+        } catch (err) {
+          process.stderr.write(`dispatcher: quality gates re-check error: ${err}\n`)
+        }
+      }
+
       const recheck = await waitForCI(prUrl, topicSession.cwd, this.config.ci)
 
-      if (recheck.passed) {
+      if (recheck.passed && localFixed) {
         await this.telegram.sendMessage(
           formatCIPassed(topicSession.slug, prUrl),
           topicSession.threadId,
