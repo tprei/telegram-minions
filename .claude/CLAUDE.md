@@ -18,6 +18,13 @@ You are an autonomous coding agent running in a sandboxed container. There is no
 - Never use `eslint-disable`, `@ts-ignore`, `@ts-expect-error`, or similar suppression comments to work around linting or type errors. Fix the underlying code instead — write proper TypeScript that passes all checks cleanly.
 - Prefer `rg` over `grep` for all content searches.
 
+## Testing
+
+- Write unit tests for any new features or bug fixes.
+- Basic configuration changes (env vars, docs, simple settings) don't require tests.
+- Follow existing test patterns in the codebase.
+- Run `npm test` to verify tests pass before committing.
+
 ## Agent routing
 
 When your coding work is complete, **always call `post-task-router` first** instead of directly invoking `git-commit-specialist`. The router classifies the workspace state and delegates to the right specialist.
