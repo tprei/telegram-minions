@@ -1,0 +1,33 @@
+{
+  "env": {
+    "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "32000",
+    "DISABLE_COST_WARNINGS": "1",
+    "MAX_MCP_OUTPUT_TOKENS": "32000",
+    "CLAUDE_CODE_STREAM_CLOSE_TIMEOUT": "30000"
+  },
+  "includeCoAuthoredBy": false,
+  "permissions": {
+    "allow": [
+      "Bash(*)",
+      "Read(*)",
+      "Write(*)",
+      "Edit(*)",
+      "MultiEdit(*)",
+      "Glob(*)",
+      "Grep(*)",
+      "WebFetch(*)",
+      "WebSearch(*)",
+      "Agent(explorer)",
+      "Agent(planner)",
+      "Agent(technical-architect)",
+      "Agent(git-commit-specialist)",
+      "mcp__playwright__*",
+      "mcp__github__*",
+      "mcp__context7__*",
+      "mcp__sentry__*"
+    ]
+  },
+  "sandbox": {
+    "enabled": false
+  }
+}

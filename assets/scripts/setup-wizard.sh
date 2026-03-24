@@ -23,6 +23,9 @@ check_cmd() {
 }
 
 main() {
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  PKG_ASSETS="$SCRIPT_DIR/.."
+
   echo -e "\n${BOLD}╔══════════════════════════════════════════╗${RESET}"
   echo -e "${BOLD}║       Minion Setup Wizard                ║${RESET}"
   echo -e "${BOLD}║   Powered by @tprei/telegram-minions     ║${RESET}"
@@ -95,23 +98,23 @@ main() {
   success "Created $PROJECT_DIR/"
 
   # --- Copy agent templates from package ---
-  AGENT_SRC=""
-  if [[ -d "node_modules/@tprei/telegram-minions/assets/agents" ]]; then
-    AGENT_SRC="node_modules/@tprei/telegram-minions/assets/agents"
-  elif command -v npm &>/dev/null; then
-    # Try to find in global npm prefix
-    GLOBAL_PREFIX=$(npm root -g 2>/dev/null)
-    if [[ -d "$GLOBAL_PREFIX/@tprei/telegram-minions/assets/agents" ]]; then
-      AGENT_SRC="$GLOBAL_PREFIX/@tprei/telegram-minions/assets/agents"
-    fi
-  fi
-
-  if [[ -n "$AGENT_SRC" ]]; then
-    cp -r "$AGENT_SRC"/* "$PROJECT_DIR/.claude/agents/" 2>/dev/null || true
+  if [[ -d "$PKG_ASSETS/agents" ]]; then
+    cp -r "$PKG_ASSETS/agents"/* "$PROJECT_DIR/.claude/agents/" 2>/dev/null || true
     success "Copied agent templates to .claude/agents/"
   else
     warn "Could not find agent templates - create .claude/agents/ manually"
   fi
+
+  if [[ -f "$PKG_ASSETS/settings.json" ]]; then
+    cp "$PKG_ASSETS/settings.json" "$PROJECT_DIR/.claude/settings.json"
+    success ".claude/settings.json"
+  fi
+
+  cat > "$PROJECT_DIR/.claude/CLAUDE.md" <<'CLAUDEMD'
+## Project
+
+CLAUDEMD
+  success ".claude/CLAUDE.md"
 
   # --- Generate files ---
   step "Generating files"
@@ -274,25 +277,7 @@ DOCKERFILE
   success "Dockerfile"
 
   # entrypoint.sh
-  cat > "$PROJECT_DIR/entrypoint.sh" <<'ENTRYPOINT'
-#!/bin/bash
-set -e
-
-# Fix volume ownership on first run
-if [[ "$(stat -c %U /workspace 2>/dev/null)" != "minion" ]]; then
-  chown -R minion:minion /workspace
-fi
-
-# Set up npm auth for GitHub Packages
-mkdir -p /workspace/home
-echo "@tprei:registry=https://npm.pkg.github.com" > /workspace/home/.npmrc
-if [[ -n "$GITHUB_TOKEN" ]]; then
-  echo "//npm.pkg.github.com/:_authToken=$GITHUB_TOKEN" >> /workspace/home/.npmrc
-fi
-
-# Drop to minion user and start
-exec su - minion -c "HOME=/workspace/home NODE_ENV=production node /app/dist/index.js"
-ENTRYPOINT
+  cp "$PKG_ASSETS/templates/entrypoint.sh" "$PROJECT_DIR/entrypoint.sh"
   chmod +x "$PROJECT_DIR/entrypoint.sh"
   success "entrypoint.sh"
 
@@ -350,10 +335,6 @@ Thumbs.db
 # Logs
 *.log
 npm-debug.log*
-
-# Claude (but keep agents)
-.claude/*
-!.claude/agents/
 EOF
   success ".gitignore"
 
