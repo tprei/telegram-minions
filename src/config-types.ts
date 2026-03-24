@@ -74,3 +74,13 @@ export interface SystemPrompts {
   plan: string
   think: string
 }
+
+export interface ProviderProfile {
+  id: string
+  name: string
+  baseUrl?: string
+  authToken?: string
+  opusModel?: string
+  sonnetModel?: string
+  haikuModel?: string
+}

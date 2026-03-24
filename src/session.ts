@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process"
 import { createInterface } from "node:readline"
 import fs from "node:fs"
 import path from "node:path"
-import type { GooseConfig, ClaudeConfig, McpConfig } from "./config-types.js"
+import type { GooseConfig, ClaudeConfig, McpConfig, ProviderProfile } from "./config-types.js"
 import type { GooseStreamEvent, SessionMeta, SessionState } from "./types.js"
 import { translateClaudeEvents } from "./claude-stream.js"
 import { captureException, setContext, addBreadcrumb } from "./sentry.js"
@@ -17,6 +17,7 @@ export interface SessionConfig {
   goose: GooseConfig
   claude: ClaudeConfig
   mcp: McpConfig
+  profile?: ProviderProfile
 }
 
 const PLAN_DISALLOWED_TOOLS = ["Edit", "Write", "NotebookEdit"]
@@ -166,7 +167,7 @@ export class SessionHandle {
       fs.copyFileSync(settingsSrc, settingsDst)
     }
 
-    return {
+    const baseEnv: Record<string, string> = {
       PATH: process.env["PATH"] ?? "/usr/local/bin:/usr/bin:/bin",
       HOME: sessionHome,
       CLAUDE_CONFIG_DIR: parentClaudeDir,
@@ -184,6 +185,17 @@ export class SessionHandle {
       GITHUB_PERSONAL_ACCESS_TOKEN: process.env["GITHUB_TOKEN"] ?? "",
       SENTRY_ACCESS_TOKEN: process.env["SENTRY_ACCESS_TOKEN"] ?? "",
     }
+
+    const profile = this.sessionConfig.profile
+    if (profile) {
+      if (profile.baseUrl) baseEnv["ANTHROPIC_BASE_URL"] = profile.baseUrl
+      if (profile.authToken) baseEnv["ANTHROPIC_AUTH_TOKEN"] = profile.authToken
+      if (profile.opusModel) baseEnv["ANTHROPIC_DEFAULT_OPUS_MODEL"] = profile.opusModel
+      if (profile.sonnetModel) baseEnv["ANTHROPIC_DEFAULT_SONNET_MODEL"] = profile.sonnetModel
+      if (profile.haikuModel) baseEnv["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = profile.haikuModel
+    }
+
+    return baseEnv
   }
 
   private startGoose(task: string, systemPrompt?: string): void {

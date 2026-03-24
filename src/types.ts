@@ -147,4 +147,5 @@ export interface TopicSession {
   pendingFeedback: string[]
   mode: SessionMode
   lastActivityAt: number
+  profileId?: string
 }

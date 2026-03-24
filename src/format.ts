@@ -259,6 +259,7 @@ export function formatHelp(): string {
     `<code>/think [repo] question</code> — start a deep research session`,
     `<code>/status</code> — show active sessions`,
     `<code>/stats</code> — show aggregate usage statistics`,
+    `<code>/config</code> — manage provider profiles`,
     `<code>/clean</code> — remove all idle sessions and their topics`,
     `<code>/help</code> — show this message`,
     ``,
@@ -348,4 +349,30 @@ export function formatCIGaveUp(slug: string, maxAttempts: number): string {
 function formatElapsed(ms: number): string {
   const secs = Math.round(ms / 1000)
   return secs >= 60 ? `${Math.floor(secs / 60)}m ${secs % 60}s` : `${secs}s`
+}
+
+export function formatProfileList(profiles: { id: string; name: string; baseUrl?: string }[]): string {
+  const lines: string[] = [`⚙️ <b>Provider profiles</b>`, ""]
+  for (const p of profiles) {
+    const url = p.baseUrl ? ` · ${esc(p.baseUrl)}` : ""
+    lines.push(`• <code>${esc(p.id)}</code> — ${esc(p.name)}${url}`)
+  }
+  lines.push("")
+  lines.push(`<code>/config add &lt;id&gt; &lt;name&gt;</code> — add new profile`)
+  lines.push(`<code>/config set &lt;id&gt; &lt;field&gt; &lt;value&gt;</code> — update field`)
+  lines.push(`<code>/config remove &lt;id&gt;</code> — remove profile`)
+  return lines.join("\n")
+}
+
+export function formatConfigHelp(): string {
+  return [
+    `⚙️ <b>Config commands</b>`,
+    ``,
+    `<code>/config</code> — list profiles`,
+    `<code>/config add &lt;id&gt; &lt;name&gt;</code> — add new profile`,
+    `<code>/config set &lt;id&gt; &lt;field&gt; &lt;value&gt;</code> — update field`,
+    `<code>/config remove &lt;id&gt;</code> — remove profile`,
+    ``,
+    `<b>Fields</b>: name, baseUrl, authToken, opusModel, sonnetModel, haikuModel`,
+  ].join("\n")
 }
