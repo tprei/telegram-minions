@@ -19,14 +19,6 @@ function optionalNumber(name: string, fallback: number): number {
 }
 
 export function configFromEnv(overrides?: Partial<MinionConfig>): MinionConfig {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const dotenv = require("dotenv") as { config: (opts?: { path?: string }) => void }
-    dotenv.config()
-  } catch {
-    // dotenv is optional
-  }
-
   const base: MinionConfig = {
     telegram: {
       botToken: required("TELEGRAM_BOT_TOKEN"),

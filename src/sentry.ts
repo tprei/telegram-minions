@@ -4,16 +4,14 @@ type SentryModule = typeof import("@sentry/node")
 
 let sentry: SentryModule | null = null
 
-export function initSentry(dsn: string | undefined): void {
+export async function initSentry(dsn: string | undefined): Promise<void> {
   if (!dsn) {
     process.stderr.write("sentry: no DSN configured, error reporting disabled\n")
     return
   }
 
   try {
-    // Dynamic import at init time so the module is only loaded when configured
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const mod = require("@sentry/node") as SentryModule
+    const mod = await import("@sentry/node") as SentryModule
     mod.init({
       dsn,
       environment: process.env["NODE_ENV"] ?? "production",

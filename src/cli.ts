@@ -1,11 +1,12 @@
 #!/usr/bin/env node
+import "dotenv/config"
 import { createMinion, configFromEnv } from "./index.js"
 import { initSentry, captureException, flush as flushSentry } from "./sentry.js"
 
 const config = configFromEnv()
 const minion = createMinion(config)
 
-initSentry(config.sentry?.dsn)
+await initSentry(config.sentry?.dsn)
 
 process.stderr.write(`main: starting telegram-minions\n`)
 process.stderr.write(`main: chatId=${config.telegram.chatId}\n`)

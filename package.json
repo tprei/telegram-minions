@@ -24,6 +24,7 @@
     "start": "node dist/cli.js",
     "dev": "npx tsx src/cli.ts",
     "build": "tsc",
+    "lint": "eslint src/",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -33,10 +34,13 @@
     "@sentry/node": "^9.12.0"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/node": "^22.0.0",
     "dotenv": "^16.4.5",
+    "eslint": "^10.1.0",
     "tsx": "^4.19.2",
     "typescript": "^5.9.3",
+    "typescript-eslint": "^8.57.2",
     "vitest": "^4.1.0"
   },
   "peerDependencies": {
