@@ -2,12 +2,16 @@
 mkdir -p /workspace/home/.claude
 chown -R minion:minion /workspace
 
-# Copy custom agent definitions if provided (falls back to package defaults)
-if [ -d /app/.claude/agents ]; then
-  cp -r /app/.claude/agents /workspace/home/.claude/
+# Copy agent definitions from the npm package (updated on version bump)
+PKG_AGENTS=/app/node_modules/@tprei/telegram-minions/assets/agents
+if [ -d "$PKG_AGENTS" ]; then
+  mkdir -p /workspace/home/.claude/agents
+  cp "$PKG_AGENTS"/*.md /workspace/home/.claude/agents/
 fi
+
+# Overlay any client-specific agent overrides
 if [ -d /app/.claude/agents ]; then
-  cp -r /app/.claude/agents /workspace/home/.claude/
+  cp /app/.claude/agents/*.md /workspace/home/.claude/agents/ 2>/dev/null
 fi
 if [ -f /app/.claude/settings.json ]; then
   cp /app/.claude/settings.json /workspace/home/.claude/
