@@ -12,6 +12,7 @@ import { generateSlug } from "./slugs.js"
 import type { MinionConfig } from "./config-types.js"
 import { DEFAULT_PROMPTS } from "./prompts.js"
 import { SessionStore } from "./store.js"
+import { ProfileStore } from "./profile-store.js"
 import {
   formatPlanIteration,
   formatPlanExecuting,
@@ -30,6 +31,8 @@ import {
   formatCIFixing,
   formatCIPassed,
   formatCIGaveUp,
+  formatProfileList,
+  formatConfigHelp,
 } from "./format.js"
 import { runQualityGates } from "./quality-gates.js"
 import { StatsTracker } from "./stats.js"
@@ -50,6 +53,7 @@ const REPLY_SHORT = "/r"
 const CLOSE_CMD = "/close"
 const HELP_CMD = "/help"
 const CLEAN_CMD = "/clean"
+const CONFIG_CMD = "/config"
 
 interface ActiveSession {
   handle: SessionHandle
@@ -60,13 +64,18 @@ interface ActiveSession {
 interface PendingTask {
   task: string
   threadId?: number
+  repoSlug?: string
+  repoUrl?: string
+  mode: "task" | "plan" | "think"
 }
 
 export class Dispatcher {
   private readonly sessions = new Map<number, ActiveSession>()
   private readonly topicSessions = new Map<number, TopicSession>()
   private readonly pendingTasks = new Map<number, PendingTask>()
+  private readonly pendingProfiles = new Map<number, PendingTask>()
   private readonly store: SessionStore
+  private readonly profileStore: ProfileStore
   private offset = 0
   private running = false
   private cleanupTimer: ReturnType<typeof setInterval> | null = null
@@ -79,6 +88,7 @@ export class Dispatcher {
     private readonly config: MinionConfig,
   ) {
     this.store = new SessionStore(this.config.workspace.root)
+    this.profileStore = new ProfileStore(this.config.workspace.root)
     this.stats = new StatsTracker(this.config.workspace.root)
   }
 
@@ -228,6 +238,10 @@ export class Dispatcher {
         await this.handleHelpCommand()
         return
       }
+      if (text === CONFIG_CMD || text?.startsWith(CONFIG_CMD + " ")) {
+        await this.handleConfigCommand(text.slice(CONFIG_CMD.length).trim())
+        return
+      }
     }
 
     if (text?.startsWith(THINK_PREFIX)) {
@@ -281,7 +295,17 @@ export class Dispatcher {
     }
 
     const data = query.data
-    if (!data?.startsWith("repo:") && !data?.startsWith("plan-repo:") && !data?.startsWith("think-repo:")) {
+    if (!data) {
+      await this.telegram.answerCallbackQuery(query.id)
+      return
+    }
+
+    if (data.startsWith("profile:")) {
+      await this.handleProfileCallback(query, data.slice("profile:".length))
+      return
+    }
+
+    if (!data.startsWith("repo:") && !data.startsWith("plan-repo:") && !data.startsWith("think-repo:")) {
       await this.telegram.answerCallbackQuery(query.id)
       return
     }
@@ -307,14 +331,46 @@ export class Dispatcher {
         this.pendingTasks.delete(messageId)
         await this.telegram.answerCallbackQuery(query.id, `Selected: ${repoSlug}`)
         await this.telegram.deleteMessage(messageId)
-        if (isThink) {
-          await this.startTopicSession(repoUrl, pending.task, "think")
-        } else if (isPlan) {
-          await this.startTopicSession(repoUrl, pending.task, "plan")
+
+        pending.repoSlug = repoSlug
+        pending.repoUrl = repoUrl
+
+        const profiles = this.profileStore.list()
+        if (profiles.length > 1) {
+          const keyboard = buildProfileKeyboard(profiles)
+          const msgId = await this.telegram.sendMessageWithKeyboard(
+            `Pick a profile for: <i>${escapeHtml(pending.task)}</i>`,
+            keyboard,
+            pending.threadId,
+          )
+          if (msgId) {
+            this.pendingProfiles.set(msgId, pending)
+          }
         } else {
-          const threadId = query.message?.message_thread_id
-          await this.handleTaskCommand(`${repoUrl} ${pending.task}`, threadId)
+          await this.startTopicSessionWithProfile(repoUrl, pending.task, pending.mode, undefined)
         }
+        return
+      }
+    }
+
+    await this.telegram.answerCallbackQuery(query.id)
+  }
+
+  private async handleProfileCallback(query: TelegramCallbackQuery, profileId: string): Promise<void> {
+    const profile = this.profileStore.get(profileId)
+    if (!profile) {
+      await this.telegram.answerCallbackQuery(query.id, "Unknown profile")
+      return
+    }
+
+    const messageId = query.message?.message_id
+    if (messageId) {
+      const pending = this.pendingProfiles.get(messageId)
+      if (pending) {
+        this.pendingProfiles.delete(messageId)
+        await this.telegram.answerCallbackQuery(query.id, `Selected: ${profile.name}`)
+        await this.telegram.deleteMessage(messageId)
+        await this.startTopicSessionWithProfile(pending.repoUrl, pending.task, pending.mode, profileId)
         return
       }
     }
@@ -336,6 +392,60 @@ export class Dispatcher {
 
   private async handleHelpCommand(): Promise<void> {
     await this.telegram.sendMessage(formatHelp())
+  }
+
+  private async handleConfigCommand(args: string): Promise<void> {
+    if (!args) {
+      const profiles = this.profileStore.list()
+      await this.telegram.sendMessage(formatProfileList(profiles))
+      return
+    }
+
+    const parts = args.split(/\s+/)
+    const subcommand = parts[0]
+
+    if (subcommand === "add" && parts.length >= 3) {
+      const id = parts[1]
+      const name = parts.slice(2).join(" ")
+      const added = this.profileStore.add({ id, name })
+      if (added) {
+        await this.telegram.sendMessage(`✅ Added profile <code>${escapeHtml(id)}</code>`)
+      } else {
+        await this.telegram.sendMessage(`❌ Profile <code>${escapeHtml(id)}</code> already exists`)
+      }
+      return
+    }
+
+    if (subcommand === "set" && parts.length >= 4) {
+      const id = parts[1]
+      const field = parts[2]
+      const value = parts.slice(3).join(" ")
+      const validFields = ["name", "baseUrl", "authToken", "opusModel", "sonnetModel", "haikuModel"]
+      if (!validFields.includes(field)) {
+        await this.telegram.sendMessage(`❌ Invalid field. Valid: ${validFields.join(", ")}`)
+        return
+      }
+      const updated = this.profileStore.update(id, { [field]: value })
+      if (updated) {
+        await this.telegram.sendMessage(`✅ Updated <code>${escapeHtml(id)}.${escapeHtml(field)}</code>`)
+      } else {
+        await this.telegram.sendMessage(`❌ Profile <code>${escapeHtml(id)}</code> not found`)
+      }
+      return
+    }
+
+    if (subcommand === "remove" && parts.length >= 2) {
+      const id = parts[1]
+      const removed = this.profileStore.remove(id)
+      if (removed) {
+        await this.telegram.sendMessage(`✅ Removed profile <code>${escapeHtml(id)}</code>`)
+      } else {
+        await this.telegram.sendMessage(`❌ Cannot remove <code>${escapeHtml(id)}</code> (not found or is default)`)
+      }
+      return
+    }
+
+    await this.telegram.sendMessage(formatConfigHelp())
   }
 
   private async handleCleanCommand(): Promise<void> {
@@ -397,10 +507,24 @@ export class Dispatcher {
           replyThreadId,
         )
         if (msgId) {
-          this.pendingTasks.set(msgId, { task, threadId: replyThreadId })
+          this.pendingTasks.set(msgId, { task, threadId: replyThreadId, mode: "task" })
         }
         return
       }
+    }
+
+    const profiles = this.profileStore.list()
+    if (profiles.length > 1) {
+      const keyboard = buildProfileKeyboard(profiles)
+      const msgId = await this.telegram.sendMessageWithKeyboard(
+        `Pick a profile for: <i>${escapeHtml(task)}</i>`,
+        keyboard,
+        replyThreadId,
+      )
+      if (msgId) {
+        this.pendingProfiles.set(msgId, { task, threadId: replyThreadId, repoUrl, mode: "task" })
+      }
+      return
     }
 
     await this.startTopicSession(repoUrl, task, "task", photos)
@@ -429,10 +553,24 @@ export class Dispatcher {
           replyThreadId,
         )
         if (msgId) {
-          this.pendingTasks.set(msgId, { task, threadId: replyThreadId })
+          this.pendingTasks.set(msgId, { task, threadId: replyThreadId, mode: "plan" })
         }
         return
       }
+    }
+
+    const profiles = this.profileStore.list()
+    if (profiles.length > 1) {
+      const keyboard = buildProfileKeyboard(profiles)
+      const msgId = await this.telegram.sendMessageWithKeyboard(
+        `Pick a profile for plan: <i>${escapeHtml(task)}</i>`,
+        keyboard,
+        replyThreadId,
+      )
+      if (msgId) {
+        this.pendingProfiles.set(msgId, { task, threadId: replyThreadId, repoUrl, mode: "plan" })
+      }
+      return
     }
 
     await this.startTopicSession(repoUrl, task, "plan", photos)
@@ -461,10 +599,24 @@ export class Dispatcher {
           replyThreadId,
         )
         if (msgId) {
-          this.pendingTasks.set(msgId, { task, threadId: replyThreadId })
+          this.pendingTasks.set(msgId, { task, threadId: replyThreadId, mode: "think" })
         }
         return
       }
+    }
+
+    const profiles = this.profileStore.list()
+    if (profiles.length > 1) {
+      const keyboard = buildProfileKeyboard(profiles)
+      const msgId = await this.telegram.sendMessageWithKeyboard(
+        `Pick a profile for research: <i>${escapeHtml(task)}</i>`,
+        keyboard,
+        replyThreadId,
+      )
+      if (msgId) {
+        this.pendingProfiles.set(msgId, { task, threadId: replyThreadId, repoUrl, mode: "think" })
+      }
+      return
     }
 
     await this.startTopicSession(repoUrl, task, "think", photos)
@@ -475,6 +627,7 @@ export class Dispatcher {
     task: string,
     mode: "task" | "plan" | "think",
     photos?: TelegramPhotoSize[],
+    profileId?: string,
   ): Promise<void> {
     const sessionId = crypto.randomUUID()
     const slug = generateSlug(sessionId)
@@ -516,11 +669,21 @@ export class Dispatcher {
       pendingFeedback: [],
       mode,
       lastActivityAt: Date.now(),
+      profileId,
     }
 
     this.topicSessions.set(threadId, topicSession)
 
     await this.spawnTopicAgent(topicSession, fullTask)
+  }
+
+  private async startTopicSessionWithProfile(
+    repoUrl: string | undefined,
+    task: string,
+    mode: "task" | "plan" | "think",
+    profileId?: string,
+  ): Promise<void> {
+    return this.startTopicSession(repoUrl, task, mode, undefined, profileId)
   }
 
   private async updateTopicTitle(topicSession: TopicSession, stateEmoji: string): Promise<void> {
@@ -555,10 +718,12 @@ export class Dispatcher {
     }
 
     const prompts = { ...DEFAULT_PROMPTS, ...this.config.prompts }
+    const profile = topicSession.profileId ? this.profileStore.get(topicSession.profileId) : undefined
     const sessionConfig: SessionConfig = {
       goose: this.config.goose,
       claude: this.config.claude,
       mcp: this.config.mcp,
+      profile,
     }
 
     const handle = new SessionHandle(
@@ -1082,6 +1247,20 @@ export function buildRepoKeyboard(
     const row = [{ text: repoKeys[i], callback_data: `${dataPrefix}:${repoKeys[i]}` }]
     if (i + 1 < repoKeys.length) {
       row.push({ text: repoKeys[i + 1], callback_data: `${dataPrefix}:${repoKeys[i + 1]}` })
+    }
+    rows.push(row)
+  }
+  return rows
+}
+
+export function buildProfileKeyboard(
+  profiles: { id: string; name: string }[],
+): { text: string; callback_data: string }[][] {
+  const rows: { text: string; callback_data: string }[][] = []
+  for (let i = 0; i < profiles.length; i += 2) {
+    const row = [{ text: profiles[i].name, callback_data: `profile:${profiles[i].id}` }]
+    if (i + 1 < profiles.length) {
+      row.push({ text: profiles[i + 1].name, callback_data: `profile:${profiles[i + 1].id}` })
     }
     rows.push(row)
   }
