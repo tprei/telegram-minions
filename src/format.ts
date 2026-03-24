@@ -294,6 +294,25 @@ export function formatQualityReport(
   return lines.join("\n")
 }
 
+export function formatQualityReportForContext(
+  results: { gate: string; passed: boolean; output: string }[],
+): string {
+  const lines: string[] = ["## Quality gate results\n"]
+  for (const r of results) {
+    const status = r.passed ? "PASSED" : "FAILED"
+    lines.push(`### ${r.gate}: ${status}`)
+    if (!r.passed && r.output) {
+      const trimmed = r.output.slice(-1500).trim()
+      lines.push("```")
+      lines.push(trimmed)
+      lines.push("```")
+    }
+    lines.push("")
+  }
+  lines.push("Fix the failing quality gates before proceeding.")
+  return lines.join("\n")
+}
+
 export function formatBudgetWarning(slug: string, tokens: number, budget: number): string {
   return `💰 <b>Token budget exceeded</b>  ·  🏷 <code>${esc(slug)}</code>  ·  ${tokens.toLocaleString()} / ${budget.toLocaleString()} tokens\nSession terminated to limit context usage.`
 }

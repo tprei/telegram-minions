@@ -1,5 +1,6 @@
 import { execSync } from "node:child_process"
 import type { CiConfig } from "./config-types.js"
+import type { QualityReport } from "./quality-gates.js"
 
 export interface CICheckResult {
   name: string
@@ -193,6 +194,40 @@ export function buildCIFixPrompt(
   lines.push("")
   lines.push("---")
   lines.push("Fix the failures above. Run the failing commands locally to verify before pushing.")
+
+  return lines.join("\n")
+}
+
+export function buildQualityGateFixPrompt(
+  prUrl: string,
+  qualityReport: QualityReport,
+  attempt: number,
+  maxAttempts: number,
+): string {
+  const failed = qualityReport.results.filter((r) => !r.passed)
+  const lines: string[] = [
+    "## Local quality gate failures",
+    "",
+    `PR: ${prUrl}`,
+    `Attempt: ${attempt}/${maxAttempts}`,
+    "",
+    "### Failed gates",
+    "",
+  ]
+
+  for (const r of failed) {
+    lines.push(`- **${r.gate}**`)
+    if (r.output) {
+      const trimmed = r.output.slice(-1500).trim()
+      lines.push("```")
+      lines.push(trimmed)
+      lines.push("```")
+    }
+  }
+
+  lines.push("")
+  lines.push("---")
+  lines.push("Fix the local quality gate failures above. Run the failing commands locally to verify before pushing.")
 
   return lines.join("\n")
 }
