@@ -7,6 +7,20 @@ import { captureException } from "./sentry.js"
 
 const MAX_LENGTH = 4096
 const BASE = "https://api.telegram.org"
+const MAX_RETRIES = 3
+const TRANSIENT_RETRY_MS = 2000
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function parseRetryAfter(body: string): number {
+  try {
+    const json = JSON.parse(body)
+    if (json?.parameters?.retry_after) return json.parameters.retry_after
+  } catch { /* not JSON */ }
+  return 10 // safe default
+}
 
 /** Remove control characters that Telegram rejects as invalid UTF-8. */
 function sanitizeText(text: string): string {
@@ -72,24 +86,49 @@ export class TelegramClient {
   }
 
   private async call<T>(method: string, body: Record<string, unknown>): Promise<T> {
-    const res = await fetch(`${this.baseUrl}/${method}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    })
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      let res: Response
+      try {
+        res = await fetch(`${this.baseUrl}/${method}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        })
+      } catch (err) {
+        // Transient network error (DNS, TCP, TLS)
+        if (attempt < MAX_RETRIES - 1) {
+          process.stderr.write(`telegram: ${method} fetch error (attempt ${attempt + 1}), retrying: ${err}\n`)
+          await sleep(TRANSIENT_RETRY_MS * (attempt + 1))
+          continue
+        }
+        throw err
+      }
 
-    if (!res.ok) {
-      const text = await res.text()
-      throw new Error(`Telegram ${method} HTTP ${res.status}: ${text}`)
+      if (res.status === 429) {
+        const text = await res.text()
+        const retryAfter = parseRetryAfter(text)
+        if (attempt < MAX_RETRIES - 1) {
+          process.stderr.write(`telegram: ${method} rate limited, retrying after ${retryAfter}s\n`)
+          await sleep(retryAfter * 1000)
+          continue
+        }
+        throw new Error(`Telegram ${method} HTTP 429: ${text}`)
+      }
+
+      if (!res.ok) {
+        const text = await res.text()
+        throw new Error(`Telegram ${method} HTTP ${res.status}: ${text}`)
+      }
+
+      const data = (await res.json()) as { ok: boolean; result: T; description?: string }
+
+      if (!data.ok) {
+        throw new Error(`Telegram ${method} error: ${data.description ?? "unknown"}`)
+      }
+
+      return data.result
     }
-
-    const data = (await res.json()) as { ok: boolean; result: T; description?: string }
-
-    if (!data.ok) {
-      throw new Error(`Telegram ${method} error: ${data.description ?? "unknown"}`)
-    }
-
-    return data.result
+    throw new Error(`Telegram ${method}: exhausted retries`)
   }
 
   async getUpdates(offset: number, timeout: number): Promise<TelegramUpdate[]> {
@@ -290,23 +329,47 @@ export class TelegramClient {
     threadId?: number,
     caption?: string,
   ): Promise<number | null> {
-    const form = new FormData()
-    form.append("chat_id", this.chatId)
-    form.append("photo", blob, filename)
-    if (threadId !== undefined) form.append("message_thread_id", String(threadId))
-    if (caption) form.append("caption", sanitizeText(caption))
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      const form = new FormData()
+      form.append("chat_id", this.chatId)
+      form.append("photo", blob, filename)
+      if (threadId !== undefined) form.append("message_thread_id", String(threadId))
+      if (caption) form.append("caption", sanitizeText(caption))
 
-    const res = await fetch(`${this.baseUrl}/sendPhoto`, { method: "POST", body: form })
+      let res: Response
+      try {
+        res = await fetch(`${this.baseUrl}/sendPhoto`, { method: "POST", body: form })
+      } catch (err) {
+        if (attempt < MAX_RETRIES - 1) {
+          process.stderr.write(`telegram: sendPhoto fetch error (attempt ${attempt + 1}), retrying: ${err}\n`)
+          await sleep(TRANSIENT_RETRY_MS * (attempt + 1))
+          continue
+        }
+        throw err
+      }
 
-    if (!res.ok) {
-      const text = await res.text()
-      throw new Error(`HTTP ${res.status}: ${text}`)
+      if (res.status === 429) {
+        const text = await res.text()
+        const retryAfter = parseRetryAfter(text)
+        if (attempt < MAX_RETRIES - 1) {
+          process.stderr.write(`telegram: sendPhoto rate limited, retrying after ${retryAfter}s\n`)
+          await sleep(retryAfter * 1000)
+          continue
+        }
+        throw new Error(`HTTP 429: ${text}`)
+      }
+
+      if (!res.ok) {
+        const text = await res.text()
+        throw new Error(`HTTP ${res.status}: ${text}`)
+      }
+
+      const json = (await res.json()) as { ok: boolean; result: { message_id: number }; description?: string }
+      if (!json.ok) throw new Error(json.description ?? "unknown error")
+
+      return json.result.message_id
     }
-
-    const json = (await res.json()) as { ok: boolean; result: { message_id: number }; description?: string }
-    if (!json.ok) throw new Error(json.description ?? "unknown error")
-
-    return json.result.message_id
+    throw new Error("sendPhoto: exhausted retries")
   }
 
   async downloadFile(fileId: string, destPath: string): Promise<boolean> {
