@@ -38,6 +38,8 @@ import {
   formatCIFixing,
   formatCIPassed,
   formatCIGaveUp,
+  formatCIConflicts,
+  formatCINoChecks,
   formatProfileList,
   formatConfigHelp,
   formatSplitAnalyzing,
@@ -50,7 +52,7 @@ import { runQualityGates, type QualityReport } from "./quality-gates.js"
 import { StatsTracker } from "./stats.js"
 import { fetchClaudeUsage } from "./claude-usage.js"
 import { writeSessionLog } from "./session-log.js"
-import { extractPRUrl, waitForCI, getFailedCheckLogs, buildCIFixPrompt, buildQualityGateFixPrompt } from "./ci-babysit.js"
+import { extractPRUrl, waitForCI, getFailedCheckLogs, buildCIFixPrompt, buildQualityGateFixPrompt, checkPRMergeability } from "./ci-babysit.js"
 import { buildConversationDigest } from "./conversation-digest.js"
 import { DEFAULT_CI_FIX_PROMPT } from "./prompts.js"
 
@@ -1218,6 +1220,22 @@ export class Dispatcher {
 
     process.stderr.write(`dispatcher: watching CI for PR ${prUrl} (max ${maxRetries} retries)\n`)
 
+    // Check for merge conflicts before polling CI
+    let mergeState = checkPRMergeability(prUrl, topicSession.cwd)
+    if (mergeState === "UNKNOWN") {
+      // GitHub may still be computing mergeability — retry once after a short delay
+      await new Promise((resolve) => setTimeout(resolve, 5_000))
+      mergeState = checkPRMergeability(prUrl, topicSession.cwd)
+    }
+    if (mergeState === "CONFLICTING") {
+      await this.telegram.sendMessage(
+        formatCIConflicts(topicSession.slug, prUrl),
+        topicSession.threadId,
+      )
+      process.stderr.write(`dispatcher: PR ${prUrl} has merge conflicts, skipping CI babysit\n`)
+      return
+    }
+
     const result = await waitForCI(prUrl, topicSession.cwd, this.config.ci)
 
     if (result.passed && localReport == null) {
@@ -1230,6 +1248,10 @@ export class Dispatcher {
     }
 
     if (result.timedOut && result.checks.length === 0 && localReport == null) {
+      await this.telegram.sendMessage(
+        formatCINoChecks(topicSession.slug, prUrl),
+        topicSession.threadId,
+      )
       process.stderr.write(`dispatcher: no CI checks found for PR ${prUrl}, skipping babysit\n`)
       return
     }
@@ -1292,6 +1314,18 @@ export class Dispatcher {
         } catch (err) {
           process.stderr.write(`dispatcher: quality gates re-check error: ${err}\n`)
         }
+      }
+
+      // Re-check for merge conflicts before polling CI again
+      const retryMergeState = checkPRMergeability(prUrl, topicSession.cwd)
+      if (retryMergeState === "CONFLICTING") {
+        await this.telegram.sendMessage(
+          formatCIConflicts(topicSession.slug, prUrl),
+          topicSession.threadId,
+        )
+        process.stderr.write(`dispatcher: PR ${prUrl} has merge conflicts after fix attempt ${attempt}, aborting\n`)
+        topicSession.mode = "task"
+        return
       }
 
       const recheck = await waitForCI(prUrl, topicSession.cwd, this.config.ci)

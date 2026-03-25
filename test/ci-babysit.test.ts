@@ -1,5 +1,13 @@
-import { describe, it, expect } from "vitest"
-import { extractPRUrl, buildCIFixPrompt, buildQualityGateFixPrompt } from "../src/ci-babysit.js"
+import { describe, it, expect, vi, afterEach } from "vitest"
+import { extractPRUrl, buildCIFixPrompt, buildQualityGateFixPrompt, checkPRMergeability } from "../src/ci-babysit.js"
+
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>()
+  return { ...actual, execSync: vi.fn(actual.execSync) }
+})
+
+import { execSync } from "node:child_process"
+const mockExecSync = vi.mocked(execSync)
 
 describe("extractPRUrl", () => {
   it("extracts a PR URL from conversation text", () => {
@@ -201,5 +209,34 @@ describe("buildQualityGateFixPrompt", () => {
       3,
     )
     expect(prompt).toContain("## Local quality gate failures")
+  })
+})
+
+describe("checkPRMergeability", () => {
+  afterEach(() => { mockExecSync.mockReset() })
+
+  it("returns MERGEABLE when gh reports mergeable", () => {
+    mockExecSync.mockReturnValue(Buffer.from("MERGEABLE\n"))
+    expect(checkPRMergeability("https://github.com/org/repo/pull/1", "/tmp")).toBe("MERGEABLE")
+  })
+
+  it("returns CONFLICTING when gh reports conflicts", () => {
+    mockExecSync.mockReturnValue(Buffer.from("CONFLICTING\n"))
+    expect(checkPRMergeability("https://github.com/org/repo/pull/1", "/tmp")).toBe("CONFLICTING")
+  })
+
+  it("returns UNKNOWN when gh reports unknown", () => {
+    mockExecSync.mockReturnValue(Buffer.from("UNKNOWN\n"))
+    expect(checkPRMergeability("https://github.com/org/repo/pull/1", "/tmp")).toBe("UNKNOWN")
+  })
+
+  it("returns null when gh command fails", () => {
+    mockExecSync.mockImplementation(() => { throw new Error("gh failed") })
+    expect(checkPRMergeability("https://github.com/org/repo/pull/1", "/tmp")).toBeNull()
+  })
+
+  it("returns null for unexpected output", () => {
+    mockExecSync.mockReturnValue(Buffer.from("SOMETHING_ELSE\n"))
+    expect(checkPRMergeability("https://github.com/org/repo/pull/1", "/tmp")).toBeNull()
   })
 })

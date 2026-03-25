@@ -391,6 +391,16 @@ export function formatCIGaveUp(slug: string, maxAttempts: number): string {
   return `🛑 <b>CI still failing</b>  ·  🏷 <code>${esc(slug)}</code>  ·  gave up after ${maxAttempts} attempt${maxAttempts === 1 ? "" : "s"}`
 }
 
+export function formatCIConflicts(slug: string, prUrl: string): string {
+  const prNum = prUrl.match(/\/pull\/(\d+)/)?.[1] ?? prUrl
+  return `⚠️ <b>Merge conflicts</b>  ·  🏷 <code>${esc(slug)}</code>  ·  PR #${esc(prNum)}\n\nCI cannot run until conflicts are resolved.`
+}
+
+export function formatCINoChecks(slug: string, prUrl: string): string {
+  const prNum = prUrl.match(/\/pull\/(\d+)/)?.[1] ?? prUrl
+  return `⏳ <b>No CI checks found</b>  ·  🏷 <code>${esc(slug)}</code>  ·  PR #${esc(prNum)}\n\nTimed out waiting for checks to appear.`
+}
+
 import type { ClaudeUsageResponse, UsageTier } from "./claude-usage.js"
 import type { AggregateStats, SessionRecord, ModeBreakdown } from "./stats.js"
 

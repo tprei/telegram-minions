@@ -232,6 +232,29 @@ export function buildQualityGateFixPrompt(
   return lines.join("\n")
 }
 
+export type MergeableState = "MERGEABLE" | "CONFLICTING" | "UNKNOWN"
+
+export function checkPRMergeability(prUrl: string, cwd: string): MergeableState | null {
+  try {
+    const output = execSync(
+      `gh pr view ${JSON.stringify(prUrl)} --json mergeable --jq .mergeable`,
+      {
+        cwd,
+        timeout: 30_000,
+        stdio: ["ignore", "pipe", "pipe"],
+        env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+      },
+    ).toString().trim()
+
+    if (output === "MERGEABLE" || output === "CONFLICTING" || output === "UNKNOWN") {
+      return output
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }

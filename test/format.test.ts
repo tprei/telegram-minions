@@ -27,6 +27,8 @@ import {
   formatSplitStart,
   formatSplitChildComplete,
   formatSplitAllDone,
+  formatCIConflicts,
+  formatCINoChecks,
   formatUsage,
 } from "../src/format.js"
 import type { ClaudeUsageResponse } from "../src/claude-usage.js"
@@ -582,6 +584,26 @@ describe("formatStatus (review mode)", () => {
       5,
     )
     expect(msg).toContain("👀 review")
+  })
+})
+
+describe("formatCIConflicts", () => {
+  it("includes slug, PR number, and conflict message", () => {
+    const msg = formatCIConflicts("test-slug", "https://github.com/org/repo/pull/42")
+    expect(msg).toContain("Merge conflicts")
+    expect(msg).toContain("test-slug")
+    expect(msg).toContain("PR #42")
+    expect(msg).toContain("CI cannot run until conflicts are resolved")
+  })
+})
+
+describe("formatCINoChecks", () => {
+  it("includes slug, PR number, and timeout message", () => {
+    const msg = formatCINoChecks("test-slug", "https://github.com/org/repo/pull/99")
+    expect(msg).toContain("No CI checks found")
+    expect(msg).toContain("test-slug")
+    expect(msg).toContain("PR #99")
+    expect(msg).toContain("Timed out waiting for checks")
   })
 })
 
