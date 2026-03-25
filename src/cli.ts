@@ -4,7 +4,6 @@ import { createMinion, configFromEnv } from "./index.js"
 import { initSentry, captureException, flush as flushSentry } from "./sentry.js"
 
 const config = configFromEnv()
-const minion = createMinion(config)
 
 await initSentry(config.sentry?.dsn)
 
@@ -13,6 +12,8 @@ process.stderr.write(`main: chatId=${config.telegram.chatId}\n`)
 process.stderr.write(`main: allowedUsers=${config.telegram.allowedUserIds.join(",")}\n`)
 process.stderr.write(`main: workspace=${config.workspace.root}\n`)
 process.stderr.write(`main: maxSessions=${config.workspace.maxConcurrentSessions}\n`)
+
+const minion = createMinion(config)
 
 process.on("SIGTERM", () => {
   process.stderr.write("main: received SIGTERM, shutting down\n")

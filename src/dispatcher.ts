@@ -10,7 +10,7 @@ import type { TelegramClient } from "./telegram.js"
 import { captureException } from "./sentry.js"
 import { SessionHandle, type SessionConfig } from "./session.js"
 import { Observer } from "./observer.js"
-import type { TelegramUpdate, TelegramCallbackQuery, TelegramPhotoSize, SessionMeta, TopicSession } from "./types.js"
+import type { TelegramUpdate, TelegramCallbackQuery, TelegramPhotoSize, SessionMeta, TopicSession, SessionState } from "./types.js"
 import { generateSlug } from "./slugs.js"
 import type { MinionConfig, McpConfig } from "./config-types.js"
 import { DEFAULT_PROMPTS } from "./prompts.js"
@@ -191,18 +191,6 @@ export class Dispatcher {
     // Mark active sessions as interrupted before persisting for restart
     this.persistTopicSessions(true).catch(() => {}) // best effort on shutdown
     process.stderr.write("dispatcher: stopped\n")
-  }
-
-  getSessions(): Map<number, ActiveSession> {
-    return this.sessions
-  }
-
-  getTopicSessions(): Map<number, TopicSession> {
-    return this.topicSessions
-  }
-
-  getDags(): Map<string, DagGraph> {
-    return this.dags
   }
 
   async handleReplyCommand(threadId: number, text: string, _photos?: string[]): Promise<void> {
@@ -2749,6 +2737,66 @@ export class Dispatcher {
 
   activeSessions(): number {
     return this.sessions.size
+  }
+
+  // API server accessors
+  getSessions(): Map<number, { handle: SessionHandle; meta: SessionMeta; task: string }> {
+    return this.sessions
+  }
+
+  getTopicSessions(): Map<number, TopicSession> {
+    return this.topicSessions
+  }
+
+  getDags(): Map<string, DagGraph> {
+    return this.dags
+  }
+
+  getSessionState(threadId: number): SessionState | undefined {
+    const session = this.sessions.get(threadId)
+    return session?.handle.getState()
+  }
+
+  async apiSendReply(threadId: number, message: string): Promise<void> {
+    const topicSession = this.topicSessions.get(threadId)
+    if (!topicSession) {
+      throw new Error(`Session not found: ${threadId}`)
+    }
+
+    // Queue the message for the session to pick up
+    topicSession.pendingFeedback.push(message)
+
+    // Note: If there's no active session, the message will be queued
+    // and processed when the user sends another /reply command
+    // This is a limitation of the current architecture
+  }
+
+  apiStopSession(threadId: number): void {
+    const session = this.sessions.get(threadId)
+    if (session) {
+      session.handle.interrupt()
+    }
+  }
+
+  async apiCloseSession(threadId: number): Promise<void> {
+    const topicSession = this.topicSessions.get(threadId)
+    if (!topicSession) {
+      throw new Error(`Session not found: ${threadId}`)
+    }
+
+    // Stop any active session
+    const activeSession = this.sessions.get(threadId)
+    if (activeSession) {
+      activeSession.handle.interrupt()
+      this.sessions.delete(threadId)
+    }
+
+    // Delete the topic
+    await this.telegram.deleteForumTopic(threadId)
+    await this.removeWorkspace(topicSession)
+    this.topicSessions.delete(threadId)
+    await this.persistTopicSessions()
+    this.updatePinnedSummary()
   }
 }
 

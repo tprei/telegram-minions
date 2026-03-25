@@ -1,333 +1,539 @@
 import http from "node:http"
-import type { MinionConfig } from "./config-types.js"
-import { StatsTracker } from "./stats.js"
-import type { Dispatcher } from "./dispatcher.js"
-import { dagProgress } from "./dag.js"
-import { TelegramClient } from "./telegram.js"
-import { parseBody } from "./http-utils.js"
+import fs from "node:fs"
+import path from "node:path"
+import { EventEmitter } from "node:events"
+import type { TopicSession, SessionState } from "./types.js"
+import type { DagGraph } from "./dag.js"
 
-export interface SessionApiResponse {
-  threadId: number
-  slug: string
-  repo: string
-  mode: string
-  status: "active" | "idle"
-  task: string
-  startedAt: number
-  lastActivityAt: number
-  dagId?: string
-  dagNodeId?: string
-  parentThreadId?: number
-  childThreadIds?: number[]
-}
-
-export interface DagNodeApiResponse {
+export interface ApiSession {
   id: string
-  title: string
-  description: string
-  dependsOn: string[]
-  status: string
-  threadId?: number
+  slug: string
+  status: "pending" | "running" | "completed" | "failed"
+  command: string
+  repo?: string
   branch?: string
   prUrl?: string
+  threadId?: number
+  chatId?: number
+  createdAt: string
+  updatedAt: string
+  parentId?: string
+  childIds: string[]
+}
+
+export interface ApiDagNode {
+  id: string
+  slug: string
+  status: "pending" | "running" | "completed" | "failed" | "skipped"
+  dependencies: string[]
+  dependents: string[]
+  session?: ApiSession
+}
+
+export interface ApiDagGraph {
+  id: string
+  rootTaskId: string
+  nodes: Record<string, ApiDagNode>
+  status: "pending" | "running" | "completed" | "failed"
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ApiResponse<T> {
+  data: T
   error?: string
 }
 
-export interface DagApiResponse {
-  id: string
-  nodes: DagNodeApiResponse[]
-  parentThreadId: number
-  repo: string
-  repoUrl?: string
-  createdAt: number
-  progress: {
-    total: number
-    done: number
-    running: number
-    ready: number
-    pending: number
-    failed: number
-    skipped: number
-  }
-}
-
-export interface StatsApiResponse {
-  totalSessions: number
-  completedSessions: number
-  erroredSessions: number
-  activeSessions: number
-  idleSessions: number
-  totalTokens: number
-}
-
-export interface CommandResponse {
+export interface CommandResult {
   success: boolean
-  message?: string
+  error?: string
 }
 
-export type ApiHttpMethod = "GET" | "POST"
+export type SseEvent =
+  | { type: "session_created"; session: ApiSession }
+  | { type: "session_updated"; session: ApiSession }
+  | { type: "session_deleted"; sessionId: string }
+  | { type: "dag_created"; dag: ApiDagGraph }
+  | { type: "dag_updated"; dag: ApiDagGraph }
+  | { type: "dag_deleted"; dagId: string }
 
-export interface ApiRequest {
-  method: ApiHttpMethod
-  path: string
-  query?: Record<string, string>
-  body?: unknown
+export type MinionCommand =
+  | { action: "reply"; sessionId: string; message: string }
+  | { action: "stop"; sessionId: string }
+  | { action: "close"; sessionId: string }
+
+export interface DispatcherApi {
+  getSessions(): Map<number, { handle: unknown; meta: { sessionId: string; threadId: number }; task: string }>
+  getTopicSessions(): Map<number, TopicSession>
+  getDags(): Map<string, DagGraph>
+  getSessionState(threadId: number): SessionState | undefined
+  sendReply(threadId: number, message: string): Promise<void>
+  stopSession(threadId: number): void
+  closeSession(threadId: number): Promise<void>
 }
 
-export type ApiHandler = (req: ApiRequest) => Promise<unknown>
-
-export class ApiServer {
-  private readonly config: MinionConfig
-  private readonly telegram: TelegramClient
-  private readonly dispatcher: Dispatcher
-  private readonly stats: StatsTracker
-  private server?: http.Server
-  private readonly token?: string
-
-  constructor(
-    config: MinionConfig,
-    telegram: TelegramClient,
-    dispatcher: Dispatcher
-  ) {
-    this.config = config
-    this.telegram = telegram
-    this.dispatcher = dispatcher
-    this.stats = new StatsTracker(config.workspace.root)
-    this.token = config.api?.apiToken ?? process.env["API_TOKEN"]
+export class StateBroadcaster extends EventEmitter {
+  broadcast(event: SseEvent): void {
+    this.emit("event", event)
   }
+}
 
-  start(): void {
-    const port = this.config.api?.port ?? 3000
-    this.server = http.createServer((req, res) => {
-      this.handleRequest(req, res).catch((err) => {
-        process.stderr.write(`api-server: error handling request: ${err}\n`)
-        res.writeHead(500)
-        res.end(JSON.stringify({ error: "Internal server error" }))
-      })
-    })
-    this.server.listen(port, () => {
-      process.stderr.write(`api-server: listening on port ${port}\n`)
-    })
+const MIME_TYPES: Record<string, string> = {
+  ".html": "text/html",
+  ".css": "text/css",
+  ".js": "application/javascript",
+  ".json": "application/json",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".svg": "image/svg+xml",
+  ".ico": "image/x-icon",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
+}
+
+function getMimeType(filePath: string): string {
+  const ext = path.extname(filePath).toLowerCase()
+  return MIME_TYPES[ext] ?? "application/octet-stream"
+}
+
+function topicSessionToApi(
+  session: TopicSession,
+  activeSessionId?: string,
+  sessionState?: SessionState,
+): ApiSession {
+  const status = sessionState === "completed"
+    ? "completed"
+    : sessionState === "errored"
+      ? "failed"
+      : session.activeSessionId || activeSessionId
+        ? "running"
+        : "pending"
+
+  return {
+    id: session.slug,
+    slug: session.slug,
+    status,
+    command: session.conversation[0]?.text ?? "",
+    repo: session.repoUrl,
+    branch: undefined, // Branch info would need to be tracked separately
+    prUrl: undefined, // PR URL would need to be tracked separately
+    threadId: session.threadId,
+    chatId: undefined, // Chat ID is the main forum ID
+    createdAt: new Date().toISOString(), // TopicSession doesn't track startedAt
+    updatedAt: new Date(session.lastActivityAt).toISOString(),
+    parentId: session.parentThreadId?.toString(),
+    childIds: session.childThreadIds?.map(String) ?? [],
   }
+}
 
-  stop(): void {
-    if (this.server) {
-      this.server.close()
-      process.stderr.write(`api-server: closed\n`)
+function dagToApi(
+  graph: DagGraph,
+  topicSessions: Map<number, TopicSession>,
+  sessions: Map<number, { meta: { sessionId: string; threadId: number } }>,
+): ApiDagGraph {
+  const nodes: Record<string, ApiDagNode> = {}
+
+  // Build dependency graph
+  const dependents = new Map<string, string[]>()
+  for (const node of graph.nodes) {
+    dependents.set(node.id, [])
+  }
+  for (const node of graph.nodes) {
+    for (const dep of node.dependsOn) {
+      dependents.get(dep)?.push(node.id)
     }
   }
 
-  private async handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-    const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`)
-    const path = url.pathname
+  for (const node of graph.nodes) {
+    const topicSession = node.threadId ? topicSessions.get(node.threadId) : undefined
+    const activeSession = node.threadId ? sessions.get(node.threadId) : undefined
 
-    if (this.token && req.headers.authorization !== `Bearer ${this.token}`) {
-      res.writeHead(401)
-      res.end(JSON.stringify({ error: "Unauthorized" }))
-      return
+    let apiSession: ApiSession | undefined
+    if (topicSession) {
+      apiSession = topicSessionToApi(topicSession, activeSession?.meta.sessionId)
     }
 
-    res.setHeader("Content-Type", "application/json")
+    nodes[node.id] = {
+      id: node.id,
+      slug: topicSession?.slug ?? node.title,
+      status: node.status === "done"
+        ? "completed"
+        : node.status === "ready"
+          ? "pending"
+          : node.status,
+      dependencies: node.dependsOn,
+      dependents: dependents.get(node.id) ?? [],
+      session: apiSession,
+    }
+  }
+
+  const dagStatus = graph.nodes.every((n) => n.status === "done")
+    ? "completed"
+    : graph.nodes.some((n) => n.status === "failed")
+      ? "failed"
+      : graph.nodes.some((n) => n.status === "running")
+        ? "running"
+        : "pending"
+
+  return {
+    id: graph.id,
+    rootTaskId: graph.parentThreadId.toString(),
+    nodes,
+    status: dagStatus,
+    createdAt: new Date(graph.createdAt).toISOString(),
+    updatedAt: new Date().toISOString(),
+  }
+}
+
+export interface ApiServerOptions {
+  port: number
+  uiDistPath: string
+  chatId: string
+  broadcaster: StateBroadcaster
+}
+
+export function createApiServer(
+  dispatcher: DispatcherApi,
+  options: ApiServerOptions,
+): http.Server {
+  const { port, uiDistPath, chatId, broadcaster } = options
+  const sseClients = new Set<http.ServerResponse>()
+
+  // Broadcast events to all SSE clients
+  broadcaster.on("event", (event: SseEvent) => {
+    const data = `data: ${JSON.stringify(event)}\n\n`
+    for (const client of sseClients) {
+      client.write(data)
+    }
+  })
+
+  const server = http.createServer(async (req, res) => {
+    const url = new URL(req.url ?? "/", `http://localhost:${port}`)
+
+    // CORS headers for development
     res.setHeader("Access-Control-Allow-Origin", "*")
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization")
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type")
 
     if (req.method === "OPTIONS") {
-      res.writeHead(200)
+      res.writeHead(204)
       res.end()
       return
     }
 
-    let body: unknown
-    if (req.method === "POST") {
+    // API routes
+    if (url.pathname.startsWith("/api/")) {
+      await handleApiRoute(req, res, url, dispatcher, chatId, sseClients)
+      return
+    }
+
+    // Telegram Mini App validation endpoint
+    if (url.pathname === "/validate") {
+      await handleValidation(req, res, chatId)
+      return
+    }
+
+    // Serve static files
+    await serveStatic(req, res, url, uiDistPath)
+  })
+
+  return server
+}
+
+async function handleApiRoute(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  url: URL,
+  dispatcher: DispatcherApi,
+  chatId: string,
+  sseClients: Set<http.ServerResponse>,
+): Promise<void> {
+  const pathname = url.pathname
+
+  try {
+    // GET /api/sessions
+    if (pathname === "/api/sessions" && req.method === "GET") {
+      const sessions = dispatcher.getSessions()
+      const topicSessions = dispatcher.getTopicSessions()
+      const apiSessions: ApiSession[] = []
+
+      for (const [threadId, session] of topicSessions) {
+        const activeSession = sessions.get(threadId)
+        const state = dispatcher.getSessionState(threadId)
+        apiSessions.push(topicSessionToApi(session, activeSession?.meta.sessionId, state))
+      }
+
+      res.writeHead(200, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ data: apiSessions }))
+      return
+    }
+
+    // GET /api/sessions/:id
+    const sessionMatch = pathname.match(/^\/api\/sessions\/([^/]+)$/)
+    if (sessionMatch && req.method === "GET") {
+      const slug = sessionMatch[1]
+      const topicSessions = dispatcher.getTopicSessions()
+
+      for (const [threadId, session] of topicSessions) {
+        if (session.slug === slug) {
+          const sessions = dispatcher.getSessions()
+          const activeSession = sessions.get(threadId)
+          const state = dispatcher.getSessionState(threadId)
+          res.writeHead(200, { "Content-Type": "application/json" })
+          res.end(JSON.stringify({ data: topicSessionToApi(session, activeSession?.meta.sessionId, state) }))
+          return
+        }
+      }
+
+      res.writeHead(404, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ data: null, error: "Session not found" }))
+      return
+    }
+
+    // GET /api/dags
+    if (pathname === "/api/dags" && req.method === "GET") {
+      const dags = dispatcher.getDags()
+      const topicSessions = dispatcher.getTopicSessions()
+      const sessions = dispatcher.getSessions()
+      const apiDags: ApiDagGraph[] = []
+
+      for (const graph of dags.values()) {
+        apiDags.push(dagToApi(graph, topicSessions, sessions))
+      }
+
+      res.writeHead(200, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ data: apiDags }))
+      return
+    }
+
+    // GET /api/dags/:id
+    const dagMatch = pathname.match(/^\/api\/dags\/([^/]+)$/)
+    if (dagMatch && req.method === "GET") {
+      const dagId = dagMatch[1]
+      const dag = dispatcher.getDags().get(dagId)
+
+      if (dag) {
+        const topicSessions = dispatcher.getTopicSessions()
+        const sessions = dispatcher.getSessions()
+        res.writeHead(200, { "Content-Type": "application/json" })
+        res.end(JSON.stringify({ data: dagToApi(dag, topicSessions, sessions) }))
+        return
+      }
+
+      res.writeHead(404, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ data: null, error: "DAG not found" }))
+      return
+    }
+
+    // POST /api/commands
+    if (pathname === "/api/commands" && req.method === "POST") {
+      const body = await readBody(req)
+      const command = JSON.parse(body) as MinionCommand
+
+      // Find the thread ID from the session ID (slug)
+      const topicSessions = dispatcher.getTopicSessions()
+      let threadId: number | undefined
+
+      for (const [tid, session] of topicSessions) {
+        if (session.slug === command.sessionId || tid.toString() === command.sessionId) {
+          threadId = tid
+          break
+        }
+      }
+
+      if (!threadId) {
+        res.writeHead(404, { "Content-Type": "application/json" })
+        res.end(JSON.stringify({ success: false, error: "Session not found" }))
+        return
+      }
+
       try {
-        body = await parseBody(req)
-      } catch {
-        res.writeHead(400)
-        res.end(JSON.stringify({ error: "Invalid JSON body" }))
+        switch (command.action) {
+          case "reply":
+            await dispatcher.sendReply(threadId, command.message)
+            break
+          case "stop":
+            dispatcher.stopSession(threadId)
+            break
+          case "close":
+            await dispatcher.closeSession(threadId)
+            break
+        }
+
+        res.writeHead(200, { "Content-Type": "application/json" })
+        res.end(JSON.stringify({ success: true }))
+      } catch (err) {
+        res.writeHead(500, { "Content-Type": "application/json" })
+        res.end(JSON.stringify({ success: false, error: String(err) }))
+      }
+      return
+    }
+
+    // GET /api/events (SSE)
+    if (pathname === "/api/events" && req.method === "GET") {
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+      })
+      res.flushHeaders()
+
+      sseClients.add(res)
+
+      // Send initial connection message
+      res.write(": connected\n\n")
+
+      req.on("close", () => {
+        sseClients.delete(res)
+      })
+      return
+    }
+
+    // 404 for unknown API routes
+    res.writeHead(404, { "Content-Type": "application/json" })
+    res.end(JSON.stringify({ data: null, error: "Not found" }))
+  } catch (err) {
+    process.stderr.write(`api-server: error handling ${pathname}: ${err}\n`)
+    res.writeHead(500, { "Content-Type": "application/json" })
+    res.end(JSON.stringify({ data: null, error: "Internal server error" }))
+  }
+}
+
+async function handleValidation(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  expectedChatId: string,
+): Promise<void> {
+  if (req.method !== "POST") {
+    res.writeHead(405, { "Content-Type": "application/json" })
+    res.end(JSON.stringify({ error: "Method not allowed" }))
+    return
+  }
+
+  try {
+    const body = await readBody(req)
+    const { initData } = JSON.parse(body) as { initData?: string }
+
+    if (!initData) {
+      res.writeHead(400, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ valid: false, error: "Missing initData" }))
+      return
+    }
+
+    // Parse Telegram init data
+    const params = new URLSearchParams(initData)
+    const chatId = params.get("chat_id") ?? params.get("chat")?.split(":")[0]
+
+    if (chatId !== expectedChatId) {
+      res.writeHead(403, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ valid: false, error: "Unauthorized chat" }))
+      return
+    }
+
+    // Check auth_date is recent (within 24 hours)
+    const authDate = params.get("auth_date")
+    if (authDate) {
+      const authTimestamp = parseInt(authDate, 10) * 1000
+      const now = Date.now()
+      const maxAge = 24 * 60 * 60 * 1000 // 24 hours
+
+      if (now - authTimestamp > maxAge) {
+        res.writeHead(403, { "Content-Type": "application/json" })
+        res.end(JSON.stringify({ valid: false, error: "Init data expired" }))
         return
       }
     }
 
-    const method = req.method as ApiHttpMethod
-    const apiReq: ApiRequest = { method, path, query: Object.fromEntries(url.searchParams), body }
+    const user = params.get("user")
+    const userData = user ? JSON.parse(user) : null
 
-    try {
-      const result = await this.route(apiReq)
-      res.writeHead(200)
-      res.end(JSON.stringify(result))
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      res.writeHead(400)
-      res.end(JSON.stringify({ error: message }))
-    }
-  }
-
-  private async route(req: ApiRequest): Promise<unknown> {
-    const { method, path, body } = req
-
-    if (method === "GET" && path === "/api/sessions") {
-      return this.getSessions()
-    }
-
-    if (method === "GET" && path === "/api/dags") {
-      return this.getDags()
-    }
-
-    if (method === "GET" && path.startsWith("/api/dags/")) {
-      const id = path.slice("/api/dags/".length)
-      return this.getDag(id)
-    }
-
-    if (method === "GET" && path === "/api/stats") {
-      return this.getStats()
-    }
-
-    if (method === "POST" && path === "/api/commands") {
-      if (!body) throw new Error("Missing request body")
-      return this.handleCommand(body as { action: string; threadId?: number; text?: string })
-    }
-
-    throw new Error(`Unknown route: ${method} ${path}`)
-  }
-
-  private getSessions(): { sessions: SessionApiResponse[] } {
-    const topicSessions = this.dispatcher.getTopicSessions()
-    const sessions = Array.from(topicSessions.values()).map((session): SessionApiResponse => {
-      const activeSession = this.dispatcher.getSessions().get(session.threadId)
-      return {
-        threadId: session.threadId,
-        slug: session.slug,
-        repo: session.repo,
-        mode: session.mode,
-        status: activeSession ? "active" : "idle",
-        task: session.conversation[0]?.text ?? "",
-        startedAt: session.conversation[0] ? 0 : Date.now(),
-        lastActivityAt: session.lastActivityAt,
-        dagId: session.dagId,
-        dagNodeId: session.dagNodeId,
-        parentThreadId: session.parentThreadId,
-        childThreadIds: session.childThreadIds,
-      }
-    })
-    return { sessions }
-  }
-
-  private getDags(): { dags: DagApiResponse[] } {
-    const dags = this.dispatcher.getDags()
-    const result = Array.from(dags.values()).map((graph): DagApiResponse => {
-      const progress = dagProgress(graph)
-      return {
-        id: graph.id,
-        nodes: graph.nodes.map((node): DagNodeApiResponse => ({
-          id: node.id,
-          title: node.title,
-          description: node.description,
-          dependsOn: node.dependsOn,
-          status: node.status,
-          threadId: node.threadId,
-          branch: node.branch,
-          prUrl: node.prUrl,
-          error: node.error,
-        })),
-        parentThreadId: graph.parentThreadId,
-        repo: graph.repo,
-        repoUrl: graph.repoUrl,
-        createdAt: graph.createdAt,
-        progress: {
-          total: progress.total,
-          done: progress.done,
-          running: progress.running,
-          ready: progress.ready,
-          pending: progress.pending,
-          failed: progress.failed,
-          skipped: progress.skipped,
-        },
-      }
-    })
-    return { dags: result }
-  }
-
-  private getDag(id: string): DagApiResponse {
-    const dag = this.dispatcher.getDags().get(id)
-    if (!dag) throw new Error(`DAG not found: ${id}`)
-    const progress = dagProgress(dag)
-    return {
-      id: dag.id,
-      nodes: dag.nodes.map((node): DagNodeApiResponse => ({
-        id: node.id,
-        title: node.title,
-        description: node.description,
-        dependsOn: node.dependsOn,
-        status: node.status,
-        threadId: node.threadId,
-        branch: node.branch,
-        prUrl: node.prUrl,
-        error: node.error,
-      })),
-      parentThreadId: dag.parentThreadId,
-      repo: dag.repo,
-      repoUrl: dag.repoUrl,
-      createdAt: dag.createdAt,
-      progress: {
-        total: progress.total,
-        done: progress.done,
-        running: progress.running,
-        ready: progress.ready,
-        pending: progress.pending,
-        failed: progress.failed,
-        skipped: progress.skipped,
-      },
-    }
-  }
-
-  private async getStats(): Promise<StatsApiResponse> {
-    const stats = await this.stats.aggregate()
-    const sessions = this.dispatcher.getSessions()
-    const topicSessions = this.dispatcher.getTopicSessions()
-    const totalTokens = Array.from(sessions.values()).reduce((sum, s) => sum + (s.meta.totalTokens ?? 0), 0)
-    const activeSessions = Array.from(topicSessions.values()).filter((s) => s.activeSessionId).length
-    const idleSessions = topicSessions.size - activeSessions
-    return {
-      totalSessions: stats.totalSessions,
-      completedSessions: stats.completedSessions,
-      erroredSessions: stats.erroredSessions,
-      activeSessions,
-      idleSessions,
-      totalTokens,
-    }
-  }
-
-  private async handleCommand(body: { action: string; threadId?: number; text?: string }): Promise<CommandResponse> {
-    const { action, threadId, text } = body
-
-    if (action === "reply") {
-      if (typeof threadId !== "number") throw new Error("threadId must be a number")
-      if (typeof text !== "string") throw new Error("text must be a string")
-      await this.dispatcher.handleReplyCommand(threadId, text)
-      return { success: true, message: `Reply sent to thread ${threadId}` }
-    }
-
-    if (action === "stop") {
-      if (typeof threadId !== "number") throw new Error("threadId must be a number")
-      await this.dispatcher.handleStopCommand(threadId)
-      return { success: true, message: `Stop command sent to thread ${threadId}` }
-    }
-
-    if (action === "close") {
-      if (typeof threadId !== "number") throw new Error("threadId must be a number")
-      await this.dispatcher.handleCloseCommand(threadId)
-      return { success: true, message: `Close command sent to thread ${threadId}` }
-    }
-
-    throw new Error(`Unknown action: ${action}`)
+    res.writeHead(200, { "Content-Type": "application/json" })
+    res.end(JSON.stringify({
+      valid: true,
+      user: userData ? {
+        id: userData.id,
+        username: userData.username,
+        firstName: userData.first_name,
+      } : null,
+    }))
+  } catch (err) {
+    res.writeHead(400, { "Content-Type": "application/json" })
+    res.end(JSON.stringify({ valid: false, error: String(err) }))
   }
 }
 
-export function createApiServer(
-  config: MinionConfig,
-  telegram: TelegramClient,
-  dispatcher: Dispatcher
-): ApiServer {
-  return new ApiServer(config, telegram, dispatcher)
+async function serveStatic(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  url: URL,
+  uiDistPath: string,
+): Promise<void> {
+  let filePath = url.pathname
+
+  // Serve index.html for root and SPA routes
+  if (filePath === "/" || !filePath.includes(".")) {
+    filePath = "/index.html"
+  }
+
+  const fullPath = path.join(uiDistPath, filePath)
+
+  // Security: prevent directory traversal
+  const normalized = path.normalize(fullPath)
+  if (!normalized.startsWith(uiDistPath)) {
+    res.writeHead(403)
+    res.end("Forbidden")
+    return
+  }
+
+  try {
+    const stat = await fs.promises.stat(normalized)
+
+    if (stat.isDirectory()) {
+      // Serve index.html for directories
+      const indexPath = path.join(normalized, "index.html")
+      try {
+        await fs.promises.stat(indexPath)
+        await serveFile(indexPath, res)
+      } catch {
+        res.writeHead(404)
+        res.end("Not found")
+      }
+      return
+    }
+
+    await serveFile(normalized, res)
+  } catch {
+    // For SPA, serve index.html for any not-found route
+    if (!url.pathname.includes(".")) {
+      try {
+        await serveFile(path.join(uiDistPath, "index.html"), res)
+        return
+      } catch {
+        // Fall through to 404
+      }
+    }
+
+    res.writeHead(404)
+    res.end("Not found")
+  }
+}
+
+async function serveFile(filePath: string, res: http.ServerResponse): Promise<void> {
+  const content = await fs.promises.readFile(filePath)
+  const mimeType = getMimeType(filePath)
+
+  res.writeHead(200, {
+    "Content-Type": mimeType,
+    "Cache-Control": mimeType === "text/html" ? "no-cache" : "public, max-age=31536000",
+  })
+  res.end(content)
+}
+
+function readBody(req: http.IncomingMessage): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = []
+    req.on("data", (chunk) => chunks.push(chunk as Buffer))
+    req.on("end", () => resolve(Buffer.concat(chunks).toString("utf-8")))
+    req.on("error", reject)
+  })
 }

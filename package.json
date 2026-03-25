@@ -23,9 +23,12 @@
   "scripts": {
     "start": "node dist/cli.js",
     "dev": "npx tsx src/cli.ts",
-    "build": "tsc",
+    "build": "tsc && npm run build:ui",
+    "build:ui": "cd ui && npm install && npm run build",
     "lint": "eslint src/",
+    "lint:ui": "cd ui && npm run lint",
     "typecheck": "tsc --noEmit",
+    "typecheck:ui": "cd ui && npm run typecheck",
     "test": "vitest run",
     "test:watch": "vitest",
     "prepublishOnly": "npm run build"
