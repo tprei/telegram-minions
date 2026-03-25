@@ -64,6 +64,7 @@ import { extractStackItems, extractDagItems, buildDagChildPrompt } from "./dag-e
 import {
   buildDag, advanceDag, failNode, isDagComplete,
   readyNodes, dagProgress, getUpstreamBranches, topologicalSort,
+  renderDagForGitHub, upsertDagSection,
   type DagGraph, type DagNode, type DagInput,
 } from "./dag.js"
 import { runQualityGates, type QualityReport } from "./quality-gates.js"
@@ -2177,6 +2178,9 @@ export class Dispatcher {
       }
     }
 
+    // Update DAG section in all PR descriptions
+    await this.updateDagPRDescriptions(graph, childSession.cwd)
+
     // Check if DAG is complete
     if (isDagComplete(graph)) {
       const progress = dagProgress(graph)
@@ -2189,6 +2193,35 @@ export class Dispatcher {
     }
 
     await this.persistTopicSessions()
+  }
+
+  /**
+   * Update all DAG child PRs with the current DAG graph rendering.
+   * Uses idempotent HTML comment markers so repeated calls replace rather than append.
+   */
+  private async updateDagPRDescriptions(graph: DagGraph, cwd: string): Promise<void> {
+    const nodesWithPRs = graph.nodes.filter((n) => n.prUrl)
+    if (nodesWithPRs.length === 0) return
+
+    for (const node of nodesWithPRs) {
+      try {
+        const dagSection = renderDagForGitHub(graph, node.id)
+
+        const currentBody = execSync(
+          `gh pr view ${JSON.stringify(node.prUrl!)} --json body --jq .body`,
+          { cwd, stdio: ["pipe", "pipe", "pipe"], timeout: 30_000, env: { ...process.env } },
+        ).toString()
+
+        const newBody = upsertDagSection(currentBody, dagSection)
+
+        execSync(
+          `gh pr edit ${JSON.stringify(node.prUrl!)} --body-file -`,
+          { input: newBody, cwd, stdio: ["pipe", "pipe", "pipe"], timeout: 30_000, env: { ...process.env } },
+        )
+      } catch (err) {
+        process.stderr.write(`dispatcher: failed to update DAG section in PR ${node.prUrl}: ${err}\n`)
+      }
+    }
   }
 
   /**
