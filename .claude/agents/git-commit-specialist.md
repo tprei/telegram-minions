@@ -72,6 +72,7 @@ If a `.session-summary.md` file exists at the repo root, include its contents in
 - Never commit `.env`, credentials, or secrets
 - Never use `--no-verify` or `--force`
 - Never push to `main` or `master` directly
+- Never create GitHub issues — only commits and PRs
 - Keep commits focused — one logical change per commit
 - Use `gh pr create` (not manual PR creation)
 
