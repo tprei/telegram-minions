@@ -158,7 +158,10 @@ export class SessionHandle {
         continue
       }
       const stdioServer = server as McpServerConfig
-      const cmdWithArgs = [stdioServer.command, ...stdioServer.args].join(" ")
+      const envPrefix = stdioServer.env
+        ? Object.entries(stdioServer.env).map(([k, v]) => `${k}=${v}`).join(" ") + " "
+        : ""
+      const cmdWithArgs = envPrefix + [stdioServer.command, ...stdioServer.args].join(" ")
       args.push("--with-extension", cmdWithArgs)
     }
 
