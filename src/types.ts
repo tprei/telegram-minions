@@ -152,4 +152,6 @@ export interface TopicSession {
   childThreadIds?: number[]
   splitLabel?: string
   interruptedAt?: number
+  dagId?: string
+  dagNodeId?: string
 }

@@ -293,6 +293,9 @@ export function formatHelp(): string {
     `<code>/reply text</code> (or <code>/r text</code>) — give feedback to the agent`,
     `<code>/execute [directive]</code> — finalize plan and start implementation (plan/think mode)`,
     `<code>/split [directive]</code> — split plan into parallel sub-tasks (plan/think mode)`,
+    `<code>/stack [directive]</code> — create stacked PRs (sequential chain, plan/think mode)`,
+    `<code>/dag [directive]</code> — create a dependency DAG of tasks (plan/think mode)`,
+    `<code>/land</code> — merge completed stack/DAG PRs to main in order`,
     `<code>/stop</code> — stop the running agent but keep the thread and data`,
     `<code>/close</code> — stop the session, wipe data, and delete the topic`,
   ].join("\n")
@@ -542,6 +545,86 @@ export function formatSplitChildComplete(slug: string, state: string, label: str
 
 export function formatSplitAllDone(succeeded: number, total: number): string {
   return `📊 <b>Split complete</b>: ${succeeded}/${total} succeeded`
+}
+
+export function formatStackAnalyzing(slug: string): string {
+  return `📚 <b>Analyzing conversation</b>  ·  🏷 <code>${esc(slug)}</code>\nExtracting sequential work items for stacked PRs…`
+}
+
+export function formatDagAnalyzing(slug: string): string {
+  return `🔗 <b>Analyzing conversation</b>  ·  🏷 <code>${esc(slug)}</code>\nExtracting work items with dependencies…`
+}
+
+export function formatDagStart(
+  slug: string,
+  children: { slug: string; title: string; dependsOn: string[] }[],
+  isStack: boolean,
+): string {
+  const mode = isStack ? "Stack" : "DAG"
+  const icon = isStack ? "📚" : "🔗"
+  const lines: string[] = [
+    `${icon} <b>${mode}: ${children.length} tasks</b>  ·  🏷 <code>${esc(slug)}</code>`,
+    "",
+  ]
+  for (let i = 0; i < children.length; i++) {
+    const deps = children[i].dependsOn.length > 0
+      ? ` ← ${children[i].dependsOn.join(", ")}`
+      : ""
+    const status = children[i].dependsOn.length === 0 ? "⚡" : "⏳"
+    lines.push(`${i + 1}. ${status} <b>${esc(children[i].slug)}</b> — ${esc(children[i].title)}${deps}`)
+  }
+  lines.push("")
+  if (isStack) {
+    lines.push("Tasks run sequentially. Each task branches from the previous one's PR branch.")
+  } else {
+    lines.push("Tasks run in dependency order. Independent tasks run in parallel.")
+  }
+  return lines.join("\n")
+}
+
+export function formatDagNodeStarting(nodeTitle: string, nodeId: string, slug: string): string {
+  return `⚡ <b>Starting</b>: ${esc(nodeTitle)} (<code>${esc(nodeId)}</code>)  ·  🏷 <code>${esc(slug)}</code>`
+}
+
+export function formatDagNodeComplete(
+  slug: string,
+  state: string,
+  nodeTitle: string,
+  prUrl?: string,
+  progress?: { done: number; total: number; running: number },
+): string {
+  const emoji = state === "errored" ? "❌" : "✅"
+  const prSuffix = prUrl ? ` — <a href="${esc(prUrl)}">PR</a>` : ""
+  const progressSuffix = progress
+    ? `\n📊 ${progress.done}/${progress.total} complete` +
+      (progress.running > 0 ? `, ${progress.running} running` : "")
+    : ""
+  return `${emoji} <b>${esc(slug)}</b> ${esc(state)}: ${esc(nodeTitle)}${prSuffix}${progressSuffix}`
+}
+
+export function formatDagNodeSkipped(nodeTitle: string, reason: string): string {
+  return `⏭️ <b>Skipped</b>: ${esc(nodeTitle)} — ${esc(reason)}`
+}
+
+export function formatDagAllDone(succeeded: number, total: number, failed: number): string {
+  const failedSuffix = failed > 0 ? `, ${failed} failed` : ""
+  return `📊 <b>DAG complete</b>: ${succeeded}/${total} succeeded${failedSuffix}`
+}
+
+export function formatLandStart(slug: string, count: number): string {
+  return `🛬 <b>Landing stack</b>  ·  🏷 <code>${esc(slug)}</code>\nMerging ${count} PRs bottom-up…`
+}
+
+export function formatLandProgress(title: string, prUrl: string, index: number, total: number): string {
+  return `🛬 <b>${index + 1}/${total}</b> Merged: ${esc(title)} — <a href="${esc(prUrl)}">PR</a>`
+}
+
+export function formatLandComplete(succeeded: number, total: number): string {
+  return `🛬 <b>Landing complete</b>: ${succeeded}/${total} PRs merged to main`
+}
+
+export function formatLandError(title: string, error: string): string {
+  return `❌ <b>Landing failed</b> at: ${esc(title)}\n<code>${esc(error)}</code>`
 }
 
 export function formatConfigHelp(): string {

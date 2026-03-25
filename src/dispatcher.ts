@@ -47,8 +47,25 @@ import {
   formatSplitStart,
   formatSplitChildComplete,
   formatSplitAllDone,
+  formatStackAnalyzing,
+  formatDagAnalyzing,
+  formatDagStart,
+  formatDagNodeStarting,
+  formatDagNodeComplete,
+  formatDagNodeSkipped,
+  formatDagAllDone,
+  formatLandStart,
+  formatLandProgress,
+  formatLandComplete,
+  formatLandError,
 } from "./format.js"
 import { extractSplitItems, buildSplitChildPrompt } from "./split.js"
+import { extractStackItems, extractDagItems, buildDagChildPrompt } from "./dag-extract.js"
+import {
+  buildDag, advanceDag, failNode, isDagComplete,
+  readyNodes, dagProgress, getUpstreamBranches, topologicalSort,
+  type DagGraph, type DagNode, type DagInput,
+} from "./dag.js"
 import { runQualityGates, type QualityReport } from "./quality-gates.js"
 import { StatsTracker } from "./stats.js"
 import { fetchClaudeUsage } from "./claude-usage.js"
@@ -75,6 +92,9 @@ const CLEAN_CMD = "/clean"
 const USAGE_CMD = "/usage"
 const CONFIG_CMD = "/config"
 const SPLIT_CMD = "/split"
+const STACK_CMD = "/stack"
+const DAG_CMD = "/dag"
+const LAND_CMD = "/land"
 
 interface ActiveSession {
   handle: SessionHandle
@@ -97,6 +117,7 @@ export class Dispatcher {
   private readonly pendingProfiles = new Map<number, PendingTask>()
   private readonly store: SessionStore
   private readonly profileStore: ProfileStore
+  private readonly dags = new Map<string, DagGraph>()
   private offset = 0
   private running = false
   private cleanupTimer: ReturnType<typeof setInterval> | null = null
@@ -391,6 +412,14 @@ export class Dispatcher {
         } else if ((topicSession.mode === "plan" || topicSession.mode === "think") && (text === SPLIT_CMD || text?.startsWith(SPLIT_CMD + " "))) {
           const directive = text!.slice(SPLIT_CMD.length).trim() || undefined
           await this.handleSplitCommand(topicSession, directive)
+        } else if ((topicSession.mode === "plan" || topicSession.mode === "think") && (text === STACK_CMD || text?.startsWith(STACK_CMD + " "))) {
+          const directive = text!.slice(STACK_CMD.length).trim() || undefined
+          await this.handleStackCommand(topicSession, directive)
+        } else if ((topicSession.mode === "plan" || topicSession.mode === "think") && (text === DAG_CMD || text?.startsWith(DAG_CMD + " "))) {
+          const directive = text!.slice(DAG_CMD.length).trim() || undefined
+          await this.handleDagCommand(topicSession, directive)
+        } else if (text === LAND_CMD) {
+          await this.handleLandCommand(topicSession)
         } else if (text?.startsWith(REPLY_PREFIX + " ") || text?.startsWith(REPLY_SHORT + " ") || text === REPLY_PREFIX || text === REPLY_SHORT) {
           const stripped = text.startsWith(REPLY_PREFIX)
             ? text.slice(REPLY_PREFIX.length).trim()
@@ -1585,6 +1614,12 @@ export class Dispatcher {
   ): Promise<void> {
     if (!childSession.parentThreadId) return
 
+    // If this child is part of a DAG, delegate to DAG completion handler
+    if (childSession.dagId && childSession.dagNodeId) {
+      await this.onDagChildComplete(childSession, state)
+      return
+    }
+
     const parent = this.topicSessions.get(childSession.parentThreadId)
     if (!parent) return
 
@@ -1770,6 +1805,537 @@ export class Dispatcher {
     return threadId
   }
 
+  // ── DAG / Stack commands ──────────────────────────────────────────
+
+  private async handleStackCommand(topicSession: TopicSession, directive?: string): Promise<void> {
+    if (topicSession.activeSessionId) {
+      const activeSession = this.sessions.get(topicSession.threadId)
+      if (activeSession) await activeSession.handle.kill()
+      this.sessions.delete(topicSession.threadId)
+      topicSession.activeSessionId = undefined
+    }
+
+    await this.telegram.sendMessage(
+      formatStackAnalyzing(topicSession.slug),
+      topicSession.threadId,
+    )
+
+    const GRACE_PERIOD_MS = 2000
+    await new Promise((resolve) => setTimeout(resolve, GRACE_PERIOD_MS))
+
+    const result = await extractStackItems(topicSession.conversation, directive)
+
+    if (result.error === "system") {
+      await this.telegram.sendMessage(
+        `⚠️ <b>System error</b> during extraction: <code>${result.errorMessage ?? "Unknown error"}</code>\n\n` +
+        `Try <code>/stack</code> again, or use <code>/execute</code> for a single task.`,
+        topicSession.threadId,
+      )
+      return
+    }
+
+    if (result.items.length === 0) {
+      await this.telegram.sendMessage(
+        `⚠️ Could not extract sequential work items. Try <code>/execute</code> instead.`,
+        topicSession.threadId,
+      )
+      return
+    }
+
+    if (result.items.length === 1) {
+      await this.telegram.sendMessage(
+        `Only 1 item found — using <code>/execute</code> instead.`,
+        topicSession.threadId,
+      )
+      await this.handleExecuteCommand(topicSession, result.items[0].description)
+      return
+    }
+
+    await this.startDag(topicSession, result.items, true)
+  }
+
+  private async handleDagCommand(topicSession: TopicSession, directive?: string): Promise<void> {
+    if (topicSession.activeSessionId) {
+      const activeSession = this.sessions.get(topicSession.threadId)
+      if (activeSession) await activeSession.handle.kill()
+      this.sessions.delete(topicSession.threadId)
+      topicSession.activeSessionId = undefined
+    }
+
+    await this.telegram.sendMessage(
+      formatDagAnalyzing(topicSession.slug),
+      topicSession.threadId,
+    )
+
+    const GRACE_PERIOD_MS = 2000
+    await new Promise((resolve) => setTimeout(resolve, GRACE_PERIOD_MS))
+
+    const result = await extractDagItems(topicSession.conversation, directive)
+
+    if (result.error === "system") {
+      await this.telegram.sendMessage(
+        `⚠️ <b>System error</b> during extraction: <code>${result.errorMessage ?? "Unknown error"}</code>\n\n` +
+        `Try <code>/dag</code> again, or use <code>/split</code> for parallel tasks.`,
+        topicSession.threadId,
+      )
+      return
+    }
+
+    if (result.items.length === 0) {
+      await this.telegram.sendMessage(
+        `⚠️ Could not extract work items with dependencies. Try <code>/split</code> or <code>/execute</code> instead.`,
+        topicSession.threadId,
+      )
+      return
+    }
+
+    if (result.items.length === 1) {
+      await this.telegram.sendMessage(
+        `Only 1 item found — using <code>/execute</code> instead.`,
+        topicSession.threadId,
+      )
+      await this.handleExecuteCommand(topicSession, result.items[0].description)
+      return
+    }
+
+    await this.startDag(topicSession, result.items, false)
+  }
+
+  /**
+   * Build a DAG graph and start scheduling nodes.
+   */
+  private async startDag(
+    topicSession: TopicSession,
+    items: DagInput[],
+    isStack: boolean,
+  ): Promise<void> {
+    const dagId = `dag-${topicSession.slug}`
+
+    let graph: DagGraph
+    try {
+      graph = buildDag(dagId, items, topicSession.threadId, topicSession.repo, topicSession.repoUrl)
+    } catch (err) {
+      await this.telegram.sendMessage(
+        `❌ <b>Invalid DAG</b>: <code>${err instanceof Error ? err.message : String(err)}</code>`,
+        topicSession.threadId,
+      )
+      return
+    }
+
+    // Check session slot availability for initial ready nodes
+    const initialReady = readyNodes(graph)
+    const available = this.config.workspace.maxConcurrentSessions - this.sessions.size
+    if (initialReady.length > available) {
+      await this.telegram.sendMessage(
+        `⚠️ DAG needs ${initialReady.length} initial slots but only ${available} available. Free up sessions first.`,
+        topicSession.threadId,
+      )
+      return
+    }
+
+    // Close existing children before spawning new DAG
+    await this.closeChildSessions(topicSession)
+    topicSession.childThreadIds = []
+    topicSession.dagId = dagId
+
+    this.dags.set(dagId, graph)
+
+    // Send DAG overview
+    const childSummaries = graph.nodes.map((n) => ({
+      slug: n.id,
+      title: n.title,
+      dependsOn: n.dependsOn,
+    }))
+
+    await this.telegram.sendMessage(
+      formatDagStart(topicSession.slug, childSummaries, isStack),
+      topicSession.threadId,
+    )
+    await this.updateTopicTitle(topicSession, isStack ? "📚" : "🔗")
+
+    // Start scheduling ready nodes
+    await this.scheduleDagNodes(topicSession, graph, isStack)
+    await this.persistTopicSessions()
+  }
+
+  /**
+   * Schedule all ready nodes in the DAG for execution.
+   * Called initially and after each node completes.
+   */
+  private async scheduleDagNodes(
+    topicSession: TopicSession,
+    graph: DagGraph,
+    isStack: boolean,
+  ): Promise<void> {
+    const ready = readyNodes(graph)
+
+    for (const node of ready) {
+      const available = this.config.workspace.maxConcurrentSessions - this.sessions.size
+      if (available <= 0) {
+        process.stderr.write(`dispatcher: DAG ${graph.id} — no session slots for node ${node.id}, will retry when a slot opens\n`)
+        break
+      }
+
+      node.status = "running"
+
+      const threadId = await this.spawnDagChild(topicSession, graph, node, isStack)
+      if (threadId) {
+        node.threadId = threadId
+        topicSession.childThreadIds!.push(threadId)
+      } else {
+        const skipped = failNode(graph, node.id)
+        node.error = "Failed to spawn child session"
+
+        await this.telegram.sendMessage(
+          formatDagNodeSkipped(node.title, "Failed to spawn session"),
+          topicSession.threadId,
+        )
+
+        if (skipped.length > 0) {
+          for (const skippedId of skipped) {
+            const skippedNode = graph.nodes.find((n) => n.id === skippedId)!
+            await this.telegram.sendMessage(
+              formatDagNodeSkipped(skippedNode.title, `upstream "${node.id}" failed`),
+              topicSession.threadId,
+            )
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * Spawn a single DAG child session.
+   */
+  private async spawnDagChild(
+    parent: TopicSession,
+    graph: DagGraph,
+    node: DagNode,
+    isStack: boolean,
+  ): Promise<number | null> {
+    const sessionId = crypto.randomUUID()
+    const slug = generateSlug(sessionId)
+    const repo = parent.repo
+    const topicName = `${isStack ? "📚" : "🔗"} ${repo} · ${slug}`
+
+    let topic: { message_thread_id: number }
+    try {
+      topic = await this.telegram.createForumTopic(topicName)
+    } catch (err) {
+      process.stderr.write(`dispatcher: failed to create DAG child topic: ${err}\n`)
+      captureException(err, { operation: "createForumTopic", parentSlug: parent.slug, dagNode: node.id })
+      return null
+    }
+
+    const threadId = topic.message_thread_id
+
+    // Determine the start branch for this node
+    const upstreamBranches = getUpstreamBranches(graph, node.id)
+    let startBranch: string | undefined
+
+    if (upstreamBranches.length === 1) {
+      startBranch = upstreamBranches[0]
+    } else if (upstreamBranches.length > 1) {
+      // Fan-in: need to merge upstream branches
+      const fanInBranch = await this.prepareFanInBranch(slug, parent.repoUrl!, upstreamBranches)
+      if (!fanInBranch) {
+        await this.telegram.sendMessage(
+          `❌ Merge conflict detected when combining upstream branches for <b>${node.title}</b>.`,
+          threadId,
+        )
+        await this.telegram.deleteForumTopic(threadId)
+        return null
+      }
+      startBranch = fanInBranch
+    }
+
+    const cwd = await this.prepareWorkspace(slug, parent.repoUrl, startBranch)
+    if (!cwd) {
+      await this.telegram.sendMessage(`❌ Failed to prepare workspace.`, threadId)
+      await this.telegram.deleteForumTopic(threadId)
+      return null
+    }
+
+    // For fan-in with multiple branches, merge remaining branches into the worktree
+    if (upstreamBranches.length > 1 && startBranch) {
+      const additionalBranches = upstreamBranches.filter((b) => b !== startBranch)
+      if (additionalBranches.length > 0) {
+        const mergeOk = this.mergeUpstreamBranches(cwd, additionalBranches)
+        if (!mergeOk) {
+          await this.telegram.sendMessage(
+            `❌ Merge conflict when combining upstream branches for <b>${node.title}</b>.`,
+            threadId,
+          )
+          await this.telegram.deleteForumTopic(threadId)
+          await this.removeWorkspace({ cwd, repoUrl: parent.repoUrl } as TopicSession).catch(() => {})
+          return null
+        }
+      }
+    }
+
+    const branch = `minion/${slug}`
+    node.branch = branch
+
+    const task = buildDagChildPrompt(
+      parent.conversation,
+      { id: node.id, title: node.title, description: node.description, dependsOn: node.dependsOn },
+      graph.nodes.map((n) => ({ id: n.id, title: n.title, description: n.description, dependsOn: n.dependsOn })),
+      upstreamBranches,
+      isStack,
+    )
+
+    const childSession: TopicSession = {
+      threadId,
+      repo,
+      repoUrl: parent.repoUrl,
+      cwd,
+      slug,
+      conversation: [{ role: "user", text: task }],
+      pendingFeedback: [],
+      mode: "task",
+      lastActivityAt: Date.now(),
+      profileId: parent.profileId,
+      parentThreadId: parent.threadId,
+      splitLabel: node.title,
+      dagId: graph.id,
+      dagNodeId: node.id,
+    }
+
+    this.topicSessions.set(threadId, childSession)
+
+    await this.telegram.sendMessage(
+      formatDagNodeStarting(node.title, node.id, slug),
+      parent.threadId,
+    )
+
+    await this.spawnTopicAgent(childSession, task)
+    return threadId
+  }
+
+  /**
+   * Called when a DAG child session completes.
+   * Advances the DAG and schedules newly ready nodes.
+   */
+  private async onDagChildComplete(
+    childSession: TopicSession,
+    state: string,
+  ): Promise<void> {
+    if (!childSession.dagId || !childSession.dagNodeId) return
+
+    const graph = this.dags.get(childSession.dagId)
+    if (!graph) return
+
+    const node = graph.nodes.find((n) => n.id === childSession.dagNodeId)
+    if (!node) return
+
+    const parent = this.topicSessions.get(graph.parentThreadId)
+    if (!parent) return
+
+    const prUrl = this.extractPRFromConversation(childSession) ?? undefined
+
+    if (state === "errored" || state === "failed") {
+      const skipped = failNode(graph, node.id)
+      node.error = "Session errored"
+
+      const progress = dagProgress(graph)
+      await this.telegram.sendMessage(
+        formatDagNodeComplete(childSession.slug, state, node.title, prUrl, {
+          done: progress.done,
+          total: progress.total,
+          running: progress.running,
+        }),
+        parent.threadId,
+      )
+
+      for (const skippedId of skipped) {
+        const skippedNode = graph.nodes.find((n) => n.id === skippedId)!
+        await this.telegram.sendMessage(
+          formatDagNodeSkipped(skippedNode.title, `upstream "${node.id}" failed`),
+          parent.threadId,
+        )
+      }
+    } else {
+      node.status = "done"
+      node.prUrl = prUrl
+
+      const progress = dagProgress(graph)
+      await this.telegram.sendMessage(
+        formatDagNodeComplete(childSession.slug, state, node.title, prUrl, {
+          done: progress.done,
+          total: progress.total,
+          running: progress.running,
+        }),
+        parent.threadId,
+      )
+
+      // Advance the DAG: find newly ready nodes
+      const newlyReady = advanceDag(graph)
+      if (newlyReady.length > 0) {
+        const isStack = !graph.nodes.some((n) => n.dependsOn.length > 1) &&
+          graph.nodes.every((n, i) => i === 0 || n.dependsOn.length === 1)
+        await this.scheduleDagNodes(parent, graph, isStack)
+      }
+    }
+
+    // Check if DAG is complete
+    if (isDagComplete(graph)) {
+      const progress = dagProgress(graph)
+      await this.telegram.sendMessage(
+        formatDagAllDone(progress.done, progress.total, progress.failed),
+        parent.threadId,
+      )
+      await this.updateTopicTitle(parent, progress.failed > 0 ? "⚠️" : "✅")
+      this.dags.delete(graph.id)
+    }
+
+    await this.persistTopicSessions()
+  }
+
+  /**
+   * Handle /land command — merge completed DAG PRs in topological order.
+   */
+  private async handleLandCommand(topicSession: TopicSession): Promise<void> {
+    if (!topicSession.dagId) {
+      // Fallback: check if this is a split parent with child PRs
+      if (!topicSession.childThreadIds || topicSession.childThreadIds.length === 0) {
+        await this.telegram.sendMessage(
+          `⚠️ No DAG or stack found for this session. Use <code>/stack</code> or <code>/dag</code> first.`,
+          topicSession.threadId,
+        )
+        return
+      }
+    }
+
+    const graph = topicSession.dagId ? this.dags.get(topicSession.dagId) : undefined
+
+    if (graph) {
+      await this.landDag(topicSession, graph)
+    } else {
+      await this.landChildPRs(topicSession)
+    }
+  }
+
+  /**
+   * Land a DAG by merging PRs in topological order.
+   */
+  private async landDag(topicSession: TopicSession, graph: DagGraph): Promise<void> {
+    const sorted = topologicalSort(graph)
+    const prNodes = sorted
+      .map((id) => graph.nodes.find((n) => n.id === id)!)
+      .filter((n) => n.status === "done" && n.prUrl)
+
+    if (prNodes.length === 0) {
+      await this.telegram.sendMessage(
+        `⚠️ No completed PRs to land.`,
+        topicSession.threadId,
+      )
+      return
+    }
+
+    await this.telegram.sendMessage(
+      formatLandStart(topicSession.slug, prNodes.length),
+      topicSession.threadId,
+    )
+
+    let succeeded = 0
+    const gitOpts = { stdio: ["pipe" as const, "pipe" as const, "pipe" as const], timeout: 60_000 }
+
+    for (const node of prNodes) {
+      try {
+        // Merge the PR with squash
+        execSync(
+          `gh pr merge ${JSON.stringify(node.prUrl!)} --squash --delete-branch`,
+          { ...gitOpts, cwd: topicSession.cwd, env: { ...process.env } },
+        )
+        succeeded++
+
+        await this.telegram.sendMessage(
+          formatLandProgress(node.title, node.prUrl!, succeeded - 1, prNodes.length),
+          topicSession.threadId,
+        )
+
+        // Brief pause for GitHub to process the merge and retarget downstream PRs
+        await new Promise((resolve) => setTimeout(resolve, 3000))
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err)
+        await this.telegram.sendMessage(
+          formatLandError(node.title, errMsg),
+          topicSession.threadId,
+        )
+        break
+      }
+    }
+
+    await this.telegram.sendMessage(
+      formatLandComplete(succeeded, prNodes.length),
+      topicSession.threadId,
+    )
+  }
+
+  /**
+   * Land child PRs (for split sessions without a DAG).
+   */
+  private async landChildPRs(topicSession: TopicSession): Promise<void> {
+    if (!topicSession.childThreadIds) return
+
+    const prUrls: { title: string; prUrl: string }[] = []
+    for (const childId of topicSession.childThreadIds) {
+      const child = this.topicSessions.get(childId)
+      if (child) {
+        const prUrl = this.extractPRFromConversation(child)
+        if (prUrl) {
+          prUrls.push({ title: child.splitLabel ?? child.slug, prUrl })
+        }
+      }
+    }
+
+    if (prUrls.length === 0) {
+      await this.telegram.sendMessage(
+        `⚠️ No PRs found among child sessions.`,
+        topicSession.threadId,
+      )
+      return
+    }
+
+    await this.telegram.sendMessage(
+      formatLandStart(topicSession.slug, prUrls.length),
+      topicSession.threadId,
+    )
+
+    let succeeded = 0
+    const gitOpts = { stdio: ["pipe" as const, "pipe" as const, "pipe" as const], timeout: 60_000 }
+    const anyCwd = topicSession.cwd || this.topicSessions.get(topicSession.childThreadIds[0])?.cwd
+
+    for (const { title, prUrl } of prUrls) {
+      try {
+        execSync(
+          `gh pr merge ${JSON.stringify(prUrl)} --squash --delete-branch`,
+          { ...gitOpts, cwd: anyCwd, env: { ...process.env } },
+        )
+        succeeded++
+
+        await this.telegram.sendMessage(
+          formatLandProgress(title, prUrl, succeeded - 1, prUrls.length),
+          topicSession.threadId,
+        )
+
+        await new Promise((resolve) => setTimeout(resolve, 3000))
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err)
+        await this.telegram.sendMessage(
+          formatLandError(title, errMsg),
+          topicSession.threadId,
+        )
+        break
+      }
+    }
+
+    await this.telegram.sendMessage(
+      formatLandComplete(succeeded, prUrls.length),
+      topicSession.threadId,
+    )
+  }
+
   /**
    * Close all children of a parent session.
    * Handles both tracked children (in childThreadIds) and orphaned children (pointing via parentThreadId).
@@ -1893,7 +2459,7 @@ export class Dispatcher {
     return [destPath]
   }
 
-  private async prepareWorkspace(slug: string, repoUrl?: string): Promise<string | null> {
+  private async prepareWorkspace(slug: string, repoUrl?: string, startBranch?: string): Promise<string | null> {
     const workDir = path.join(this.config.workspace.root, slug)
 
     try {
@@ -1917,7 +2483,7 @@ export class Dispatcher {
         }
 
         const branch = `minion/${slug}`
-        const startRef = resolveDefaultBranch(bareDir, gitOpts)
+        const startRef = startBranch ?? resolveDefaultBranch(bareDir, gitOpts)
         process.stderr.write(`dispatcher: adding worktree ${workDir} (branch ${branch}) from ${startRef}\n`)
         execSync(
           `git worktree add ${JSON.stringify(workDir)} -b ${JSON.stringify(branch)} ${startRef}`,
@@ -1935,6 +2501,78 @@ export class Dispatcher {
       captureException(err, { operation: "prepareWorkspace" })
       return null
     }
+  }
+
+  /**
+   * Merge multiple upstream branches into a single merge branch for fan-in nodes.
+   * Returns the merge branch name, or null if merge conflicts occur.
+   */
+  private async prepareFanInBranch(
+    slug: string,
+    repoUrl: string,
+    upstreamBranches: string[],
+  ): Promise<string | null> {
+    if (upstreamBranches.length <= 1) {
+      return upstreamBranches[0] ?? null
+    }
+
+    const repoName = extractRepoName(repoUrl)
+    const bareDir = path.join(this.config.workspace.root, ".repos", `${repoName}.git`)
+    const gitEnv = { ...process.env, GIT_TERMINAL_PROMPT: "0" }
+    const stdio: import("node:child_process").StdioOptions = ["ignore", "pipe", "pipe"]
+    const gitOpts = { stdio, timeout: 120_000, env: gitEnv }
+
+    try {
+      // Fetch latest state
+      execSync(`git fetch --prune origin`, { ...gitOpts, cwd: bareDir })
+
+      // Use git merge-tree to check for conflicts before creating a real merge
+      const baseBranch = upstreamBranches[0]
+      for (let i = 1; i < upstreamBranches.length; i++) {
+        const result = execSync(
+          `git merge-tree --write-tree ${baseBranch} ${upstreamBranches[i]}`,
+          { ...gitOpts, cwd: bareDir },
+        ).toString().trim()
+
+        // If merge-tree reports conflicts, the exit code is non-zero (caught by try/catch)
+        process.stderr.write(`dispatcher: merge-tree check OK for ${baseBranch} + ${upstreamBranches[i]}: ${result.slice(0, 40)}\n`)
+      }
+
+      // No conflicts detected — create the fan-in worktree from the first branch,
+      // then merge the rest in sequence
+      return upstreamBranches[0] // The actual merge happens in prepareWorkspace + post-checkout merge
+    } catch (err) {
+      process.stderr.write(`dispatcher: fan-in merge conflict detected for ${slug}: ${err}\n`)
+      return null
+    }
+  }
+
+  /**
+   * After creating a worktree from one upstream branch, merge additional upstream branches into it.
+   */
+  private mergeUpstreamBranches(workDir: string, additionalBranches: string[]): boolean {
+    const gitEnv = { ...process.env, GIT_TERMINAL_PROMPT: "0" }
+    const stdio: import("node:child_process").StdioOptions = ["ignore", "pipe", "pipe"]
+    const gitOpts = { stdio, timeout: 120_000, env: gitEnv }
+
+    for (const branch of additionalBranches) {
+      try {
+        execSync(
+          `git merge --no-edit ${JSON.stringify(branch)}`,
+          { ...gitOpts, cwd: workDir },
+        )
+        process.stderr.write(`dispatcher: merged ${branch} into worktree ${workDir}\n`)
+      } catch (err) {
+        process.stderr.write(`dispatcher: merge of ${branch} into ${workDir} failed: ${err}\n`)
+        // Abort the merge
+        try {
+          execSync(`git merge --abort`, { ...gitOpts, cwd: workDir })
+        } catch { /* best effort */ }
+        return false
+      }
+    }
+
+    return true
   }
 
   private cleanBuildArtifacts(cwd: string): void {

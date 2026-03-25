@@ -26,6 +26,8 @@ Telegram-controlled Goose coding agents on fly.io. The Dispatcher polls Telegram
 | `src/slugs.ts` | Deterministic adjective-noun slug generator |
 | `src/types.ts` | TypeScript types for Goose events and Telegram API |
 | `src/ci-babysit.ts` | CI polling, failure log parsing, fix prompt builder |
+| `src/dag.ts` | DAG data model, topological sort, scheduling, status rendering |
+| `src/dag-extract.ts` | DAG/stack item extraction from conversations, child prompt building |
 | `goose/config.yaml` | Goose agent configuration (mode, extensions, limits) |
 | `.claude/agents/post-task-router.md` | Haiku classifier — routes completed work to the right action |
 | `.claude/agents/ci-fix.md` | CI fix specialist — diagnoses and fixes CI failures |
@@ -80,6 +82,8 @@ npm run build            # compile to dist/
 2. Reply in the thread with feedback — the agent refines the plan
 3. Send `/execute` to close the planning thread and spawn an execution task with the final plan
 4. Or send `/split` to extract parallelizable items and spawn independent sub-minions
+5. Or send `/stack` to create stacked PRs (sequential chain)
+6. Or send `/dag` to create a dependency graph of tasks
 
 ### Split (parallel sub-tasks from plan/think)
 ```
@@ -91,6 +95,36 @@ npm run build            # compile to dist/
 3. Each child runs as a `/task` in parallel and opens its own PR
 4. The parent topic tracks children and reports aggregate status
 5. Send `/close` in the parent to terminate all children
+
+### Stack (sequential stacked PRs from plan/think)
+```
+/stack
+/stack Focus on the auth flow
+```
+1. Extracts ordered work items from the conversation using a Haiku classifier
+2. Spawns child sessions sequentially — each branches from the previous one's PR branch
+3. Each child opens a PR targeting the previous branch (stacked PRs)
+4. Parent topic tracks progress and shows DAG status
+5. Send `/land` to merge the stack bottom-up into main
+
+### DAG (dependency graph from plan/think)
+```
+/dag
+/dag Only the backend items
+```
+1. Extracts work items with explicit dependencies using a Haiku classifier
+2. Schedules tasks using Kahn's algorithm — independent tasks run in parallel
+3. Fan-in nodes (multiple dependencies) merge upstream branches before starting
+4. Failed nodes skip all transitive dependents
+5. Send `/land` to merge completed PRs in topological order
+
+### Land (merge stack/DAG PRs)
+```
+/land
+```
+1. Merges completed PRs in topological order (bottom-up for stacks)
+2. Uses squash merge with branch deletion
+3. GitHub auto-retargets downstream PRs after each merge
 
 ## Goose stream-json event schema
 
