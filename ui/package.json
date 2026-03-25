@@ -19,7 +19,7 @@
     "@reactflow/core": "^11.11.4",
     "@reactflow/minimap": "^11.7.14",
     "@telegram-apps/telegram-ui": "^2.1.13",
-    "@twa.js/sdk": "^0.11.2",
+    "@twa-dev/sdk": "^8.0.2",
     "dagre": "^0.8.5",
     "preact": "^10.26.4"
   },

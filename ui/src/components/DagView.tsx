@@ -13,18 +13,30 @@ import { MiniMap } from '@reactflow/minimap'
 import dagre from 'dagre'
 import type { DagGraph, DagNode } from '../types'
 import { StatusBadge } from './SessionList'
+import { useTelegram } from '../hooks'
 
 const NODE_WIDTH = 200
 const NODE_HEIGHT = 80
 
 type DagNodeStatus = DagNode['status']
 
-const STATUS_COLORS: Record<DagNodeStatus, { bg: string; border: string; text: string }> = {
-  pending: { bg: '#f3f4f6', border: '#9ca3af', text: '#374151' },
-  running: { bg: '#dbeafe', border: '#3b82f6', text: '#1e40af' },
-  completed: { bg: '#dcfce7', border: '#22c55e', text: '#166534' },
-  failed: { bg: '#fee2e2', border: '#ef4444', text: '#991b1b' },
-  skipped: { bg: '#f5f5f4', border: '#a8a29e', text: '#57534e' },
+function getStatusColors(isDark: boolean): Record<DagNodeStatus, { bg: string; border: string; text: string }> {
+  if (isDark) {
+    return {
+      pending: { bg: '#374151', border: '#6b7280', text: '#e5e7eb' },
+      running: { bg: '#1e3a5f', border: '#3b82f6', text: '#93c5fd' },
+      completed: { bg: '#064e3b', border: '#22c55e', text: '#86efac' },
+      failed: { bg: '#7f1d1d', border: '#ef4444', text: '#fca5a5' },
+      skipped: { bg: '#292524', border: '#78716c', text: '#a8a29e' },
+    }
+  }
+  return {
+    pending: { bg: '#f3f4f6', border: '#9ca3af', text: '#374151' },
+    running: { bg: '#dbeafe', border: '#3b82f6', text: '#1e40af' },
+    completed: { bg: '#dcfce7', border: '#22c55e', text: '#166534' },
+    failed: { bg: '#fee2e2', border: '#ef4444', text: '#991b1b' },
+    skipped: { bg: '#f5f5f4', border: '#a8a29e', text: '#57534e' },
+  }
 }
 
 function getLayoutedElements(
@@ -61,13 +73,20 @@ function getLayoutedElements(
   return { nodes: layoutedNodes, edges }
 }
 
-function convertDagToFlowElements(dag: DagGraph): { nodes: Node[]; edges: Edge[] } {
+function convertDagToFlowElements(
+  dag: DagGraph,
+  isDark: boolean
+): { nodes: Node[]; edges: Edge[] } {
+  const statusColors = getStatusColors(isDark)
+
   const nodes: Node[] = Object.values(dag.nodes).map((dagNode) => ({
     id: dagNode.id,
     type: 'dagNode',
     data: {
       ...dagNode,
       label: dagNode.slug,
+      statusColors: statusColors[dagNode.status],
+      isDark,
     },
     position: { x: 0, y: 0 },
   }))
@@ -83,9 +102,9 @@ function convertDagToFlowElements(dag: DagGraph): { nodes: Node[]; edges: Edge[]
         animated: dagNode.status === 'running',
         markerEnd: {
           type: MarkerType.ArrowClosed,
-          color: '#6b7280',
+          color: isDark ? '#9ca3af' : '#6b7280',
         },
-        style: { stroke: '#6b7280' },
+        style: { stroke: isDark ? '#9ca3af' : '#6b7280' },
       })
     })
   })
@@ -96,28 +115,30 @@ function convertDagToFlowElements(dag: DagGraph): { nodes: Node[]; edges: Edge[]
 interface DagNodeProps {
   data: DagNode & {
     label: string
+    statusColors: { bg: string; border: string; text: string }
+    isDark: boolean
     onNodeClick?: (node: DagNode) => void
   }
 }
 
 function DagNodeComponent({ data }: DagNodeProps) {
-  const colors = STATUS_COLORS[data.status]
+  const colors = data.statusColors
   const [showTooltip, setShowTooltip] = useState(false)
+  const tg = useTelegram()
 
   const handleClick = useCallback(() => {
     if (data.onNodeClick) {
       data.onNodeClick(data)
     } else if (data.session?.threadId && data.session?.chatId) {
       const threadUrl = `https://t.me/c/${Math.abs(data.session.chatId)}/${data.session.threadId}`
-      if (window.Telegram?.WebApp) {
-        window.Telegram.WebApp.openTelegramLink?.(threadUrl)
-      } else {
-        window.open(threadUrl, '_blank')
-      }
+      tg.navigation.openTgLink(threadUrl)
     }
-  }, [data])
+  }, [data, tg.navigation])
 
   const hasThread = Boolean(data.session?.threadId && data.session?.chatId)
+
+  const tooltipBg = data.isDark ? '#1f2937' : '#1f2937' // Always dark for contrast
+  const tooltipColor = '#f9fafb'
 
   return (
     <div
@@ -157,8 +178,8 @@ function DagNodeComponent({ data }: DagNodeProps) {
         <div
           class="absolute z-10 p-2 text-xs rounded shadow-lg"
           style={{
-            backgroundColor: '#1f2937',
-            color: '#f9fafb',
+            backgroundColor: tooltipBg,
+            color: tooltipColor,
             width: '220px',
             left: '50%',
             transform: 'translateX(-50%)',
@@ -198,8 +219,11 @@ interface DagViewProps {
 }
 
 export function DagView({ dag, onNodeClick }: DagViewProps) {
+  const tg = useTelegram()
+  const isDark = tg.darkMode
+
   const { nodes: initialNodes, edges: initialEdges } = useMemo(() => {
-    const { nodes, edges } = convertDagToFlowElements(dag)
+    const { nodes, edges } = convertDagToFlowElements(dag, isDark)
 
     const nodesWithClickHandler = nodes.map((node) => ({
       ...node,
@@ -210,7 +234,7 @@ export function DagView({ dag, onNodeClick }: DagViewProps) {
     }))
 
     return { nodes: nodesWithClickHandler, edges }
-  }, [dag, onNodeClick])
+  }, [dag, onNodeClick, isDark])
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges)
@@ -230,14 +254,18 @@ export function DagView({ dag, onNodeClick }: DagViewProps) {
 
   void onLayout
 
+  const hintColor = isDark ? 'text-gray-400' : 'text-gray-500'
+
   if (Object.keys(dag.nodes).length === 0) {
     return (
-      <div class="text-center py-8 text-telegram-hint">
+      <div class={`text-center py-8 ${hintColor}`}>
         <div class="text-lg">Empty DAG</div>
         <div class="text-sm mt-1">No tasks in this graph</div>
       </div>
     )
   }
+
+  const statusColors = getStatusColors(isDark)
 
   return (
     <div style={{ width: '100%', height: '400px' }}>
@@ -252,14 +280,15 @@ export function DagView({ dag, onNodeClick }: DagViewProps) {
         minZoom={0.3}
         maxZoom={1.5}
       >
-        <Background gap={16} size={1} />
-        <Controls />
+        <Background gap={16} size={1} color={isDark ? '#374151' : '#e5e7eb'} />
+        <Controls style={{ filter: isDark ? 'invert(1)' : undefined }} />
         <MiniMap
           nodeColor={(node: Node) => {
             const status = (node.data as { status?: DagNodeStatus })?.status
-            return status ? STATUS_COLORS[status].border : '#6b7280'
+            return status ? statusColors[status].border : '#6b7280'
           }}
-          maskColor="rgba(0,0,0,0.1)"
+          maskColor={isDark ? 'rgba(0,0,0,0.3)' : 'rgba(0,0,0,0.1)'}
+          style={{ filter: isDark ? 'invert(0.8) hue-rotate(180deg)' : undefined }}
         />
       </ReactFlow>
     </div>
@@ -273,10 +302,15 @@ interface DagListProps {
 }
 
 export function DagList({ dags, isLoading, onNodeClick }: DagListProps) {
+  const tg = useTelegram()
+  const headingColor = tg.darkMode ? 'text-white' : 'text-gray-900'
+  const cardBg = tg.darkMode ? 'bg-gray-800' : 'bg-gray-50'
+  const hintColor = tg.darkMode ? 'text-gray-400' : 'text-gray-500'
+
   if (isLoading && dags.length === 0) {
     return (
       <div class="text-center py-8">
-        <div class="animate-pulse text-telegram-hint">Loading DAGs...</div>
+        <div class={`animate-pulse ${hintColor}`}>Loading DAGs...</div>
       </div>
     )
   }
@@ -287,17 +321,17 @@ export function DagList({ dags, isLoading, onNodeClick }: DagListProps) {
 
   return (
     <section class="mt-8">
-      <h2 class="text-lg font-semibold text-telegram-text mb-3">DAG Workflows</h2>
+      <h2 class={`text-lg font-semibold mb-3 ${headingColor}`}>DAG Workflows</h2>
       {dags.map((dag) => (
-        <div key={dag.id} class="bg-telegram-secondary rounded-lg p-4 mb-4">
+        <div key={dag.id} class={`${cardBg} rounded-lg p-4 mb-4`}>
           <div class="flex items-center justify-between mb-3">
             <div class="flex items-center gap-2">
-              <span class="font-medium text-telegram-text">
+              <span class={`font-medium ${headingColor}`}>
                 {Object.values(dag.nodes).find((n) => n.id === dag.rootTaskId)?.slug || 'DAG'}
               </span>
               <StatusBadge status={dag.status === 'failed' ? 'failed' : dag.status} />
             </div>
-            <span class="text-xs text-telegram-hint">
+            <span class={`text-xs ${hintColor}`}>
               {Object.values(dag.nodes).length} nodes
             </span>
           </div>

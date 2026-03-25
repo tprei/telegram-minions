@@ -1,4 +1,5 @@
 import { useCallback, useEffect } from 'preact/hooks'
+import { useTelegram } from '../hooks'
 
 interface ConfirmDialogProps {
   isOpen: boolean
@@ -23,6 +24,8 @@ export function ConfirmDialog({
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
+  const tg = useTelegram()
+
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -45,27 +48,37 @@ export function ConfirmDialog({
 
   const confirmButtonClass =
     confirmVariant === 'danger'
-      ? 'bg-red-500 text-white hover:bg-red-600'
-      : 'bg-telegram-button text-telegram-buttonText hover:opacity-90'
+      ? tg.darkMode
+        ? 'bg-red-600 text-white hover:bg-red-700'
+        : 'bg-red-500 text-white hover:bg-red-600'
+      : tg.darkMode
+        ? 'bg-blue-600 text-white hover:bg-blue-700'
+        : 'bg-blue-500 text-white hover:bg-blue-600'
+
+  const overlayBg = tg.darkMode ? 'bg-black/70' : 'bg-black/50'
+  const dialogBg = tg.darkMode ? 'bg-gray-800' : 'bg-white'
+  const titleColor = tg.darkMode ? 'text-white' : 'text-gray-900'
+  const messageColor = tg.darkMode ? 'text-gray-300' : 'text-gray-600'
+  const cancelColor = tg.darkMode ? 'text-gray-300 hover:bg-gray-700' : 'text-gray-600 hover:bg-gray-100'
 
   return (
     <div class="fixed inset-0 z-50 flex items-center justify-center">
-      <div class="absolute inset-0 bg-black/50" onClick={onCancel} />
+      <div class={`absolute inset-0 ${overlayBg}`} onClick={onCancel} />
       <div
-        class="relative bg-telegram-bg rounded-lg p-4 max-w-sm w-full mx-4 shadow-xl"
+        class={`relative ${dialogBg} rounded-lg p-4 max-w-sm w-full mx-4 shadow-xl`}
         role="dialog"
         aria-modal="true"
         aria-labelledby="dialog-title"
       >
-        <h3 id="dialog-title" class="text-lg font-semibold text-telegram-text mb-2">
+        <h3 id="dialog-title" class={`text-lg font-semibold ${titleColor} mb-2`}>
           {title}
         </h3>
-        <p class="text-sm text-telegram-hint mb-4">{message}</p>
+        <p class={`text-sm ${messageColor} mb-4`}>{message}</p>
         <div class="flex justify-end gap-2">
           <button
             onClick={onCancel}
             disabled={isLoading}
-            class="px-4 py-2 text-sm font-medium text-telegram-hint hover:bg-telegram-secondary rounded transition-colors disabled:opacity-50"
+            class={`px-4 py-2 text-sm font-medium rounded transition-colors disabled:opacity-50 ${cancelColor}`}
           >
             {cancelLabel}
           </button>
@@ -91,6 +104,8 @@ interface ReplyDialogProps {
 }
 
 export function ReplyDialog({ isOpen, sessionId, isLoading, onSend, onCancel }: ReplyDialogProps) {
+  const tg = useTelegram()
+
   const handleSubmit = useCallback(
     (e: Event) => {
       e.preventDefault()
@@ -106,20 +121,30 @@ export function ReplyDialog({ isOpen, sessionId, isLoading, onSend, onCancel }: 
 
   if (!isOpen) return null
 
+  const overlayBg = tg.darkMode ? 'bg-black/70' : 'bg-black/50'
+  const dialogBg = tg.darkMode ? 'bg-gray-800' : 'bg-white'
+  const titleColor = tg.darkMode ? 'text-white' : 'text-gray-900'
+  const hintColor = tg.darkMode ? 'text-gray-400' : 'text-gray-500'
+  const inputBg = tg.darkMode ? 'bg-gray-700 border-gray-600' : 'bg-gray-50 border-gray-300'
+  const inputText = tg.darkMode ? 'text-white' : 'text-gray-900'
+  const cancelColor = tg.darkMode ? 'text-gray-300 hover:bg-gray-700' : 'text-gray-600 hover:bg-gray-100'
+  const buttonBg = tg.isTelegram ? tg.theme.buttonColor : tg.darkMode ? 'bg-blue-600' : 'bg-blue-500'
+  const buttonText = tg.isTelegram ? tg.theme.buttonTextColor : 'text-white'
+
   return (
     <div class="fixed inset-0 z-50 flex items-center justify-center">
-      <div class="absolute inset-0 bg-black/50" onClick={onCancel} />
+      <div class={`absolute inset-0 ${overlayBg}`} onClick={onCancel} />
       <form
         onSubmit={handleSubmit}
-        class="relative bg-telegram-bg rounded-lg p-4 max-w-sm w-full mx-4 shadow-xl"
+        class={`relative ${dialogBg} rounded-lg p-4 max-w-sm w-full mx-4 shadow-xl`}
         role="dialog"
         aria-modal="true"
         aria-labelledby="reply-dialog-title"
       >
-        <h3 id="reply-dialog-title" class="text-lg font-semibold text-telegram-text mb-2">
+        <h3 id="reply-dialog-title" class={`text-lg font-semibold ${titleColor} mb-2`}>
           Send Reply
         </h3>
-        <p class="text-xs text-telegram-hint mb-3">
+        <p class={`text-xs ${hintColor} mb-3`}>
           Your message will be sent to the minion's Telegram thread.
         </p>
         <textarea
@@ -127,7 +152,7 @@ export function ReplyDialog({ isOpen, sessionId, isLoading, onSend, onCancel }: 
           rows={3}
           placeholder="Enter your message..."
           disabled={isLoading}
-          class="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-telegram-button focus:border-transparent disabled:opacity-50 bg-telegram-secondary text-telegram-text"
+          class={`w-full px-3 py-2 text-sm border rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50 ${inputBg} ${inputText}`}
           autoFocus
         />
         <div class="flex justify-end gap-2 mt-3">
@@ -135,14 +160,15 @@ export function ReplyDialog({ isOpen, sessionId, isLoading, onSend, onCancel }: 
             type="button"
             onClick={onCancel}
             disabled={isLoading}
-            class="px-4 py-2 text-sm font-medium text-telegram-hint hover:bg-telegram-secondary rounded transition-colors disabled:opacity-50"
+            class={`px-4 py-2 text-sm font-medium rounded transition-colors disabled:opacity-50 ${cancelColor}`}
           >
             Cancel
           </button>
           <button
             type="submit"
             disabled={isLoading}
-            class="bg-telegram-button text-telegram-buttonText px-4 py-2 text-sm font-medium rounded hover:opacity-90 transition-colors disabled:opacity-50"
+            class="px-4 py-2 text-sm font-medium rounded transition-colors disabled:opacity-50"
+            style={tg.isTelegram ? { backgroundColor: buttonBg, color: buttonText } : undefined}
           >
             {isLoading ? 'Sending...' : 'Send'}
           </button>

@@ -16,18 +16,14 @@ import {
 } from './store'
 import { SessionList } from './components/SessionList'
 import { DagList } from './components/DagView'
+import { useTelegram, useMainButton } from './hooks'
 import type { MinionSession, DagNode } from './types'
 
 function handleThreadClick(session: MinionSession) {
-  if (window.Telegram?.WebApp) {
-    const webapp = window.Telegram.WebApp
-    if (session.threadId && session.chatId) {
-      const threadUrl = `https://t.me/c/${Math.abs(session.chatId)}/${session.threadId}`
-      webapp.openTelegramLink?.(threadUrl)
-    }
-  } else if (session.threadId && session.chatId) {
+  const tg = useTelegram()
+  if (session.threadId && session.chatId) {
     const threadUrl = `https://t.me/c/${Math.abs(session.chatId)}/${session.threadId}`
-    window.open(threadUrl, '_blank')
+    tg.navigation.openTgLink(threadUrl)
   }
 }
 
@@ -39,8 +35,13 @@ function handleDagNodeClick(node: DagNode) {
 
 function ErrorMessage() {
   if (!error.value) return null
+
+  const tg = useTelegram()
+
   return (
-    <div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+    <div
+      class={`p-4 rounded mb-4 ${tg.darkMode ? 'bg-red-900/30 border border-red-700 text-red-200' : 'bg-red-100 border border-red-400 text-red-700'}`}
+    >
       {error.value}
     </div>
   )
@@ -48,10 +49,18 @@ function ErrorMessage() {
 
 function ActionError() {
   if (!actionState.value.error) return null
+
+  const tg = useTelegram()
+
   return (
-    <div class="bg-orange-100 border border-orange-400 text-orange-700 px-4 py-3 rounded mb-4 flex items-center justify-between">
+    <div
+      class={`px-4 py-3 rounded mb-4 flex items-center justify-between ${tg.darkMode ? 'bg-orange-900/30 border border-orange-700 text-orange-200' : 'bg-orange-100 border border-orange-400 text-orange-700'}`}
+    >
       <span>{actionState.value.error}</span>
-      <button onClick={clearActionError} class="text-orange-700 hover:text-orange-900 font-medium">
+      <button
+        onClick={clearActionError}
+        class={`font-medium hover:opacity-80 ${tg.darkMode ? 'text-orange-200' : 'text-orange-700'}`}
+      >
         Dismiss
       </button>
     </div>
@@ -59,11 +68,15 @@ function ActionError() {
 }
 
 function RefreshButton() {
+  const tg = useTelegram()
+  const buttonColor = tg.isTelegram ? tg.theme.buttonColor : undefined
+
   return (
     <button
       onClick={() => refresh()}
       disabled={isLoading.value}
-      class="bg-telegram-button text-telegram-buttonText px-4 py-2 rounded font-medium disabled:opacity-50"
+      class="px-4 py-2 rounded font-medium disabled:opacity-50 transition-colors"
+      style={tg.isTelegram ? { backgroundColor: buttonColor, color: tg.theme.buttonTextColor } : undefined}
     >
       {isLoading.value ? 'Refreshing...' : 'Refresh'}
     </button>
@@ -71,17 +84,52 @@ function RefreshButton() {
 }
 
 function ConnectionStatus() {
+  const tg = useTelegram()
+  const dotColor = sseConnected.value ? 'bg-green-500' : 'bg-gray-400'
+  const textColor = tg.darkMode ? 'text-gray-400' : undefined
+
   return (
-    <div class="flex items-center gap-2 text-xs text-telegram-hint">
-      <span
-        class={`w-2 h-2 rounded-full ${sseConnected.value ? 'bg-green-500' : 'bg-gray-400'}`}
-      />
-      <span>{sseConnected.value ? 'Live' : 'Offline'}</span>
+    <div class={`flex items-center gap-2 text-xs ${tg.darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+      <span class={`w-2 h-2 rounded-full ${dotColor}`} />
+      <span style={textColor}>{sseConnected.value ? 'Live' : 'Offline'}</span>
     </div>
   )
 }
 
+function Header() {
+  const tg = useTelegram()
+  const textColor = tg.darkMode ? 'text-white' : 'text-gray-900'
+
+  return (
+    <header class="flex items-center justify-between mb-6">
+      <h1 class={`text-xl font-bold ${textColor}`}>Minions Dashboard</h1>
+      <div class="flex items-center gap-4">
+        <ConnectionStatus />
+        <RefreshButton />
+      </div>
+    </header>
+  )
+}
+
+function MainButtonHandler() {
+  // Show main button when there are active sessions to manage
+  const activeSessions = sessions.value.filter((s) => s.status === 'running' || s.status === 'pending')
+  const hasActive = activeSessions.length > 0
+
+  useMainButton(
+    hasActive ? 'Refresh' : '',
+    () => {
+      refresh()
+    },
+    [hasActive]
+  )
+
+  return null
+}
+
 export default function App() {
+  const tg = useTelegram()
+
   useSignalEffect(() => {
     refresh()
     startSse()
@@ -92,21 +140,17 @@ export default function App() {
     window.addEventListener('beforeunload', stopSse)
   }
 
+  const headingColor = tg.darkMode ? 'text-white' : 'text-gray-900'
   return (
-    <div class="min-h-screen p-4">
-      <header class="flex items-center justify-between mb-6">
-        <h1 class="text-xl font-bold text-telegram-text">Minions Dashboard</h1>
-        <div class="flex items-center gap-4">
-          <ConnectionStatus />
-          <RefreshButton />
-        </div>
-      </header>
+    <div class={`min-h-screen p-4 ${tg.darkMode ? 'bg-gray-900' : 'bg-white'}`}>
+      <MainButtonHandler />
+      <Header />
 
       <ErrorMessage />
       <ActionError />
 
       <section>
-        <h2 class="text-lg font-semibold text-telegram-text mb-3">Sessions</h2>
+        <h2 class={`text-lg font-semibold mb-3 ${headingColor}`}>Sessions</h2>
         <SessionList
           sessions={sessions.value}
           isLoading={isLoading.value}
