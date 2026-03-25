@@ -78,14 +78,67 @@ function splitMessage(html: string): string[] {
   return chunks
 }
 
+interface QueueEntry {
+  fn: () => Promise<unknown>
+  resolve: (value: unknown) => void
+  reject: (reason: unknown) => void
+  editKey?: string
+}
+
 export class TelegramClient {
   private readonly baseUrl: string
+  private readonly queue: QueueEntry[] = []
+  private processing = false
 
   constructor(private readonly token: string, private readonly chatId: string) {
     this.baseUrl = `${BASE}/bot${token}`
   }
 
-  private async call<T>(method: string, body: Record<string, unknown>): Promise<T> {
+  private enqueue<T>(fn: () => Promise<T>, editKey?: string): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      if (editKey) {
+        const idx = this.queue.findIndex((e) => e.editKey === editKey)
+        if (idx !== -1) {
+          const old = this.queue[idx]
+          const prevResolve = old.resolve
+          const prevReject = old.reject
+          old.fn = fn as () => Promise<unknown>
+          old.resolve = (v: unknown) => { prevResolve(v); resolve(v as T) }
+          old.reject = (e: unknown) => { prevReject(e); reject(e) }
+          return
+        }
+      }
+      this.queue.push({
+        fn: fn as () => Promise<unknown>,
+        resolve: resolve as (value: unknown) => void,
+        reject,
+        editKey,
+      })
+      if (!this.processing) {
+        this.processing = true
+        queueMicrotask(() => this.processQueue())
+      }
+    })
+  }
+
+  private async processQueue(): Promise<void> {
+    while (this.queue.length > 0) {
+      const entry = this.queue.shift()!
+      try {
+        const result = await entry.fn()
+        entry.resolve(result)
+      } catch (err) {
+        entry.reject(err)
+      }
+    }
+    this.processing = false
+  }
+
+  private async call<T>(method: string, body: Record<string, unknown>, editKey?: string): Promise<T> {
+    return this.enqueue(() => this.callDirect<T>(method, body), editKey)
+  }
+
+  private async callDirect<T>(method: string, body: Record<string, unknown>): Promise<T> {
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
       let res: Response
       try {
@@ -133,7 +186,7 @@ export class TelegramClient {
 
   async getUpdates(offset: number, timeout: number): Promise<TelegramUpdate[]> {
     try {
-      const result = await this.call<TelegramUpdate[]>("getUpdates", {
+      const result = await this.callDirect<TelegramUpdate[]>("getUpdates", {
         offset,
         timeout,
         allowed_updates: ["message", "callback_query"],
@@ -204,7 +257,7 @@ export class TelegramClient {
       }
       if (threadId !== undefined) body.message_thread_id = threadId
 
-      await this.call("editMessageText", body)
+      await this.call("editMessageText", body, String(messageId))
       return true
     } catch (err) {
       if (String(err).includes("message is not modified")) return true
@@ -335,7 +388,16 @@ export class TelegramClient {
     }
   }
 
-  private async sendPhotoBlob(
+  private sendPhotoBlob(
+    blob: Blob,
+    filename: string,
+    threadId?: number,
+    caption?: string,
+  ): Promise<number | null> {
+    return this.enqueue(() => this.sendPhotoBlobDirect(blob, filename, threadId, caption))
+  }
+
+  private async sendPhotoBlobDirect(
     blob: Blob,
     filename: string,
     threadId?: number,
