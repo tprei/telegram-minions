@@ -827,6 +827,7 @@ export class Dispatcher {
         }
 
         this.persistTopicSessions()
+        this.cleanBuildArtifacts(topicSession.cwd)
 
         if (topicSession.pendingFeedback.length > 0) {
           const feedback = topicSession.pendingFeedback.join("\n\n")
@@ -1152,6 +1153,28 @@ export class Dispatcher {
       captureException(err, { operation: "prepareWorkspace" })
       return null
     }
+  }
+
+  private cleanBuildArtifacts(cwd: string): void {
+    const artifacts = ["node_modules", ".next", ".turbo", ".cache", "dist", ".npm"]
+    for (const name of artifacts) {
+      const target = path.join(cwd, name)
+      try {
+        if (fs.existsSync(target)) {
+          fs.rmSync(target, { recursive: true, force: true })
+          process.stderr.write(`dispatcher: cleaned ${name} from ${cwd}\n`)
+        }
+      } catch (err) {
+        process.stderr.write(`dispatcher: failed to clean ${name} from ${cwd}: ${err}\n`)
+      }
+    }
+    const homeCacheDir = path.join(cwd, ".home", ".npm")
+    try {
+      if (fs.existsSync(homeCacheDir)) {
+        fs.rmSync(homeCacheDir, { recursive: true, force: true })
+        process.stderr.write(`dispatcher: cleaned .home/.npm from ${cwd}\n`)
+      }
+    } catch { /* best effort */ }
   }
 
   private removeWorkspace(topicSession: TopicSession): void {
