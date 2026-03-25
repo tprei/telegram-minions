@@ -114,12 +114,28 @@ export class Dispatcher {
   }
 
   async loadPersistedSessions(): Promise<void> {
-    const { active, expired } = this.store.load()
+    const { active, expired, offset } = this.store.load()
+    this.offset = offset
+
     for (const [threadId, session] of active) {
       this.topicSessions.set(threadId, session)
+
+      // Notify about interrupted sessions
+      if (session.interruptedAt) {
+        process.stderr.write(`dispatcher: session ${session.slug} was interrupted, notifying\n`)
+        this.telegram.sendMessage(
+          `⚡ This session was interrupted by a deploy. Send <b>/reply</b> to continue.`,
+          threadId,
+        ).catch((err) => {
+          process.stderr.write(`dispatcher: failed to notify interrupted session: ${err}\n`)
+        })
+        // Clear the interruption flag
+        session.interruptedAt = undefined
+      }
     }
+
     if (active.size > 0) {
-      process.stderr.write(`dispatcher: loaded ${active.size} persisted session(s)\n`)
+      process.stderr.write(`dispatcher: loaded ${active.size} persisted session(s), offset=${offset}\n`)
     }
     if (expired.size > 0) {
       process.stderr.write(`dispatcher: cleaning ${expired.size} expired session(s)\n`)
@@ -147,7 +163,8 @@ export class Dispatcher {
     for (const { handle } of this.sessions.values()) {
       handle.interrupt()
     }
-    this.persistTopicSessions()
+    // Mark active sessions as interrupted before persisting for restart
+    this.persistTopicSessions(true)
     process.stderr.write("dispatcher: stopped\n")
   }
 
@@ -198,15 +215,22 @@ export class Dispatcher {
     this.updatePinnedSummary()
   }
 
-  private persistTopicSessions(): void {
-    // Only persist sessions that aren't actively running
+  private persistTopicSessions(markInterrupted = false): void {
     const toSave = new Map<number, TopicSession>()
+    const now = Date.now()
     for (const [threadId, session] of this.topicSessions) {
-      if (!session.activeSessionId) {
+      if (markInterrupted && session.activeSessionId) {
+        // Mark as interrupted so we can notify on restart
+        toSave.set(threadId, {
+          ...session,
+          activeSessionId: undefined,
+          interruptedAt: now,
+        })
+      } else {
         toSave.set(threadId, session)
       }
     }
-    this.store.save(toSave)
+    this.store.save(toSave, this.offset)
   }
 
   private get pinnedSummaryPath(): string {
@@ -273,6 +297,8 @@ export class Dispatcher {
 
     if (updates.length > 0) {
       this.offset = Math.max(...updates.map((u) => u.update_id)) + 1
+      // Persist offset after each batch so we don't lose messages on crash/deploy
+      this.persistTopicSessions()
     }
   }
 
