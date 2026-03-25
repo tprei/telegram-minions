@@ -14,6 +14,9 @@ import {
   formatPlanIteration,
   formatPlanExecuting,
   formatPlanComplete,
+  formatReviewStart,
+  formatReviewIteration,
+  formatReviewComplete,
   formatTaskComplete,
   formatFollowUpIteration,
   formatStatus,
@@ -471,6 +474,11 @@ describe("formatHelp", () => {
     const msg = formatHelp()
     expect(msg).toContain("/split")
   })
+
+  it("includes /review command", () => {
+    const msg = formatHelp()
+    expect(msg).toContain("/review")
+  })
 })
 
 describe("formatSplitAnalyzing", () => {
@@ -518,5 +526,53 @@ describe("formatSplitAllDone", () => {
     const msg = formatSplitAllDone(2, 3)
     expect(msg).toContain("2/3")
     expect(msg).toContain("Split complete")
+  })
+})
+
+describe("formatReviewStart", () => {
+  it("includes review header, repo, slug, and task", () => {
+    const msg = formatReviewStart("my-repo", "cool-slug", "Review PR #42")
+    expect(msg).toContain("Review started")
+    expect(msg).toContain("my-repo")
+    expect(msg).toContain("cool-slug")
+    expect(msg).toContain("Review PR #42")
+  })
+
+  it("includes /reply instructions", () => {
+    const msg = formatReviewStart("repo", "slug", "task")
+    expect(msg).toContain("/reply")
+  })
+})
+
+describe("formatReviewIteration", () => {
+  it("includes slug and iteration number", () => {
+    const msg = formatReviewIteration("cool-slug", 2)
+    expect(msg).toContain("Re-reviewing")
+    expect(msg).toContain("cool-slug")
+    expect(msg).toContain("2")
+  })
+})
+
+describe("formatReviewComplete", () => {
+  it("includes slug and /reply instructions", () => {
+    const msg = formatReviewComplete("cool-slug")
+    expect(msg).toContain("Review complete")
+    expect(msg).toContain("cool-slug")
+    expect(msg).toContain("/reply")
+  })
+})
+
+describe("formatStatus (review mode)", () => {
+  it("displays review mode icon", () => {
+    const msg = formatStatus(
+      [{
+        meta: { topicName: "review-slug", repo: "repo", startedAt: Date.now(), mode: "review" },
+        task: "Review PR #42",
+        handle: { isActive: () => true, getState: () => "working" },
+      }],
+      [],
+      5,
+    )
+    expect(msg).toContain("👀 review")
   })
 })

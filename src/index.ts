@@ -12,7 +12,7 @@ export type {
   AgentDefinitions,
   SystemPrompts,
 } from "./config-types.js"
-export { DEFAULT_PROMPTS, DEFAULT_TASK_PROMPT, DEFAULT_PLAN_PROMPT, DEFAULT_THINK_PROMPT } from "./prompts.js"
+export { DEFAULT_PROMPTS, DEFAULT_TASK_PROMPT, DEFAULT_PLAN_PROMPT, DEFAULT_THINK_PROMPT, DEFAULT_REVIEW_PROMPT } from "./prompts.js"
 export { TelegramClient } from "./telegram.js"
 export { Observer } from "./observer.js"
 export { Dispatcher } from "./dispatcher.js"

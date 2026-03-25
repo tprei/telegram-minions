@@ -36,6 +36,7 @@ export function configFromEnv(overrides?: Partial<MinionConfig>): MinionConfig {
     claude: {
       planModel: optional("PLAN_MODEL", "sonnet"),
       thinkModel: optional("THINK_MODEL", "opus"),
+      reviewModel: optional("REVIEW_MODEL", "opus"),
     },
     workspace: {
       root: optional("WORKSPACE_ROOT", "/workspace"),

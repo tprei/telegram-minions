@@ -240,4 +240,30 @@ describe("TelegramClient retry logic", () => {
       expect(fetchMock).toHaveBeenCalledTimes(3)
     })
   })
+
+  describe("pinChatMessage", () => {
+    it("sends pinChatMessage with disable_notification", async () => {
+      fetchMock.mockResolvedValueOnce(ok(true))
+
+      const client = new TelegramClient(TOKEN, CHAT_ID)
+      await client.pinChatMessage(42)
+
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      const [url, opts] = fetchMock.mock.calls[0]
+      expect(url).toContain("/pinChatMessage")
+      const body = JSON.parse(opts.body)
+      expect(body).toEqual({
+        chat_id: CHAT_ID,
+        message_id: 42,
+        disable_notification: true,
+      })
+    })
+
+    it("does not throw on failure", async () => {
+      fetchMock.mockResolvedValueOnce(httpError(400, "Bad Request: not enough rights"))
+
+      const client = new TelegramClient(TOKEN, CHAT_ID)
+      await expect(client.pinChatMessage(42)).resolves.toBeUndefined()
+    })
+  })
 })

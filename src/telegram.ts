@@ -229,6 +229,18 @@ export class TelegramClient {
     })
   }
 
+  async pinChatMessage(messageId: number): Promise<void> {
+    try {
+      await this.call("pinChatMessage", {
+        chat_id: this.chatId,
+        message_id: messageId,
+        disable_notification: true,
+      })
+    } catch (err) {
+      process.stderr.write(`telegram: pinChatMessage failed: ${err}\n`)
+    }
+  }
+
   async closeForumTopic(threadId: number): Promise<void> {
     try {
       await this.call("closeForumTopic", {
