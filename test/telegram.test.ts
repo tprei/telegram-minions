@@ -266,4 +266,56 @@ describe("TelegramClient retry logic", () => {
       await expect(client.pinChatMessage(42)).resolves.toBeUndefined()
     })
   })
+
+  describe("request queue", () => {
+    it("serializes concurrent sendMessage calls", async () => {
+      fetchMock
+        .mockResolvedValueOnce(ok({ message_id: 1 }))
+        .mockResolvedValueOnce(ok({ message_id: 2 }))
+
+      const client = new TelegramClient(TOKEN, CHAT_ID)
+      const [r1, r2] = await drainTimers(
+        Promise.all([client.sendMessage("a"), client.sendMessage("b")])
+      )
+      expect(r1).toEqual({ ok: true, messageId: 1 })
+      expect(r2).toEqual({ ok: true, messageId: 2 })
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+    })
+
+    it("coalesces pending edits for the same messageId", async () => {
+      fetchMock
+        .mockResolvedValueOnce(ok({ message_id: 10 }))
+        .mockResolvedValueOnce(ok(true))
+
+      const client = new TelegramClient(TOKEN, CHAT_ID)
+      const { messageId } = await drainTimers(client.sendMessage("initial"))
+
+      const [r1, r2] = await drainTimers(
+        Promise.all([
+          client.editMessage(messageId!, "edit 1"),
+          client.editMessage(messageId!, "edit 2"),
+        ])
+      )
+      expect(r1).toBe(true)
+      expect(r2).toBe(true)
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+    })
+
+    it("does not coalesce edits for different messageIds", async () => {
+      fetchMock
+        .mockResolvedValueOnce(ok(true))
+        .mockResolvedValueOnce(ok(true))
+
+      const client = new TelegramClient(TOKEN, CHAT_ID)
+      const [r1, r2] = await drainTimers(
+        Promise.all([
+          client.editMessage(10, "edit A"),
+          client.editMessage(20, "edit B"),
+        ])
+      )
+      expect(r1).toBe(true)
+      expect(r2).toBe(true)
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+    })
+  })
 })
