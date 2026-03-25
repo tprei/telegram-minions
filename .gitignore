@@ -2,6 +2,7 @@ node_modules/
 dist/
 .env
 *.log
+session-log.json
 .minion-images/
 .home/
 .claude/settings.local.json
