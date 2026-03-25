@@ -9,6 +9,7 @@ import {
   formatSessionStart,
   formatPlanStart,
   formatThinkStart,
+  formatReviewStart,
   formatSessionComplete,
   formatSessionError,
   formatAssistantText,
@@ -76,6 +77,8 @@ export class Observer {
       ? formatThinkStart(meta.repo, meta.topicName, task)
       : meta.mode === "plan"
       ? formatPlanStart(meta.repo, meta.topicName, task)
+      : meta.mode === "review"
+      ? formatReviewStart(meta.repo, meta.topicName, task)
       : formatSessionStart(meta.repo, meta.topicName, task)
     await this.telegram.sendMessage(msg, meta.threadId)
   }

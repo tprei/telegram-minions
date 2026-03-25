@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest"
 
 import {
   parseTaskArgs,
+  parseReviewArgs,
+  buildReviewAllTask,
   buildRepoKeyboard,
   escapeHtml,
   extractRepoName,
@@ -338,5 +340,102 @@ describe("buildExecutionPrompt", () => {
   it("uses default instruction when no directive is provided", () => {
     const prompt = buildExecutionPrompt(makeTopicSession())
     expect(prompt).toContain("Follow the plan closely")
+  })
+
+  it("uses Review thread header for review mode", () => {
+    const prompt = buildExecutionPrompt(makeTopicSession({ mode: "review" }))
+    expect(prompt).toContain("## Review thread")
+  })
+})
+
+describe("parseReviewArgs", () => {
+  it("parses repo alias + PR number", () => {
+    const result = parseReviewArgs(testRepos, "scripts 42")
+    expect(result).toEqual({
+      repoUrl: "https://github.com/tprei/scripts",
+      task: "Review PR #42",
+    })
+  })
+
+  it("parses URL + PR number", () => {
+    const result = parseReviewArgs({}, "https://github.com/org/repo 42")
+    expect(result).toEqual({
+      repoUrl: "https://github.com/org/repo",
+      task: "Review PR #42",
+    })
+  })
+
+  it("parses repo alias only (review all)", () => {
+    const result = parseReviewArgs(testRepos, "scripts")
+    expect(result).toEqual({
+      repoUrl: "https://github.com/tprei/scripts",
+      task: "",
+    })
+  })
+
+  it("parses URL only (review all)", () => {
+    const result = parseReviewArgs({}, "https://github.com/org/repo")
+    expect(result).toEqual({
+      repoUrl: "https://github.com/org/repo",
+      task: "",
+    })
+  })
+
+  it("returns empty task for empty args", () => {
+    const result = parseReviewArgs({}, "")
+    expect(result).toEqual({ task: "" })
+  })
+
+  it("parses bare PR number without repo", () => {
+    const result = parseReviewArgs({}, "42")
+    expect(result).toEqual({ task: "Review PR #42" })
+  })
+
+  it("handles unknown alias as plain text", () => {
+    const result = parseReviewArgs(testRepos, "unknown-repo 42")
+    expect(result).toEqual({ task: "unknown-repo 42" })
+  })
+})
+
+describe("buildReviewAllTask", () => {
+  it("builds task referencing repo URL", () => {
+    const task = buildReviewAllTask("https://github.com/org/repo")
+    expect(task).toContain("repo")
+    expect(task).toContain("gh pr list")
+    expect(task).toContain("https://github.com/org/repo")
+    expect(task).toContain("REVIEW_REQUIRED")
+  })
+})
+
+describe("buildRepoKeyboard (review prefix)", () => {
+  it("uses review-repo: prefix", () => {
+    const keyboard = buildRepoKeyboard(["scripts"], "review")
+    expect(keyboard[0][0]).toEqual({ text: "scripts", callback_data: "review-repo:scripts" })
+  })
+})
+
+describe("buildContextPrompt (review mode)", () => {
+  function makeTopicSession(overrides: Partial<TopicSession> = {}): TopicSession {
+    return {
+      threadId: 42,
+      repo: "test-repo",
+      cwd: "/tmp/test",
+      slug: "bold-arc",
+      conversation: [
+        { role: "user", text: "Review PR #42" },
+        { role: "assistant", text: "Found 2 issues" },
+        { role: "user", text: "look deeper at the auth module" },
+      ],
+      pendingFeedback: [],
+      mode: "review",
+      lastActivityAt: Date.now(),
+      ...overrides,
+    }
+  }
+
+  it("uses review header and guidance", () => {
+    const prompt = buildContextPrompt(makeTopicSession())
+    expect(prompt).toContain("Review context")
+    expect(prompt).toContain("follow-up about the review")
   })
 })

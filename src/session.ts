@@ -6,7 +6,7 @@ import type { GooseConfig, ClaudeConfig, McpConfig, ProviderProfile } from "./co
 import type { GooseStreamEvent, SessionMeta, SessionState } from "./types.js"
 import { translateClaudeEvents } from "./claude-stream.js"
 import { captureException, setContext, addBreadcrumb } from "./sentry.js"
-import { DEFAULT_TASK_PROMPT, DEFAULT_PLAN_PROMPT, DEFAULT_THINK_PROMPT } from "./prompts.js"
+import { DEFAULT_TASK_PROMPT, DEFAULT_PLAN_PROMPT, DEFAULT_THINK_PROMPT, DEFAULT_REVIEW_PROMPT } from "./prompts.js"
 
 export const SCREENSHOTS_DIR = ".screenshots"
 
@@ -24,6 +24,7 @@ export interface SessionConfig {
 
 const PLAN_DISALLOWED_TOOLS = ["Edit", "Write", "NotebookEdit"]
 const THINK_DISALLOWED_TOOLS = ["Edit", "Write", "NotebookEdit"]
+const REVIEW_DISALLOWED_TOOLS = ["Edit", "Write", "NotebookEdit"]
 
 type McpServerConfig = {
   command: string
@@ -62,6 +63,8 @@ export class SessionHandle {
       this.startClaudeThink(task)
     } else if (this.meta.mode === "plan" && !systemPrompt) {
       this.startClaude(task)
+    } else if (this.meta.mode === "review" && !systemPrompt) {
+      this.startClaudeReview(task)
     } else {
       this.startGoose(task, systemPrompt)
     }
@@ -293,6 +296,34 @@ export class SessionHandle {
         ...this.buildClaudeMcpConfigArgs(),
         "--append-system-prompt", DEFAULT_THINK_PROMPT,
         "--model", this.sessionConfig.claude.thinkModel,
+        task,
+      ],
+      {
+        cwd: this.meta.cwd,
+        env,
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    )
+
+    this.attachProcessHandlers(this.parseClaudeLine.bind(this))
+  }
+
+  private startClaudeReview(task: string): void {
+    const env = this.buildIsolatedEnv()
+
+    this.process = spawn(
+      "claude",
+      [
+        "--print",
+        "--output-format", "stream-json",
+        "--verbose",
+        "--include-partial-messages",
+        "--dangerously-skip-permissions",
+        "--no-session-persistence",
+        "--disallowed-tools", ...REVIEW_DISALLOWED_TOOLS,
+        ...this.buildClaudeMcpConfigArgs(),
+        "--append-system-prompt", DEFAULT_REVIEW_PROMPT,
+        "--model", this.sessionConfig.claude.reviewModel,
         task,
       ],
       {

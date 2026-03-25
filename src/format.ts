@@ -212,6 +212,29 @@ export function formatTaskComplete(
   ].join("\n")
 }
 
+export function formatReviewStart(
+  repo: string,
+  slug: string,
+  task: string,
+): string {
+  const MAX_TASK = 200
+  return [
+    `👀 <b>Review started</b>  ·  📦 <b>${esc(repo)}</b>  ·  🏷 <code>${esc(slug)}</code>`,
+    ``,
+    `<blockquote>${esc(truncate(task, MAX_TASK))}</blockquote>`,
+    ``,
+    `Use <code>/reply</code> (or <code>/r</code>) to ask the reviewer to look deeper.`,
+  ].join("\n")
+}
+
+export function formatReviewIteration(slug: string, iteration: number): string {
+  return `👀 <b>Re-reviewing</b>  ·  🏷 <code>${esc(slug)}</code>  ·  iteration ${iteration}`
+}
+
+export function formatReviewComplete(slug: string): string {
+  return `👀 <b>Review complete</b>  ·  🏷 <code>${esc(slug)}</code>\n\nUse <code>/reply</code> (or <code>/r</code>) to ask follow-up questions.`
+}
+
 export function formatFollowUpIteration(slug: string, iteration: number): string {
   return `🔄 <b>Follow-up</b>  ·  🏷 <code>${esc(slug)}</code>  ·  iteration ${iteration}`
 }
@@ -232,7 +255,7 @@ export function formatStatus(
     const state = handle.getState()
     const icon = handle.isActive() ? "🟢" : "🔴"
     const elapsed = formatElapsed(Date.now() - meta.startedAt)
-    const mode = meta.mode === "think" ? "🧠 think" : meta.mode === "plan" ? "📋 plan" : meta.mode === "ci-fix" ? "🔧 ci-fix" : "⚡ task"
+    const mode = meta.mode === "think" ? "🧠 think" : meta.mode === "plan" ? "📋 plan" : meta.mode === "review" ? "👀 review" : meta.mode === "ci-fix" ? "🔧 ci-fix" : "⚡ task"
     lines.push(`${icon} <b>${esc(meta.topicName)}</b>  ·  📦 ${esc(meta.repo)}  ·  ${mode}  ·  ${state}  ·  ⏱ ${elapsed}`)
     lines.push(`   <blockquote>${esc(truncate(task, 120))}</blockquote>`)
     lines.push("")
@@ -241,7 +264,7 @@ export function formatStatus(
   const standbyTopics = topicSessions.filter((p) => !p.activeSessionId)
   for (const topic of standbyTopics) {
     const originalTask = topic.conversation[0]?.text ?? ""
-    const topicMode = topic.mode === "think" ? "🧠 think" : "📋 plan"
+    const topicMode = topic.mode === "think" ? "🧠 think" : topic.mode === "review" ? "👀 review" : "📋 plan"
     lines.push(`🟡 <b>${esc(topic.slug)}</b>  ·  📦 ${esc(topic.repo)}  ·  ${topicMode}  ·  awaiting feedback`)
     lines.push(`   <blockquote>${esc(truncate(originalTask, 120))}</blockquote>`)
     lines.push("")
@@ -257,6 +280,7 @@ export function formatHelp(): string {
     `<code>/task [repo] description</code> (or <code>/w</code>) — start a one-shot coding task`,
     `<code>/plan [repo] description</code> — start a multi-turn planning session`,
     `<code>/think [repo] question</code> — start a deep research session`,
+    `<code>/review [repo] PR#</code> — review a pull request (or all unreviewed PRs)`,
     `<code>/status</code> — show active sessions`,
     `<code>/stats</code> — show aggregate usage statistics`,
     `<code>/config</code> — manage provider profiles`,

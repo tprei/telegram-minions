@@ -81,4 +81,18 @@ describe("configFromEnv", () => {
       delete process.env["SESSION_ENV_PASSTHROUGH"]
     })
   })
+
+  describe("claude config", () => {
+    it("defaults reviewModel to sonnet", () => {
+      const config = configFromEnv()
+      expect(config.claude.reviewModel).toBe("sonnet")
+    })
+
+    it("reads REVIEW_MODEL env var", () => {
+      process.env["REVIEW_MODEL"] = "haiku"
+      const config = configFromEnv()
+      expect(config.claude.reviewModel).toBe("haiku")
+      delete process.env["REVIEW_MODEL"]
+    })
+  })
 })

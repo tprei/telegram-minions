@@ -19,6 +19,8 @@ import {
   formatPlanComplete,
   formatThinkIteration,
   formatThinkComplete,
+  formatReviewIteration,
+  formatReviewComplete,
   formatStatus,
   formatTaskComplete,
   formatFollowUpIteration,
@@ -46,6 +48,7 @@ const TASK_PREFIX = "/task"
 const TASK_SHORT = "/w"
 const PLAN_PREFIX = "/plan"
 const THINK_PREFIX = "/think"
+const REVIEW_PREFIX = "/review"
 const EXECUTE_CMD = "/execute"
 const STATUS_CMD = "/status"
 const STATS_CMD = "/stats"
@@ -67,7 +70,7 @@ interface PendingTask {
   threadId?: number
   repoSlug?: string
   repoUrl?: string
-  mode: "task" | "plan" | "think"
+  mode: "task" | "plan" | "think" | "review"
 }
 
 export class Dispatcher {
@@ -245,6 +248,11 @@ export class Dispatcher {
       }
     }
 
+    if (text?.startsWith(REVIEW_PREFIX)) {
+      await this.handleReviewCommand(text.slice(REVIEW_PREFIX.length).trim(), message.message_thread_id)
+      return
+    }
+
     if (text?.startsWith(THINK_PREFIX)) {
       await this.handleThinkCommand(text.slice(THINK_PREFIX.length).trim(), message.message_thread_id, photos)
       return
@@ -268,7 +276,7 @@ export class Dispatcher {
       if (topicSession) {
         if (text === CLOSE_CMD) {
           await this.handleCloseCommand(topicSession)
-        } else if ((topicSession.mode === "plan" || topicSession.mode === "think") && (text === EXECUTE_CMD || text?.startsWith(EXECUTE_CMD + " "))) {
+        } else if ((topicSession.mode === "plan" || topicSession.mode === "think" || topicSession.mode === "review") && (text === EXECUTE_CMD || text?.startsWith(EXECUTE_CMD + " "))) {
           const directive = text!.slice(EXECUTE_CMD.length).trim() || undefined
           await this.handleExecuteCommand(topicSession, directive)
         } else if (text?.startsWith(REPLY_PREFIX + " ") || text?.startsWith(REPLY_SHORT + " ") || text === REPLY_PREFIX || text === REPLY_SHORT) {
@@ -306,17 +314,20 @@ export class Dispatcher {
       return
     }
 
-    if (!data.startsWith("repo:") && !data.startsWith("plan-repo:") && !data.startsWith("think-repo:")) {
+    if (!data.startsWith("repo:") && !data.startsWith("plan-repo:") && !data.startsWith("think-repo:") && !data.startsWith("review-repo:")) {
       await this.telegram.answerCallbackQuery(query.id)
       return
     }
 
     const isThink = data.startsWith("think-repo:")
     const isPlan = data.startsWith("plan-repo:")
+    const isReview = data.startsWith("review-repo:")
     const repoSlug = isThink
       ? data.slice("think-repo:".length)
       : isPlan
       ? data.slice("plan-repo:".length)
+      : isReview
+      ? data.slice("review-repo:".length)
       : data.slice("repo:".length)
     const repoUrl = this.config.repos[repoSlug]
     if (!repoUrl) {
@@ -335,6 +346,9 @@ export class Dispatcher {
 
         pending.repoSlug = repoSlug
         pending.repoUrl = repoUrl
+        if (pending.mode === "review" && !pending.task) {
+          pending.task = buildReviewAllTask(repoUrl)
+        }
 
         const defaultProfileId = this.profileStore.getDefaultId()
         if (defaultProfileId) {
@@ -736,10 +750,94 @@ export class Dispatcher {
     await this.startTopicSession(repoUrl, task, "think", photos)
   }
 
+  private async handleReviewCommand(args: string, replyThreadId?: number): Promise<void> {
+    const parsed = parseReviewArgs(this.config.repos, args)
+
+    if (!parsed.repoUrl && !parsed.task) {
+      const repoKeys = Object.keys(this.config.repos)
+      if (repoKeys.length === 0) {
+        if (replyThreadId !== undefined) {
+          await this.telegram.sendMessage(
+            `Usage: <code>/review [repo] [PR#]</code>\nNo repos configured.`,
+            replyThreadId,
+          )
+        }
+        return
+      }
+      if (repoKeys.length === 1) {
+        const repoUrl = this.config.repos[repoKeys[0]]
+        const task = buildReviewAllTask(repoUrl)
+        await this.startReviewSession(repoUrl, task, replyThreadId)
+        return
+      }
+      const keyboard = buildRepoKeyboard(repoKeys, "review")
+      const msgId = await this.telegram.sendMessageWithKeyboard(
+        `Pick a repo to review all unreviewed PRs:`,
+        keyboard,
+        replyThreadId,
+      )
+      if (msgId) {
+        this.pendingTasks.set(msgId, { task: "", threadId: replyThreadId, mode: "review" })
+      }
+      return
+    }
+
+    if (parsed.repoUrl && !parsed.task) {
+      const task = buildReviewAllTask(parsed.repoUrl)
+      await this.startReviewSession(parsed.repoUrl, task, replyThreadId)
+      return
+    }
+
+    if (!parsed.repoUrl && parsed.task) {
+      const repoKeys = Object.keys(this.config.repos)
+      if (repoKeys.length > 0) {
+        const keyboard = buildRepoKeyboard(repoKeys, "review")
+        const msgId = await this.telegram.sendMessageWithKeyboard(
+          `Pick a repo for review: <i>${escapeHtml(parsed.task)}</i>`,
+          keyboard,
+          replyThreadId,
+        )
+        if (msgId) {
+          this.pendingTasks.set(msgId, { task: parsed.task, threadId: replyThreadId, mode: "review" })
+        }
+        return
+      }
+    }
+
+    if (parsed.repoUrl && parsed.task) {
+      await this.startReviewSession(parsed.repoUrl, parsed.task, replyThreadId)
+      return
+    }
+  }
+
+  private async startReviewSession(repoUrl: string, task: string, replyThreadId?: number): Promise<void> {
+    const defaultProfileId = this.profileStore.getDefaultId()
+    if (defaultProfileId) {
+      await this.startTopicSession(repoUrl, task, "review", undefined, defaultProfileId)
+      return
+    }
+
+    const profiles = this.profileStore.list()
+    if (profiles.length > 1) {
+      const keyboard = buildProfileKeyboard(profiles)
+      const msgId = await this.telegram.sendMessageWithKeyboard(
+        `Pick a profile for review: <i>${escapeHtml(task)}</i>`,
+        keyboard,
+        replyThreadId,
+      )
+      if (msgId) {
+        this.pendingProfiles.set(msgId, { task, threadId: replyThreadId, repoUrl, mode: "review" })
+      }
+      return
+    }
+
+    await this.startTopicSession(repoUrl, task, "review")
+  }
+
   private async startTopicSession(
     repoUrl: string | undefined,
     task: string,
-    mode: "task" | "plan" | "think",
+    mode: "task" | "plan" | "think" | "review",
     photos?: TelegramPhotoSize[],
     profileId?: string,
   ): Promise<void> {
@@ -750,6 +848,8 @@ export class Dispatcher {
       ? `🧠 ${repo} · ${slug}`
       : mode === "plan"
       ? `📋 ${repo} · ${slug}`
+      : mode === "review"
+      ? `👀 ${repo} · ${slug}`
       : `${repo} · ${slug}`
 
     let topic: { message_thread_id: number }
@@ -794,7 +894,7 @@ export class Dispatcher {
   private async startTopicSessionWithProfile(
     repoUrl: string | undefined,
     task: string,
-    mode: "task" | "plan" | "think",
+    mode: "task" | "plan" | "think" | "review",
     profileId?: string,
   ): Promise<void> {
     return this.startTopicSession(repoUrl, task, mode, undefined, profileId)
@@ -884,6 +984,16 @@ export class Dispatcher {
           })
           this.telegram.sendMessage(
             formatThinkComplete(topicSession.slug),
+            topicSession.threadId,
+          ).catch(() => {})
+          writeSessionLog(topicSession, m, state, durationMs)
+        } else if (topicSession.mode === "review") {
+          this.updateTopicTitle(topicSession, "💬").catch(() => {})
+          this.observer.onSessionComplete(m, state, durationMs).catch((err) => {
+            process.stderr.write(`observer: onSessionComplete error: ${err}\n`)
+          })
+          this.telegram.sendMessage(
+            formatReviewComplete(topicSession.slug),
             topicSession.threadId,
           ).catch(() => {})
           writeSessionLog(topicSession, m, state, durationMs)
@@ -1194,6 +1304,11 @@ export class Dispatcher {
         formatThinkIteration(topicSession.slug, iteration),
         topicSession.threadId,
       )
+    } else if (topicSession.mode === "review") {
+      await this.telegram.sendMessage(
+        formatReviewIteration(topicSession.slug, iteration),
+        topicSession.threadId,
+      )
     } else if (topicSession.mode === "plan") {
       await this.telegram.sendMessage(
         formatPlanIteration(topicSession.slug, iteration),
@@ -1402,9 +1517,9 @@ export function parseTaskArgs(repos: Record<string, string>, args: string): { re
 
 export function buildRepoKeyboard(
   repoKeys: string[],
-  prefix: "repo" | "plan" | "think" = "repo",
+  prefix: "repo" | "plan" | "think" | "review" = "repo",
 ): { text: string; callback_data: string }[][] {
-  const dataPrefix = prefix === "think" ? "think-repo" : prefix === "plan" ? "plan-repo" : "repo"
+  const dataPrefix = prefix === "think" ? "think-repo" : prefix === "plan" ? "plan-repo" : prefix === "review" ? "review-repo" : "repo"
   const rows: { text: string; callback_data: string }[][] = []
   for (let i = 0; i < repoKeys.length; i += 2) {
     const row = [{ text: repoKeys[i], callback_data: `${dataPrefix}:${repoKeys[i]}` }]
@@ -1487,10 +1602,13 @@ export function dirSizeBytes(dirPath: string): number {
 export function buildContextPrompt(topicSession: TopicSession): string {
   const isThink = topicSession.mode === "think"
   const isPlan = topicSession.mode === "plan"
+  const isReview = topicSession.mode === "review"
   const header = isThink
     ? "## Research context\n\nYou are continuing a deep-research conversation. Here is the history:"
     : isPlan
     ? "## Planning context\n\nYou are continuing a planning conversation. Here is the history:"
+    : isReview
+    ? "## Review context\n\nYou are continuing a code review conversation. Here is the history:"
     : "## Follow-up context\n\nYou previously worked on this task. Here is the conversation history:"
 
   const MAX_ASSISTANT_CHARS = 4000
@@ -1512,6 +1630,8 @@ export function buildContextPrompt(topicSession: TopicSession): string {
     lines.push("Dig deeper based on the latest question. Search the web for additional context. Be thorough.")
   } else if (isPlan) {
     lines.push("Refine the plan based on the latest feedback. Present the updated plan clearly.")
+  } else if (isReview) {
+    lines.push("Address the user's follow-up about the review. Look deeper at the areas they highlighted.")
   } else {
     lines.push("The workspace still has your previous changes (branch, commits, PR).")
     lines.push("Address the user's latest feedback. Push updates to the existing branch.")
@@ -1535,7 +1655,8 @@ export function buildExecutionPrompt(topicSession: TopicSession, directive?: str
 
   if (conversation.length > 1) {
     const isThink = topicSession.mode === "think"
-    lines.push(isThink ? "## Research thread" : "## Planning thread")
+    const isReview = topicSession.mode === "review"
+    lines.push(isThink ? "## Research thread" : isReview ? "## Review thread" : "## Planning thread")
     lines.push("")
     for (const msg of conversation.slice(1)) {
       const label = msg.role === "user" ? "**User**" : "**Agent**"
@@ -1557,4 +1678,53 @@ export function buildExecutionPrompt(topicSession: TopicSession, directive?: str
   }
 
   return lines.join("\n")
+}
+
+export function parseReviewArgs(repos: Record<string, string>, args: string): { repoUrl?: string; task: string } {
+  if (!args) return { task: "" }
+
+  const urlPrPattern = /^(https?:\/\/[^\s]+)\s+(\d+)$/
+  const urlPrMatch = urlPrPattern.exec(args)
+  if (urlPrMatch) {
+    return { repoUrl: urlPrMatch[1], task: `Review PR #${urlPrMatch[2]}` }
+  }
+
+  const urlOnlyPattern = /^(https?:\/\/[^\s]+)$/
+  const urlOnlyMatch = urlOnlyPattern.exec(args)
+  if (urlOnlyMatch) {
+    return { repoUrl: urlOnlyMatch[1], task: "" }
+  }
+
+  const parts = args.split(/\s+/)
+  const firstWord = parts[0]
+  const aliasUrl = repos[firstWord]
+  if (aliasUrl) {
+    const rest = parts.slice(1).join(" ").trim()
+    if (/^\d+$/.test(rest)) {
+      return { repoUrl: aliasUrl, task: `Review PR #${rest}` }
+    }
+    if (!rest) {
+      return { repoUrl: aliasUrl, task: "" }
+    }
+    return { repoUrl: aliasUrl, task: rest }
+  }
+
+  if (/^\d+$/.test(args.trim())) {
+    return { task: `Review PR #${args.trim()}` }
+  }
+
+  return { task: args.trim() }
+}
+
+export function buildReviewAllTask(repoUrl: string): string {
+  const repo = extractRepoName(repoUrl)
+  return [
+    `Review all open pull requests in ${repo} that have no reviews yet.`,
+    "",
+    "Steps:",
+    `1. Run \`gh pr list --repo ${repoUrl} --state open --json number,title,reviewDecision\` to find open PRs`,
+    "2. Filter to PRs where reviewDecision is empty or REVIEW_REQUIRED",
+    "3. For each unreviewed PR, review it following the review workflow in your system prompt",
+    "4. If there are no unreviewed PRs, report that back",
+  ].join("\n")
 }

@@ -12,6 +12,7 @@ export interface GooseConfig {
 export interface ClaudeConfig {
   planModel: string
   thinkModel: string
+  reviewModel: string
 }
 
 export interface WorkspaceConfig {
@@ -75,6 +76,7 @@ export interface SystemPrompts {
   ci_fix: string
   plan: string
   think: string
+  review: string
 }
 
 export interface ProviderProfile {
