@@ -1,4 +1,7 @@
-import { execSync } from "node:child_process"
+import { execSync, execFile } from "node:child_process"
+import { promisify } from "node:util"
+
+const execFileAsync = promisify(execFile)
 import os from "node:os"
 import path from "node:path"
 import fs from "node:fs"
@@ -105,7 +108,7 @@ export class Dispatcher {
       process.stderr.write(`dispatcher: cleaning ${expired.size} expired session(s)\n`)
       for (const [threadId, session] of expired) {
         await this.telegram.deleteForumTopic(threadId)
-        this.removeWorkspace(session)
+        await this.removeWorkspace(session)
         process.stderr.write(`dispatcher: cleaned expired session ${session.slug} (topic ${threadId})\n`)
       }
     }
@@ -168,7 +171,7 @@ export class Dispatcher {
 
     for (const [threadId, session] of stale) {
       await this.telegram.deleteForumTopic(threadId)
-      this.removeWorkspace(session)
+      await this.removeWorkspace(session)
       this.topicSessions.delete(threadId)
       process.stderr.write(`dispatcher: cleaned up stale session ${session.slug} (topic ${threadId})\n`)
     }
@@ -497,7 +500,7 @@ export class Dispatcher {
         freedBytes += dirSizeBytes(session.cwd)
       }
       await this.telegram.deleteForumTopic(threadId)
-      this.removeWorkspace(session)
+      await this.removeWorkspace(session)
       this.topicSessions.delete(threadId)
       removedSessions++
     }
@@ -1240,19 +1243,30 @@ export class Dispatcher {
   private async handleCloseCommand(topicSession: TopicSession): Promise<void> {
     const threadId = topicSession.threadId
 
-    if (topicSession.activeSessionId) {
-      const activeSession = this.sessions.get(threadId)
-      if (activeSession) {
-        await activeSession.handle.kill()
-      }
-      this.sessions.delete(threadId)
-    }
-
-    this.removeWorkspace(topicSession)
+    // Remove from tracking and delete the topic first for instant user feedback
     this.topicSessions.delete(threadId)
     this.persistTopicSessions()
     await this.telegram.deleteForumTopic(threadId)
     process.stderr.write(`dispatcher: closed and deleted topic ${topicSession.slug} (thread ${threadId})\n`)
+
+    // Kill process and clean up workspace in background (non-blocking)
+    if (topicSession.activeSessionId) {
+      const activeSession = this.sessions.get(threadId)
+      this.sessions.delete(threadId)
+      if (activeSession) {
+        activeSession.handle.kill().then(
+          () => this.removeWorkspace(topicSession),
+          () => this.removeWorkspace(topicSession),
+        ).catch((err) => {
+          process.stderr.write(`dispatcher: background cleanup failed for ${topicSession.slug}: ${err}\n`)
+        })
+        return
+      }
+    }
+
+    this.removeWorkspace(topicSession).catch((err) => {
+      process.stderr.write(`dispatcher: background cleanup failed for ${topicSession.slug}: ${err}\n`)
+    })
   }
 
   private async downloadPhotos(photos: TelegramPhotoSize[] | undefined, _cwd: string): Promise<string[]> {
@@ -1319,7 +1333,7 @@ export class Dispatcher {
     cleanBuildArtifacts(cwd)
   }
 
-  private removeWorkspace(topicSession: TopicSession): void {
+  private async removeWorkspace(topicSession: TopicSession): Promise<void> {
     if (!topicSession.cwd || !fs.existsSync(topicSession.cwd)) return
 
     try {
@@ -1327,11 +1341,10 @@ export class Dispatcher {
         const repoName = extractRepoName(topicSession.repoUrl)
         const bareDir = path.join(this.config.workspace.root, ".repos", `${repoName}.git`)
         if (fs.existsSync(bareDir)) {
-          execSync(`git worktree remove --force ${JSON.stringify(topicSession.cwd)}`, {
-            cwd: bareDir,
-            stdio: ["ignore", "pipe", "pipe"],
-            timeout: 30_000,
-          })
+          await execFileAsync(
+            "git", ["worktree", "remove", "--force", topicSession.cwd],
+            { cwd: bareDir, timeout: 30_000 },
+          )
           process.stderr.write(`dispatcher: removed worktree ${topicSession.cwd}\n`)
           return
         }

@@ -243,6 +243,7 @@ export class SessionHandle {
         cwd: this.meta.cwd,
         env,
         stdio: ["ignore", "pipe", "pipe"],
+        detached: true,
       },
     )
 
@@ -271,6 +272,7 @@ export class SessionHandle {
         cwd: this.meta.cwd,
         env,
         stdio: ["ignore", "pipe", "pipe"],
+        detached: true,
       },
     )
 
@@ -299,6 +301,7 @@ export class SessionHandle {
         cwd: this.meta.cwd,
         env,
         stdio: ["ignore", "pipe", "pipe"],
+        detached: true,
       },
     )
 
@@ -390,7 +393,7 @@ export class SessionHandle {
 
   interrupt(): void {
     if (this.process && this.state === "working") {
-      this.process.kill("SIGINT")
+      this.killProcessGroup(this.process, "SIGINT")
     }
   }
 
@@ -409,15 +412,31 @@ export class SessionHandle {
 
       proc.once("close", onExit)
 
-      proc.kill("SIGINT")
+      this.killProcessGroup(proc, "SIGINT")
 
       const escalation = setTimeout(() => {
         if (this.isActive()) {
           process.stderr.write(`session ${this.meta.sessionId}: SIGINT timeout, sending SIGKILL\n`)
-          proc.kill("SIGKILL")
+          this.killProcessGroup(proc, "SIGKILL")
         }
       }, gracefulMs)
     })
+  }
+
+  private killProcessGroup(proc: ChildProcess, signal: NodeJS.Signals): void {
+    if (proc.pid) {
+      try {
+        process.kill(-proc.pid, signal)
+        return
+      } catch {
+        // process group may already be gone; fall back to direct kill
+      }
+    }
+    try {
+      proc.kill(signal)
+    } catch {
+      // process already dead
+    }
   }
 
   private clearTimeout(): void {
