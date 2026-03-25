@@ -69,6 +69,7 @@ const STATS_CMD = "/stats"
 const REPLY_PREFIX = "/reply"
 const REPLY_SHORT = "/r"
 const CLOSE_CMD = "/close"
+const STOP_CMD = "/stop"
 const HELP_CMD = "/help"
 const CLEAN_CMD = "/clean"
 const USAGE_CMD = "/usage"
@@ -382,6 +383,8 @@ export class Dispatcher {
       if (topicSession) {
         if (text === CLOSE_CMD) {
           await this.handleCloseCommand(topicSession)
+        } else if (text === STOP_CMD) {
+          await this.handleStopCommand(topicSession)
         } else if ((topicSession.mode === "plan" || topicSession.mode === "think" || topicSession.mode === "review") && (text === EXECUTE_CMD || text?.startsWith(EXECUTE_CMD + " "))) {
           const directive = text!.slice(EXECUTE_CMD.length).trim() || undefined
           await this.handleExecuteCommand(topicSession, directive)
@@ -1842,6 +1845,36 @@ export class Dispatcher {
     this.removeWorkspace(topicSession).catch((err) => {
       process.stderr.write(`dispatcher: background cleanup failed for ${topicSession.slug}: ${err}\n`)
     })
+  }
+
+  private async handleStopCommand(topicSession: TopicSession): Promise<void> {
+    const threadId = topicSession.threadId
+
+    // Only act if there's an active session
+    if (!topicSession.activeSessionId) {
+      await this.telegram.sendMessage(
+        `⚠️ No active session to stop.`,
+        threadId,
+      )
+      return
+    }
+
+    const activeSession = this.sessions.get(threadId)
+    if (activeSession) {
+      this.sessions.delete(threadId)
+      await activeSession.handle.kill()  // graceful kill with SIGINT → SIGKILL escalation
+    }
+
+    // Clear the active session ID but preserve everything else
+    topicSession.activeSessionId = undefined
+    topicSession.pendingFeedback = []
+    this.persistTopicSessions()
+
+    await this.telegram.sendMessage(
+      `⏹️ Session stopped. Send <b>/reply</b> to continue.`,
+      threadId,
+    )
+    process.stderr.write(`dispatcher: stopped session ${topicSession.slug} (thread ${threadId})\n`)
   }
 
   private async downloadPhotos(photos: TelegramPhotoSize[] | undefined, _cwd: string): Promise<string[]> {

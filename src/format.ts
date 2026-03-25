@@ -293,6 +293,7 @@ export function formatHelp(): string {
     `<code>/reply text</code> (or <code>/r text</code>) — give feedback to the agent`,
     `<code>/execute [directive]</code> — finalize plan and start implementation (plan/think mode)`,
     `<code>/split [directive]</code> — split plan into parallel sub-tasks (plan/think mode)`,
+    `<code>/stop</code> — stop the running agent but keep the thread and data`,
     `<code>/close</code> — stop the session, wipe data, and delete the topic`,
   ].join("\n")
 }
