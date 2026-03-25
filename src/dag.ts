@@ -363,3 +363,146 @@ export function renderDagStatus(graph: DagGraph): string {
 function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 }
+
+const DAG_STATUS_START = "<!-- dag-status-start -->"
+const DAG_STATUS_END = "<!-- dag-status-end -->"
+
+export { DAG_STATUS_START, DAG_STATUS_END }
+
+const statusEmoji: Record<DagNodeStatus, string> = {
+  pending: "⏳",
+  ready: "🔜",
+  running: "⚡",
+  done: "✅",
+  failed: "❌",
+  skipped: "⏭️",
+}
+
+const statusLabel: Record<DagNodeStatus, string> = {
+  pending: "Pending",
+  ready: "Ready",
+  running: "Running",
+  done: "Done",
+  failed: "Failed",
+  skipped: "Skipped",
+}
+
+/**
+ * Sanitize a node ID for use in mermaid (alphanumeric + hyphens only).
+ */
+function mermaidId(id: string): string {
+  return id.replace(/[^a-zA-Z0-9-]/g, "_")
+}
+
+/**
+ * Escape text for mermaid node labels (double-quote wrapping handles most cases).
+ */
+function mermaidLabel(text: string): string {
+  return text.replace(/"/g, "'")
+}
+
+/**
+ * Render the DAG as a GitHub-flavored markdown section with a mermaid flowchart
+ * and a status table. The output is wrapped in HTML comment markers for
+ * idempotent replacement in PR descriptions.
+ *
+ * @param graph - The DAG graph to render
+ * @param currentNodeId - Optional ID of the "current" node (the one this PR belongs to)
+ */
+export function renderDagForGitHub(graph: DagGraph, currentNodeId?: string): string {
+  if (graph.nodes.length === 0) {
+    return [DAG_STATUS_START, "", "_No tasks in DAG._", "", DAG_STATUS_END].join("\n")
+  }
+
+  const sorted = topologicalSort(graph)
+  const lines: string[] = [DAG_STATUS_START, ""]
+
+  // --- Mermaid flowchart ---
+  lines.push("```mermaid")
+  lines.push("flowchart TD")
+
+  // Class definitions for statuses
+  lines.push("  classDef done fill:#2da44e,stroke:#1a7f37,color:#fff")
+  lines.push("  classDef running fill:#bf8700,stroke:#9a6700,color:#fff")
+  lines.push("  classDef pending fill:#656d76,stroke:#424a53,color:#fff")
+  lines.push("  classDef ready fill:#0969da,stroke:#0550ae,color:#fff")
+  lines.push("  classDef failed fill:#cf222e,stroke:#a40e26,color:#fff")
+  lines.push("  classDef skipped fill:#656d76,stroke:#424a53,color:#fff,stroke-dasharray: 5 5")
+  lines.push("  classDef current stroke:#bf8700,stroke-width:3px")
+
+  // Node declarations
+  for (const id of sorted) {
+    const node = graph.nodes.find((n) => n.id === id)!
+    const mid = mermaidId(id)
+    const icon = statusEmoji[node.status]
+    const label = mermaidLabel(node.title)
+    lines.push(`  ${mid}["${icon} ${label}"]`)
+  }
+
+  // Edges
+  for (const id of sorted) {
+    const node = graph.nodes.find((n) => n.id === id)!
+    for (const dep of node.dependsOn) {
+      lines.push(`  ${mermaidId(dep)} --> ${mermaidId(id)}`)
+    }
+  }
+
+  // Apply status classes
+  for (const id of sorted) {
+    const node = graph.nodes.find((n) => n.id === id)!
+    const mid = mermaidId(id)
+    lines.push(`  class ${mid} ${node.status}`)
+    if (currentNodeId && id === currentNodeId) {
+      lines.push(`  class ${mid} current`)
+    }
+  }
+
+  lines.push("```")
+  lines.push("")
+
+  // --- Status table ---
+  lines.push("| # | Task | Status | PR |")
+  lines.push("|---|------|--------|----|")
+
+  for (let i = 0; i < sorted.length; i++) {
+    const id = sorted[i]
+    const node = graph.nodes.find((n) => n.id === id)!
+    const isCurrent = currentNodeId === id
+    const num = String(i + 1)
+    const title = isCurrent ? `**${node.title}** _(this PR)_` : node.title
+    const status = `${statusEmoji[node.status]} ${statusLabel[node.status]}`
+    const pr = node.prUrl ? `[PR](${node.prUrl})` : "—"
+    lines.push(`| ${num} | ${title} | ${status} | ${pr} |`)
+  }
+
+  const progress = dagProgress(graph)
+  lines.push("")
+  lines.push(
+    `**Progress:** ${progress.done}/${progress.total} complete` +
+    (progress.running > 0 ? ` · ${progress.running} running` : "") +
+    (progress.failed > 0 ? ` · ${progress.failed} failed` : "") +
+    (progress.skipped > 0 ? ` · ${progress.skipped} skipped` : ""),
+  )
+
+  lines.push("")
+  lines.push(DAG_STATUS_END)
+
+  return lines.join("\n")
+}
+
+/**
+ * Replace or append the DAG status section in a PR body.
+ * If the body already contains DAG markers, replaces the content between them.
+ * Otherwise appends the section at the end.
+ */
+export function upsertDagSection(body: string, dagSection: string): string {
+  const startIdx = body.indexOf(DAG_STATUS_START)
+  const endIdx = body.indexOf(DAG_STATUS_END)
+
+  if (startIdx !== -1 && endIdx !== -1) {
+    return body.substring(0, startIdx) + dagSection + body.substring(endIdx + DAG_STATUS_END.length)
+  }
+
+  const separator = body.length > 0 && !body.endsWith("\n") ? "\n\n" : body.length > 0 ? "\n" : ""
+  return body + separator + dagSection
+}
