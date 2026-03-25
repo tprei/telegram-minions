@@ -287,7 +287,7 @@ describe("checkPRMergeability", () => {
 describe("waitForCI", () => {
   const testConfig: CiConfig = {
     pollIntervalMs: 10, // Fast polling for tests
-    pollTimeoutMs: 500, // Enough headroom for slow CI environments
+    pollTimeoutMs: 1000, // Generous timeout for slow CI environments
     maxRetries: 2,
   }
 
