@@ -33,14 +33,13 @@ export async function waitForCI(prUrl: string, cwd: string, ciConfig: CiConfig):
 
   while (Date.now() - startedAt < timeoutMs) {
     const checks = getCheckStatus(prUrl, cwd)
-    if (checks === null) {
-      return { passed: false, checks: [], timedOut: true }
-    }
-
-    const pending = checks.filter((c) => c.bucket === "pending")
-    if (pending.length === 0 && checks.length > 0) {
-      const failed = checks.filter((c) => c.bucket === "fail")
-      return { passed: failed.length === 0, checks, timedOut: false }
+    // On error (null), continue polling - don't give up on transient failures
+    if (checks !== null) {
+      const pending = checks.filter((c) => c.bucket === "pending")
+      if (pending.length === 0 && checks.length > 0) {
+        const failed = checks.filter((c) => c.bucket === "fail")
+        return { passed: failed.length === 0, checks, timedOut: false }
+      }
     }
 
     await sleep(intervalMs)
@@ -62,9 +61,15 @@ function getCheckStatus(prUrl: string, cwd: string): CICheckResult[] | null {
       },
     ).toString().trim()
 
-    if (!output || output === "[]") return []
-    return JSON.parse(output) as CICheckResult[]
-  } catch {
+    if (!output || output === "[]") {
+      process.stderr.write(`ci-babysit: gh pr checks returned empty for ${prUrl}\n`)
+      return []
+    }
+    const checks = JSON.parse(output) as CICheckResult[]
+    process.stderr.write(`ci-babysit: gh pr checks returned ${checks.length} checks for ${prUrl}\n`)
+    return checks
+  } catch (err) {
+    process.stderr.write(`ci-babysit: gh pr checks failed for ${prUrl}: ${err}\n`)
     return null
   }
 }

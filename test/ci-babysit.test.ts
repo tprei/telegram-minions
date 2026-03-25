@@ -1,5 +1,6 @@
-import { describe, it, expect, vi, afterEach } from "vitest"
-import { extractPRUrl, buildCIFixPrompt, buildQualityGateFixPrompt, checkPRMergeability } from "../src/ci-babysit.js"
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest"
+import { extractPRUrl, buildCIFixPrompt, buildQualityGateFixPrompt, checkPRMergeability, waitForCI } from "../src/ci-babysit.js"
+import type { CiConfig } from "../src/config-types.js"
 
 vi.mock("node:child_process", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:child_process")>()
@@ -238,5 +239,108 @@ describe("checkPRMergeability", () => {
   it("returns null for unexpected output", () => {
     mockExecSync.mockReturnValue(Buffer.from("SOMETHING_ELSE\n"))
     expect(checkPRMergeability("https://github.com/org/repo/pull/1", "/tmp")).toBeNull()
+  })
+})
+
+describe("waitForCI", () => {
+  const testConfig: CiConfig = {
+    pollIntervalMs: 10, // Fast polling for tests
+    pollTimeoutMs: 100, // Short timeout for tests
+    maxRetries: 2,
+  }
+
+  beforeEach(() => { mockExecSync.mockReset() })
+
+  it("returns success when all checks pass immediately", async () => {
+    mockExecSync.mockReturnValue(Buffer.from(
+      JSON.stringify([
+        { name: "test", state: "success", bucket: "pass" },
+        { name: "lint", state: "success", bucket: "pass" },
+      ])
+    ))
+
+    const result = await waitForCI("https://github.com/org/repo/pull/1", "/tmp", testConfig)
+
+    expect(result.passed).toBe(true)
+    expect(result.timedOut).toBe(false)
+    expect(result.checks).toHaveLength(2)
+  })
+
+  it("returns failure when some checks fail", async () => {
+    mockExecSync.mockReturnValue(Buffer.from(
+      JSON.stringify([
+        { name: "test", state: "success", bucket: "pass" },
+        { name: "lint", state: "failure", bucket: "fail" },
+      ])
+    ))
+
+    const result = await waitForCI("https://github.com/org/repo/pull/1", "/tmp", testConfig)
+
+    expect(result.passed).toBe(false)
+    expect(result.timedOut).toBe(false)
+    expect(result.checks).toHaveLength(2)
+  })
+
+  it("continues polling when checks are pending", async () => {
+    let callCount = 0
+    mockExecSync.mockImplementation(() => {
+      callCount++
+      if (callCount < 3) {
+        return Buffer.from(JSON.stringify([
+          { name: "test", state: "pending", bucket: "pending" },
+        ]))
+      }
+      return Buffer.from(JSON.stringify([
+        { name: "test", state: "success", bucket: "pass" },
+      ]))
+    })
+
+    const result = await waitForCI("https://github.com/org/repo/pull/1", "/tmp", testConfig)
+
+    expect(result.passed).toBe(true)
+    expect(result.timedOut).toBe(false)
+    expect(callCount).toBeGreaterThanOrEqual(3)
+  })
+
+  it("continues polling on transient errors (null returns)", async () => {
+    let callCount = 0
+    mockExecSync.mockImplementation(() => {
+      callCount++
+      if (callCount < 3) {
+        throw new Error("Transient network error")
+      }
+      return Buffer.from(JSON.stringify([
+        { name: "test", state: "success", bucket: "pass" },
+      ]))
+    })
+
+    const result = await waitForCI("https://github.com/org/repo/pull/1", "/tmp", testConfig)
+
+    expect(result.passed).toBe(true)
+    expect(result.timedOut).toBe(false)
+    expect(callCount).toBeGreaterThanOrEqual(3)
+  })
+
+  it("times out when checks never complete", async () => {
+    mockExecSync.mockReturnValue(Buffer.from(JSON.stringify([
+      { name: "test", state: "pending", bucket: "pending" },
+    ])))
+
+    const result = await waitForCI("https://github.com/org/repo/pull/1", "/tmp", testConfig)
+
+    expect(result.timedOut).toBe(true)
+    expect(result.passed).toBe(false)
+  })
+
+  it("times out when all calls fail", async () => {
+    mockExecSync.mockImplementation(() => {
+      throw new Error("Permanent failure")
+    })
+
+    const result = await waitForCI("https://github.com/org/repo/pull/1", "/tmp", testConfig)
+
+    expect(result.timedOut).toBe(true)
+    expect(result.passed).toBe(false)
+    expect(result.checks).toEqual([])
   })
 })
