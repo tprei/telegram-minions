@@ -47,8 +47,25 @@ import {
   formatSplitStart,
   formatSplitChildComplete,
   formatSplitAllDone,
+  formatStackAnalyzing,
+  formatStackStart,
+  formatStackStatus,
+  formatStackNodeStart,
+  formatStackNodeComplete,
+  formatStackNodeError,
+  formatStackNodeBlocked,
+  formatStackNodeRebase,
+  formatStackConflict,
+  formatStackComplete,
+  formatStackHelp,
+  formatStackNoItems,
+  formatStackValidationError,
 } from "./format.js"
 import { extractSplitItems, buildSplitChildPrompt } from "./split.js"
+import { extractStackItems, buildStackChildPrompt } from "./stack-extract.js"
+import { StackOrchestrator, type StackItem, type StackOrchestratorCallbacks } from "./stack-orchestrator.js"
+import { StackGraph, createStackMetadata } from "./stack-graph.js"
+import type { StackMetadata, StackNode } from "./types.js"
 import { runQualityGates, type QualityReport } from "./quality-gates.js"
 import { StatsTracker } from "./stats.js"
 import { fetchClaudeUsage } from "./claude-usage.js"
@@ -75,6 +92,10 @@ const CLEAN_CMD = "/clean"
 const USAGE_CMD = "/usage"
 const CONFIG_CMD = "/config"
 const SPLIT_CMD = "/split"
+const STACK_CMD = "/stack"
+const STACK_STATUS_CMD = "/stack-status"
+const STACK_MERGE_CMD = "/stack-merge"
+const STACK_ABORT_CMD = "/stack-abort"
 
 interface ActiveSession {
   handle: SessionHandle
@@ -95,6 +116,7 @@ export class Dispatcher {
   private readonly topicSessions = new Map<number, TopicSession>()
   private readonly pendingTasks = new Map<number, PendingTask>()
   private readonly pendingProfiles = new Map<number, PendingTask>()
+  private readonly stackOrchestrators = new Map<number, StackOrchestrator>()
   private readonly store: SessionStore
   private readonly profileStore: ProfileStore
   private offset = 0
@@ -391,6 +413,15 @@ export class Dispatcher {
         } else if ((topicSession.mode === "plan" || topicSession.mode === "think") && (text === SPLIT_CMD || text?.startsWith(SPLIT_CMD + " "))) {
           const directive = text!.slice(SPLIT_CMD.length).trim() || undefined
           await this.handleSplitCommand(topicSession, directive)
+        } else if ((topicSession.mode === "plan" || topicSession.mode === "think") && (text === STACK_CMD || text?.startsWith(STACK_CMD + " "))) {
+          const directive = text!.slice(STACK_CMD.length).trim() || undefined
+          await this.handleStackCommand(topicSession, directive)
+        } else if (text === STACK_STATUS_CMD) {
+          await this.handleStackStatusCommand(topicSession)
+        } else if (text === STACK_MERGE_CMD) {
+          await this.handleStackMergeCommand(topicSession)
+        } else if (text === STACK_ABORT_CMD) {
+          await this.handleStackAbortCommand(topicSession)
         } else if (text?.startsWith(REPLY_PREFIX + " ") || text?.startsWith(REPLY_SHORT + " ") || text === REPLY_PREFIX || text === REPLY_SHORT) {
           const stripped = text.startsWith(REPLY_PREFIX)
             ? text.slice(REPLY_PREFIX.length).trim()
@@ -1812,6 +1843,407 @@ export class Dispatcher {
     await this.telegram.deleteForumTopic(childId).catch(() => {})
     await this.removeWorkspace(child).catch(() => {})
     process.stderr.write(`dispatcher: closed child topic ${child.slug} (thread ${childId})\n`)
+  }
+
+  // Stack command handlers
+
+  private async handleStackCommand(topicSession: TopicSession, directive?: string): Promise<void> {
+    if (topicSession.activeSessionId) {
+      const activeSession = this.sessions.get(topicSession.threadId)
+      if (activeSession) await activeSession.handle.kill()
+      this.sessions.delete(topicSession.threadId)
+      topicSession.activeSessionId = undefined
+    }
+
+    // Parse mode from directive
+    let mode: "sequential" | "parallel" | "auto" = "auto"
+    let actualDirective = directive
+    if (directive?.startsWith("sequential")) {
+      mode = "sequential"
+      actualDirective = directive.slice("sequential".length).trim() || undefined
+    } else if (directive?.startsWith("parallel")) {
+      mode = "parallel"
+      actualDirective = directive.slice("parallel".length).trim() || undefined
+    }
+
+    await this.telegram.sendMessage(
+      formatStackAnalyzing(topicSession.slug),
+      topicSession.threadId,
+    )
+
+    const GRACE_PERIOD_MS = 2000
+    await new Promise((resolve) => setTimeout(resolve, GRACE_PERIOD_MS))
+
+    const result = await extractStackItems(topicSession.conversation, actualDirective)
+
+    if (result.error === "system") {
+      await this.telegram.sendMessage(
+        `⚠️ <b>System error</b> during extraction: <code>${result.errorMessage ?? "Unknown error"}</code>\n\n` +
+        `Try <code>/stack</code> again, or use <code>/split</code> for parallel tasks.`,
+        topicSession.threadId,
+      )
+      return
+    }
+
+    if (result.items.length === 0) {
+      await this.telegram.sendMessage(
+        formatStackNoItems(),
+        topicSession.threadId,
+      )
+      return
+    }
+
+    // Check if items have any dependencies
+    const hasDependencies = result.items.some((item) => item.dependencies.length > 0)
+    if (!hasDependencies) {
+      await this.telegram.sendMessage(
+        `⚠️ All items are parallelizable (no dependencies). Use <code>/split</code> instead.`,
+        topicSession.threadId,
+      )
+      return
+    }
+
+    const stackId = crypto.randomUUID()
+    const stackSlug = `stack-${topicSession.slug}`
+
+    // Create stack metadata
+    const stackMetadata = createStackMetadata(
+      stackId,
+      stackSlug,
+      topicSession.threadId,
+      topicSession.repoUrl,
+      result.items.map((item) => ({
+        id: item.id,
+        title: item.title,
+        description: item.description,
+        dependencies: item.dependencies,
+      })),
+      mode,
+      "manual", // Start with manual merge strategy
+    )
+
+    // Validate DAG
+    const graph = new StackGraph(stackMetadata)
+    const validation = graph.validateDAG()
+    if (!validation.valid) {
+      await this.telegram.sendMessage(
+        formatStackValidationError(validation.cycle ?? []),
+        topicSession.threadId,
+      )
+      return
+    }
+
+    // Store stack metadata in topic session
+    topicSession.stack = stackMetadata
+
+    // Close existing children before spawning new ones
+    await this.closeChildSessions(topicSession)
+    topicSession.childThreadIds = []
+
+    // Create orchestrator
+    const orchestrator = new StackOrchestrator(stackMetadata, this.createStackCallbacks(topicSession))
+    this.stackOrchestrators.set(topicSession.threadId, orchestrator)
+
+    // Show stack start message
+    await this.telegram.sendMessage(
+      formatStackStart(stackSlug, Array.from(stackMetadata.nodes.values()), mode),
+      topicSession.threadId,
+    )
+
+    await this.updateTopicTitle(topicSession, "🔀")
+    await this.persistTopicSessions()
+
+    // Start execution
+    try {
+      await orchestrator.start()
+    } catch (err) {
+      process.stderr.write(`dispatcher: stack execution error: ${err}\n`)
+      await this.telegram.sendMessage(
+        `❌ Stack execution failed: ${err instanceof Error ? err.message : String(err)}`,
+        topicSession.threadId,
+      )
+    }
+  }
+
+  private createStackCallbacks(parentSession: TopicSession): StackOrchestratorCallbacks {
+    return {
+      onNodeStart: async (node: StackNode): Promise<void> => {
+        await this.telegram.sendMessage(
+          formatStackNodeStart(node),
+          parentSession.threadId,
+        )
+      },
+
+      onNodeComplete: async (node: StackNode): Promise<void> => {
+        await this.telegram.sendMessage(
+          formatStackNodeComplete(node, node.prUrl),
+          parentSession.threadId,
+        )
+      },
+
+      onNodeError: async (node: StackNode, error: string): Promise<void> => {
+        await this.telegram.sendMessage(
+          formatStackNodeError(node),
+          parentSession.threadId,
+        )
+        process.stderr.write(`stack: node ${node.id} error: ${error}\n`)
+      },
+
+      onNodeBlocked: async (node: StackNode, blockingDeps: string[]): Promise<void> => {
+        await this.telegram.sendMessage(
+          formatStackNodeBlocked(node, blockingDeps),
+          parentSession.threadId,
+        )
+      },
+
+      onNodeRebase: async (node: StackNode): Promise<void> => {
+        await this.telegram.sendMessage(
+          formatStackNodeRebase(node),
+          parentSession.threadId,
+        )
+      },
+
+      onConflict: async (node: StackNode, conflictFiles: string[]): Promise<void> => {
+        await this.telegram.sendMessage(
+          formatStackConflict(node, conflictFiles),
+          parentSession.threadId,
+        )
+      },
+
+      onStackComplete: async (metadata: StackMetadata): Promise<void> => {
+        await this.telegram.sendMessage(
+          formatStackComplete(metadata),
+          parentSession.threadId,
+        )
+        this.stackOrchestrators.delete(parentSession.threadId)
+        const succeeded = Array.from(metadata.nodes.values())
+          .filter((n) => n.status === "completed" || n.status === "merged").length
+        await this.updateTopicTitle(parentSession, succeeded === metadata.nodes.size ? "✅" : "⚠️")
+      },
+
+      spawnMinion: async (node: StackNode, worktree: string, branch: string, task: string): Promise<number> => {
+        return this.spawnStackNodeMinion(parentSession, node, worktree, branch, task)
+      },
+
+      prepareWorktree: async (node: StackNode, baseBranch: string, parentBranches: string[]): Promise<string> => {
+        return this.prepareStackWorktree(parentSession, node, baseBranch, parentBranches)
+      },
+    }
+  }
+
+  private async spawnStackNodeMinion(
+    parent: TopicSession,
+    node: StackNode,
+    worktree: string,
+    branch: string,
+    task: string,
+  ): Promise<number> {
+    const sessionId = crypto.randomUUID()
+    const slug = generateSlug(sessionId)
+    const repo = parent.repo
+    const topicName = `⚡ ${repo} · ${slug}`
+
+    let topic: { message_thread_id: number }
+    try {
+      topic = await this.telegram.createForumTopic(topicName)
+    } catch (err) {
+      process.stderr.write(`dispatcher: failed to create topic for stack node: ${err}\n`)
+      throw err
+    }
+
+    const threadId = topic.message_thread_id
+
+    // Build task prompt with stack context
+    const stackItems = parent.stack
+      ? Array.from(parent.stack.nodes.values()).map((n) => ({
+          id: n.id,
+          title: n.title,
+          description: n.description,
+          dependencies: n.dependencies,
+        }))
+      : []
+
+    const fullTask = buildStackChildPrompt(parent.conversation, node, stackItems)
+
+    const childSession: TopicSession = {
+      threadId,
+      repo,
+      repoUrl: parent.repoUrl,
+      cwd: worktree,
+      slug,
+      conversation: [{ role: "user", text: fullTask }],
+      pendingFeedback: [],
+      mode: "task",
+      lastActivityAt: Date.now(),
+      profileId: parent.profileId,
+      parentThreadId: parent.threadId,
+      splitLabel: `[stack] ${node.title}`,
+    }
+
+    this.topicSessions.set(threadId, childSession)
+
+    // Track as child
+    if (!parent.childThreadIds) {
+      parent.childThreadIds = []
+    }
+    parent.childThreadIds.push(threadId)
+
+    await this.spawnTopicAgent(childSession, fullTask)
+    return threadId
+  }
+
+  private async prepareStackWorktree(
+    parent: TopicSession,
+    node: StackNode,
+    baseBranch: string,
+    _parentBranches: string[],
+  ): Promise<string> {
+    const slug = `stack-${node.id.slice(0, 8)}`
+    const worktree = await this.prepareWorkspace(slug, parent.repoUrl)
+
+    if (!worktree) {
+      throw new Error(`Failed to prepare worktree for stack node ${node.id}`)
+    }
+
+    // Create branch from base
+    try {
+      await execFileAsync("git", ["checkout", "-b", node.id.replace(/[^a-zA-Z0-9-]/g, "-"), baseBranch], {
+        cwd: worktree,
+      })
+    } catch (err) {
+      process.stderr.write(`stack: failed to create branch: ${err}\n`)
+      // Continue anyway - the branch might already exist or we'll handle it later
+    }
+
+    return worktree
+  }
+
+  private async handleStackStatusCommand(topicSession: TopicSession): Promise<void> {
+    if (!topicSession.stack) {
+      await this.telegram.sendMessage(
+        `⚠️ No active stack in this topic. Use <code>/stack</code> to create one.`,
+        topicSession.threadId,
+      )
+      return
+    }
+
+    await this.telegram.sendMessage(
+      formatStackStatus(topicSession.stack),
+      topicSession.threadId,
+    )
+  }
+
+  private async handleStackMergeCommand(topicSession: TopicSession): Promise<void> {
+    if (!topicSession.stack) {
+      await this.telegram.sendMessage(
+        `⚠️ No active stack in this topic.`,
+        topicSession.threadId,
+      )
+      return
+    }
+
+    const nodes = Array.from(topicSession.stack.nodes.values())
+    const completed = nodes.filter((n) => n.status === "completed")
+
+    if (completed.length === 0) {
+      await this.telegram.sendMessage(
+        `⚠️ No completed items to merge.`,
+        topicSession.threadId,
+      )
+      return
+    }
+
+    await this.telegram.sendMessage(
+      `🔀 Starting sequential merge of ${completed.length} completed items…`,
+      topicSession.threadId,
+    )
+
+    // Merge in topological order
+    const graph = new StackGraph(topicSession.stack)
+    const sorted = graph.topologicalSort()
+
+    for (const node of sorted) {
+      if (node.status !== "completed" || !node.prUrl) continue
+
+      try {
+        const prMatch = node.prUrl.match(/\/pull\/(\d+)$/)
+        if (!prMatch) continue
+
+        await this.telegram.sendMessage(
+          `🔀 Merging: ${node.title}…`,
+          topicSession.threadId,
+        )
+
+        await execFileAsync("gh", ["pr", "merge", prMatch[1], "--squash", "--delete-branch"], {
+          cwd: node.worktree,
+        })
+
+        node.status = "merged"
+        await this.telegram.sendMessage(
+          `✅ Merged: ${node.title}`,
+          topicSession.threadId,
+        )
+
+        // Rebase remaining nodes
+        const children = graph.getChildren(node.id)
+        for (const child of children) {
+          if (child.worktree && child.branch && child.status !== "errored") {
+            try {
+              await execFileAsync("git", ["fetch", "origin"], { cwd: child.worktree })
+              await execFileAsync("git", ["rebase", "main"], { cwd: child.worktree })
+              await execFileAsync("git", ["push", "--force-with-lease", "origin", child.branch], {
+                cwd: child.worktree,
+              })
+              await this.telegram.sendMessage(
+                `🔄 Rebased: ${child.title}`,
+                topicSession.threadId,
+              )
+            } catch (err) {
+              await this.telegram.sendMessage(
+                `⚠️ Rebase failed for ${child.title}: ${err}`,
+                topicSession.threadId,
+              )
+            }
+          }
+        }
+      } catch (err) {
+        await this.telegram.sendMessage(
+          `❌ Failed to merge ${node.title}: ${err}`,
+          topicSession.threadId,
+        )
+        break
+      }
+    }
+
+    await this.persistTopicSessions()
+  }
+
+  private async handleStackAbortCommand(topicSession: TopicSession): Promise<void> {
+    const orchestrator = this.stackOrchestrators.get(topicSession.threadId)
+    if (orchestrator) {
+      orchestrator.stop()
+      this.stackOrchestrators.delete(topicSession.threadId)
+    }
+
+    if (!topicSession.stack) {
+      await this.telegram.sendMessage(
+        `⚠️ No active stack to abort.`,
+        topicSession.threadId,
+      )
+      return
+    }
+
+    // Close all child sessions
+    await this.closeChildSessions(topicSession)
+    topicSession.stack = undefined
+
+    await this.telegram.sendMessage(
+      `⏹️ Stack aborted. All child sessions closed.`,
+      topicSession.threadId,
+    )
+
+    await this.updateTopicTitle(topicSession, "⏹️")
+    await this.persistTopicSessions()
   }
 
   private async handleCloseCommand(topicSession: TopicSession): Promise<void> {

@@ -26,6 +26,10 @@ Telegram-controlled Goose coding agents on fly.io. The Dispatcher polls Telegram
 | `src/slugs.ts` | Deterministic adjective-noun slug generator |
 | `src/types.ts` | TypeScript types for Goose events and Telegram API |
 | `src/ci-babysit.ts` | CI polling, failure log parsing, fix prompt builder |
+| `src/split.ts` | Parallel task extraction and child prompt building |
+| `src/stack-graph.ts` | DAG operations for stacked minions |
+| `src/stack-orchestrator.ts` | Stack execution engine |
+| `src/stack-extract.ts` | Stack item extraction with dependencies |
 | `goose/config.yaml` | Goose agent configuration (mode, extensions, limits) |
 | `.claude/agents/post-task-router.md` | Haiku classifier — routes completed work to the right action |
 | `.claude/agents/ci-fix.md` | CI fix specialist — diagnoses and fixes CI failures |
@@ -91,6 +95,25 @@ npm run build            # compile to dist/
 3. Each child runs as a `/task` in parallel and opens its own PR
 4. The parent topic tracks children and reports aggregate status
 5. Send `/close` in the parent to terminate all children
+
+### Stack (dependency-aware sequential sub-tasks)
+```
+/stack                    # auto mode - parallel where possible
+/stack sequential         # strictly sequential execution
+/stack parallel           # parallel where dependencies allow
+/stack Focus on API changes first
+```
+1. Extracts work items with dependencies from the conversation using AI
+2. Builds a DAG (Directed Acyclic Graph) representing the dependency structure
+3. Supports linear chains, tree structures, and diamond dependencies
+4. Executes items respecting dependencies (roots first, then children)
+5. Each item gets its own worktree and branch based on its parent(s)
+6. Use `/stack-status` to view current state, `/stack-merge` to merge PRs in order
+7. Send `/stack-abort` to cancel all pending/running items
+
+**Stack vs Split:**
+- Use `/split` when items are independent and can run in parallel
+- Use `/stack` when items have true dependencies (e.g., refactor → feature → tests)
 
 ## Goose stream-json event schema
 

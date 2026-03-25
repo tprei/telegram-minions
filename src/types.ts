@@ -152,4 +152,52 @@ export interface TopicSession {
   childThreadIds?: number[]
   splitLabel?: string
   interruptedAt?: number
+  stack?: StackMetadata
+}
+
+// Stack types for dependent minions (DAG-based)
+
+export type StackNodeStatus = "pending" | "running" | "completed" | "errored" | "blocked" | "merged"
+
+export type StackExecutionMode = "sequential" | "parallel" | "auto"
+
+export type StackMergeStrategy = "manual" | "auto" | "merge-queue"
+
+export interface StackNode {
+  id: string
+  title: string
+  description: string
+  /** IDs of nodes this node depends on (must complete first) */
+  dependencies: string[]
+  /** Branch name for this node */
+  branch?: string
+  /** Worktree path for this node */
+  worktree?: string
+  /** Thread ID if spawned */
+  threadId?: number
+  /** PR URL if created */
+  prUrl?: string
+  /** Current status */
+  status: StackNodeStatus
+  /** Error message if failed */
+  error?: string
+}
+
+export interface StackMetadata {
+  /** Unique stack identifier */
+  stackId: string
+  /** Human-readable slug for the stack */
+  slug: string
+  /** All nodes in the stack */
+  nodes: Map<string, StackNode>
+  /** Execution mode */
+  mode: StackExecutionMode
+  /** Merge strategy */
+  mergeStrategy: StackMergeStrategy
+  /** Parent thread ID that owns this stack */
+  parentThreadId: number
+  /** Repository URL */
+  repoUrl?: string
+  /** Created timestamp */
+  createdAt: number
 }

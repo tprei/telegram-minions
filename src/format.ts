@@ -293,6 +293,10 @@ export function formatHelp(): string {
     `<code>/reply text</code> (or <code>/r text</code>) — give feedback to the agent`,
     `<code>/execute [directive]</code> — finalize plan and start implementation (plan/think mode)`,
     `<code>/split [directive]</code> — split plan into parallel sub-tasks (plan/think mode)`,
+    `<code>/stack [mode] [directive]</code> — create dependency-aware stack (plan/think mode)`,
+    `<code>/stack-status</code> — show current stack state`,
+    `<code>/stack-merge</code> — merge completed PRs in order`,
+    `<code>/stack-abort</code> — cancel all pending/running stack items`,
     `<code>/stop</code> — stop the running agent but keep the thread and data`,
     `<code>/close</code> — stop the session, wipe data, and delete the topic`,
   ].join("\n")
@@ -557,4 +561,235 @@ export function formatConfigHelp(): string {
     ``,
     `<b>Fields</b>: name, baseUrl, authToken, opusModel, sonnetModel, haikuModel`,
   ].join("\n")
+}
+
+// Stack formatting functions
+
+import type { StackNode, StackNodeStatus, StackMetadata } from "./types.js"
+
+const STATUS_EMOJI: Record<StackNodeStatus, string> = {
+  pending: "⏳",
+  running: "🔵",
+  completed: "✅",
+  errored: "❌",
+  blocked: "⏸️",
+  merged: "🔀",
+}
+
+export function formatStackAnalyzing(slug: string): string {
+  return `🔀 <b>Analyzing for stack</b>  ·  🏷 <code>${esc(slug)}</code>\nExtracting work items and dependencies…`
+}
+
+export function formatStackStart(
+  slug: string,
+  nodes: StackNode[],
+  mode: string,
+): string {
+  const lines: string[] = [
+    `🔀 <b>Stack created</b> (${nodes.length} items, ${mode} mode)  ·  🏷 <code>${esc(slug)}</code>`,
+    "",
+  ]
+
+  // Build tree representation
+  const nodeMap = new Map(nodes.map((n) => [n.id, n]))
+  const depths = calculateDepths(nodes)
+  const printed = new Set<string>()
+
+  const printNode = (node: StackNode, prefix: string): void => {
+    if (printed.has(node.id)) return
+    printed.add(node.id)
+
+    const emoji = STATUS_EMOJI[node.status]
+    const deps = node.dependencies.length > 0 ? ` ← ${node.dependencies.join(", ")}` : ""
+    const prSuffix = node.prUrl ? ` — <a href="${esc(node.prUrl)}">PR</a>` : ""
+    lines.push(`${prefix}${emoji} <b>${esc(node.title)}</b>${deps}${prSuffix}`)
+
+    // Print children (nodes that depend on this node)
+    const children = nodes.filter((n) => n.dependencies.includes(node.id))
+    for (let i = 0; i < children.length; i++) {
+      const childPrefix = prefix + (i === children.length - 1 ? "└─ " : "├─ ")
+      printNode(children[i], prefix + (i === children.length - 1 ? "   " : "│  "))
+    }
+  }
+
+  // Start with roots
+  const roots = nodes.filter((n) => n.dependencies.length === 0)
+  for (const root of roots) {
+    printNode(root, "")
+  }
+
+  lines.push("")
+  lines.push("Items will execute respecting dependencies. Progress updates will appear here.")
+  lines.push(`<code>/stack-status</code> — view current state`)
+
+  return lines.join("\n")
+}
+
+function calculateDepths(nodes: StackNode[]): Map<string, number> {
+  const depths = new Map<string, number>()
+
+  const calc = (node: StackNode): number => {
+    if (depths.has(node.id)) return depths.get(node.id)!
+    if (node.dependencies.length === 0) {
+      depths.set(node.id, 0)
+      return 0
+    }
+    const nodeMap = new Map(nodes.map((n) => [n.id, n]))
+    const maxParentDepth = Math.max(
+      ...node.dependencies.map((depId) => {
+        const dep = nodeMap.get(depId)
+        return dep ? calc(dep) : 0
+      }),
+    )
+    const depth = maxParentDepth + 1
+    depths.set(node.id, depth)
+    return depth
+  }
+
+  for (const node of nodes) {
+    calc(node)
+  }
+
+  return depths
+}
+
+export function formatStackStatus(metadata: StackMetadata): string {
+  const nodes = Array.from(metadata.nodes.values())
+  const lines: string[] = [
+    `🔀 <b>Stack status</b>  ·  🏷 <code>${esc(metadata.slug)}</code>`,
+    "",
+  ]
+
+  // Group by status
+  const byStatus: Record<StackNodeStatus, StackNode[]> = {
+    pending: [],
+    running: [],
+    completed: [],
+    errored: [],
+    blocked: [],
+    merged: [],
+  }
+
+  for (const node of nodes) {
+    byStatus[node.status].push(node)
+  }
+
+  // Summary
+  const summary = [
+    byStatus.merged.length > 0 ? `🔀 ${byStatus.merged.length} merged` : null,
+    byStatus.completed.length > 0 ? `✅ ${byStatus.completed.length} completed` : null,
+    byStatus.running.length > 0 ? `🔵 ${byStatus.running.length} running` : null,
+    byStatus.blocked.length > 0 ? `⏸️ ${byStatus.blocked.length} blocked` : null,
+    byStatus.pending.length > 0 ? `⏳ ${byStatus.pending.length} pending` : null,
+    byStatus.errored.length > 0 ? `❌ ${byStatus.errored.length} failed` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ")
+
+  lines.push(summary)
+  lines.push("")
+
+  // List nodes by status
+  if (byStatus.running.length > 0) {
+    lines.push("<b>Running:</b>")
+    for (const node of byStatus.running) {
+      const prSuffix = node.prUrl ? ` — <a href="${esc(node.prUrl)}">PR</a>` : ""
+      lines.push(`  🔵 ${esc(node.title)}${prSuffix}`)
+    }
+    lines.push("")
+  }
+
+  if (byStatus.blocked.length > 0) {
+    lines.push("<b>Blocked:</b>")
+    for (const node of byStatus.blocked) {
+      const waitingOn = node.dependencies.filter((d) => {
+        const dep = metadata.nodes.get(d)
+        return dep && dep.status !== "completed" && dep.status !== "merged"
+      })
+      lines.push(`  ⏸️ ${esc(node.title)} — waiting for: ${waitingOn.join(", ")}`)
+    }
+    lines.push("")
+  }
+
+  if (byStatus.errored.length > 0) {
+    lines.push("<b>Failed:</b>")
+    for (const node of byStatus.errored) {
+      const error = node.error ? ` — ${esc(node.error.slice(0, 50))}` : ""
+      lines.push(`  ❌ ${esc(node.title)}${error}`)
+    }
+    lines.push("")
+  }
+
+  lines.push(`<code>/stack-status</code> — refresh`)
+
+  return lines.join("\n")
+}
+
+export function formatStackNodeStart(node: StackNode): string {
+  const deps = node.dependencies.length > 0 ? ` (depends on: ${node.dependencies.join(", ")})` : ""
+  return `🔵 <b>Starting</b>: ${esc(node.title)}${deps}`
+}
+
+export function formatStackNodeComplete(node: StackNode, prUrl?: string): string {
+  const prSuffix = prUrl ? ` — <a href="${esc(prUrl)}">PR</a>` : ""
+  return `✅ <b>Completed</b>: ${esc(node.title)}${prSuffix}`
+}
+
+export function formatStackNodeError(node: StackNode): string {
+  const error = node.error ? `: ${esc(node.error.slice(0, 100))}` : ""
+  return `❌ <b>Failed</b>: ${esc(node.title)}${error}`
+}
+
+export function formatStackNodeBlocked(node: StackNode, blockingDeps: string[]): string {
+  return `⏸️ <b>Blocked</b>: ${esc(node.title)} — waiting for: ${blockingDeps.join(", ")}`
+}
+
+export function formatStackNodeRebase(node: StackNode): string {
+  return `🔄 <b>Rebasing</b>: ${esc(node.title)}`
+}
+
+export function formatStackConflict(node: StackNode, conflictFiles: string[]): string {
+  const files = conflictFiles.length > 5
+    ? conflictFiles.slice(0, 5).join(", ") + ` (+${conflictFiles.length - 5} more)`
+    : conflictFiles.join(", ")
+  return `⚠️ <b>Merge conflict</b> in ${esc(node.title)}:\n<code>${esc(files)}</code>`
+}
+
+export function formatStackComplete(metadata: StackMetadata): string {
+  const nodes = Array.from(metadata.nodes.values())
+  const succeeded = nodes.filter((n) => n.status === "completed" || n.status === "merged").length
+  const failed = nodes.filter((n) => n.status === "errored").length
+  const total = nodes.length
+
+  const emoji = failed === 0 ? "✅" : "⚠️"
+  const summary = failed === 0
+    ? `${succeeded}/${total} completed successfully`
+    : `${succeeded}/${total} completed, ${failed} failed`
+
+  return `${emoji} <b>Stack complete</b>: ${summary}`
+}
+
+export function formatStackHelp(): string {
+  return [
+    `🔀 <b>Stack commands</b>`,
+    ``,
+    `<code>/stack</code> — create a dependency-aware stack from plan`,
+    `<code>/stack sequential</code> — stack with sequential execution`,
+    `<code>/stack parallel</code> — stack with parallel execution (where possible)`,
+    `<code>/stack-status</code> — show current stack state`,
+    `<code>/stack-merge</code> — merge all completed PRs in order`,
+    `<code>/stack-abort</code> — cancel all pending/running items`,
+    ``,
+    `<b>Stack vs Split:</b>`,
+    `• <code>/split</code> — parallel tasks, no dependencies`,
+    `• <code>/stack</code> — sequential/dependent tasks`,
+  ].join("\n")
+}
+
+export function formatStackNoItems(): string {
+  return `⚠️ Could not extract stackable items. All items appear to be parallelizable — try <code>/split</code> instead.`
+}
+
+export function formatStackValidationError(cycle: string[]): string {
+  return `❌ <b>Invalid stack</b>: circular dependency detected: ${cycle.join(" → ")}`
 }
