@@ -24,6 +24,12 @@ export interface AggregateStats {
   avgDurationMs: number
 }
 
+export interface ModeBreakdown {
+  count: number
+  tokens: number
+  durationMs: number
+}
+
 export class StatsTracker {
   private readonly filePath: string
 
@@ -73,5 +79,26 @@ export class StatsTracker {
       totalDurationMs: totalDuration,
       avgDurationMs: records.length > 0 ? Math.round(totalDuration / records.length) : 0,
     }
+  }
+
+  recentSessions(n: number): SessionRecord[] {
+    const records = this.load()
+    return records.slice(-n).reverse()
+  }
+
+  breakdownByMode(sinceDaysAgo?: number): Record<string, ModeBreakdown> {
+    let records = this.load()
+    if (sinceDaysAgo !== undefined) {
+      const cutoff = Date.now() - sinceDaysAgo * 86400000
+      records = records.filter((r) => r.timestamp >= cutoff)
+    }
+    const result: Record<string, ModeBreakdown> = {}
+    for (const r of records) {
+      const entry = result[r.mode] ?? (result[r.mode] = { count: 0, tokens: 0, durationMs: 0 })
+      entry.count++
+      entry.tokens += r.totalTokens
+      entry.durationMs += r.durationMs
+    }
+    return result
   }
 }

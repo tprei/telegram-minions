@@ -23,7 +23,10 @@ import {
   formatHelp,
   formatQualityReport,
   formatQualityReportForContext,
+  formatUsage,
 } from "../src/format.js"
+import type { ClaudeUsageResponse } from "../src/claude-usage.js"
+import type { AggregateStats, SessionRecord, ModeBreakdown } from "../src/stats.js"
 
 describe("esc", () => {
   it("escapes &, <, and >", () => {
@@ -470,6 +473,11 @@ describe("formatHelp", () => {
     const msg = formatHelp()
     expect(msg).toContain("/review")
   })
+
+  it("includes /usage command", () => {
+    const msg = formatHelp()
+    expect(msg).toContain("/usage")
+  })
 })
 
 describe("formatReviewStart", () => {
@@ -517,5 +525,80 @@ describe("formatStatus (review mode)", () => {
       5,
     )
     expect(msg).toContain("👀 review")
+  })
+})
+
+describe("formatUsage", () => {
+  const mockAgg: AggregateStats = {
+    totalSessions: 10,
+    completedSessions: 8,
+    erroredSessions: 2,
+    totalTokens: 500000,
+    totalDurationMs: 600000,
+    avgDurationMs: 60000,
+  }
+
+  const mockBreakdown: Record<string, ModeBreakdown> = {
+    task: { count: 7, tokens: 400000, durationMs: 420000 },
+    plan: { count: 3, tokens: 100000, durationMs: 180000 },
+  }
+
+  const mockRecent: SessionRecord[] = [
+    { slug: "bold-arc", repo: "my-repo", mode: "task", state: "completed", totalTokens: 45000, durationMs: 720000, timestamp: Date.now() },
+    { slug: "calm-bay", repo: "other-repo", mode: "plan", state: "completed", totalTokens: 23000, durationMs: 480000, timestamp: Date.now() - 60000 },
+  ]
+
+  it("shows local stats without ACP usage", () => {
+    const result = formatUsage(null, mockAgg, mockBreakdown, mockRecent)
+    expect(result).toContain("📊")
+    expect(result).toContain("10 sessions")
+    expect(result).toContain("500K tokens")
+    expect(result).toContain("task: 7 sessions")
+    expect(result).toContain("plan: 3 sessions")
+    expect(result).toContain("bold-arc")
+    expect(result).toContain("calm-bay")
+    expect(result).not.toContain("Claude ACP")
+  })
+
+  it("shows ACP usage when available", () => {
+    const acpUsage: ClaudeUsageResponse = {
+      five_hour: { utilization: 35, resets_at: new Date(Date.now() + 7200000).toISOString() },
+      seven_day: { utilization: 25, resets_at: new Date(Date.now() + 400000000).toISOString() },
+      seven_day_opus: { utilization: 8, resets_at: null },
+      seven_day_sonnet: { utilization: 12, resets_at: new Date(Date.now() + 300000000).toISOString() },
+      extra_usage: null,
+    }
+    const result = formatUsage(acpUsage, mockAgg, mockBreakdown, mockRecent)
+    expect(result).toContain("Claude ACP")
+    expect(result).toContain("5h:")
+    expect(result).toContain("35%")
+    expect(result).toContain("7d:")
+    expect(result).toContain("25%")
+    expect(result).toContain("7d opus:")
+    expect(result).toContain("8%")
+  })
+
+  it("shows extra usage when enabled", () => {
+    const acpUsage: ClaudeUsageResponse = {
+      five_hour: { utilization: 10, resets_at: null },
+      seven_day: { utilization: 20, resets_at: null },
+      seven_day_opus: { utilization: 0, resets_at: null },
+      seven_day_sonnet: { utilization: 0, resets_at: null },
+      extra_usage: { is_enabled: true, monthly_limit: 100, used_credits: 12.5, utilization: null },
+    }
+    const result = formatUsage(acpUsage, mockAgg, mockBreakdown, mockRecent)
+    expect(result).toContain("extra:")
+    expect(result).toContain("$12.50")
+    expect(result).toContain("$100")
+  })
+
+  it("handles empty state gracefully", () => {
+    const emptyAgg: AggregateStats = {
+      totalSessions: 0, completedSessions: 0, erroredSessions: 0,
+      totalTokens: 0, totalDurationMs: 0, avgDurationMs: 0,
+    }
+    const result = formatUsage(null, emptyAgg, {}, [])
+    expect(result).toContain("0 sessions")
+    expect(result).not.toContain("Recent sessions")
   })
 })

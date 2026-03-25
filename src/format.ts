@@ -283,6 +283,7 @@ export function formatHelp(): string {
     `<code>/review [repo] PR#</code> — review a pull request (or all unreviewed PRs)`,
     `<code>/status</code> — show active sessions`,
     `<code>/stats</code> — show aggregate usage statistics`,
+    `<code>/usage</code> — show Claude ACP quota and recent activity`,
     `<code>/config</code> — manage provider profiles`,
     `<code>/clean</code> — remove idle sessions, orphaned workspaces, and cached repos`,
     `<code>/help</code> — show this message`,
@@ -389,9 +390,95 @@ export function formatCIGaveUp(slug: string, maxAttempts: number): string {
   return `🛑 <b>CI still failing</b>  ·  🏷 <code>${esc(slug)}</code>  ·  gave up after ${maxAttempts} attempt${maxAttempts === 1 ? "" : "s"}`
 }
 
+import type { ClaudeUsageResponse, UsageTier } from "./claude-usage.js"
+import type { AggregateStats, SessionRecord, ModeBreakdown } from "./stats.js"
+
 function formatElapsed(ms: number): string {
   const secs = Math.round(ms / 1000)
   return secs >= 60 ? `${Math.floor(secs / 60)}m ${secs % 60}s` : `${secs}s`
+}
+
+const MODE_ICONS: Record<string, string> = {
+  task: "⚡",
+  plan: "📋",
+  think: "🧠",
+  "ci-fix": "🔧",
+}
+
+function progressBar(pct: number): string {
+  const filled = Math.round(pct / 10)
+  return "█".repeat(filled) + "░".repeat(10 - filled)
+}
+
+function formatResetIn(resetsAt: string | null): string {
+  if (!resetsAt) return ""
+  const ms = new Date(resetsAt).getTime() - Date.now()
+  if (ms <= 0) return "now"
+  const hours = Math.floor(ms / 3600000)
+  const mins = Math.floor((ms % 3600000) / 60000)
+  if (hours >= 24) {
+    const days = Math.floor(hours / 24)
+    const rem = hours % 24
+    return `${days}d ${rem}h`
+  }
+  return `${hours}h ${mins}m`
+}
+
+function formatTierLine(label: string, tier: UsageTier): string {
+  const pct = Math.round(tier.utilization)
+  const bar = progressBar(pct)
+  const reset = tier.resets_at ? ` · resets in ${formatResetIn(tier.resets_at)}` : ""
+  return `  ${label}: ${bar} ${pct}%${reset}`
+}
+
+function formatTokenCount(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
+  if (n >= 1_000) return `${Math.round(n / 1_000)}K`
+  return String(n)
+}
+
+export function formatUsage(
+  acpUsage: ClaudeUsageResponse | null,
+  agg: AggregateStats,
+  breakdown: Record<string, ModeBreakdown>,
+  recent: SessionRecord[],
+): string {
+  const lines: string[] = [`📊 <b>Usage</b>`]
+
+  if (acpUsage) {
+    lines.push("")
+    lines.push(`<b>🔑 Claude ACP</b>`)
+    lines.push(formatTierLine("5h", acpUsage.five_hour))
+    lines.push(formatTierLine("7d", acpUsage.seven_day))
+    lines.push(formatTierLine("7d opus", acpUsage.seven_day_opus))
+    lines.push(formatTierLine("7d sonnet", acpUsage.seven_day_sonnet))
+    if (acpUsage.extra_usage?.is_enabled) {
+      const used = acpUsage.extra_usage.used_credits ?? 0
+      const limit = acpUsage.extra_usage.monthly_limit
+      const limitStr = limit != null ? ` / $${limit}` : ""
+      lines.push(`  extra: $${used.toFixed(2)}${limitStr}`)
+    }
+  }
+
+  lines.push("")
+  lines.push(`<b>📈 Last 7 days</b> · ${agg.totalSessions} sessions · ${formatTokenCount(agg.totalTokens)} tokens`)
+  const modes = Object.entries(breakdown).sort((a, b) => b[1].tokens - a[1].tokens)
+  for (const [mode, data] of modes) {
+    const icon = MODE_ICONS[mode] ?? "•"
+    lines.push(`  ${icon} ${mode}: ${data.count} session${data.count === 1 ? "" : "s"} · ${formatTokenCount(data.tokens)} tokens`)
+  }
+
+  if (recent.length > 0) {
+    lines.push("")
+    lines.push(`<b>📋 Recent sessions</b>`)
+    for (const r of recent) {
+      const icon = MODE_ICONS[r.mode] ?? "•"
+      const dur = formatElapsed(r.durationMs)
+      lines.push(`  <code>${esc(r.slug)}</code> · ${esc(r.repo)} · ${icon} ${r.mode} · ${formatTokenCount(r.totalTokens)} tokens · ${dur}`)
+    }
+  }
+
+  return lines.join("\n")
 }
 
 export function formatProfileList(profiles: { id: string; name: string; baseUrl?: string }[], defaultId?: string): string {
