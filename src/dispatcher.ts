@@ -209,6 +209,9 @@ export class Dispatcher {
     process.stderr.write(`dispatcher: cleaning up ${stale.length} stale session(s)\n`)
 
     for (const [threadId, session] of stale) {
+      // Cascade cleanup to children first (handles both tracked and orphaned)
+      await this.closeChildSessions(session)
+
       await this.telegram.deleteForumTopic(threadId)
       await this.removeWorkspace(session)
       this.topicSessions.delete(threadId)
@@ -1661,6 +1664,8 @@ export class Dispatcher {
       return
     }
 
+    // Close existing children before spawning new ones (handles both tracked and orphaned)
+    await this.closeChildSessions(topicSession)
     topicSession.childThreadIds = []
 
     const childSummaries: { repo: string; slug: string; title: string }[] = []
@@ -1668,7 +1673,7 @@ export class Dispatcher {
     for (const item of items) {
       const childThreadId = await this.spawnSplitChild(topicSession, item, items)
       if (childThreadId) {
-        topicSession.childThreadIds.push(childThreadId)
+        topicSession.childThreadIds!.push(childThreadId)
         const childSession = this.topicSessions.get(childThreadId)!
         childSummaries.push({
           repo: childSession.repo,
@@ -1746,26 +1751,55 @@ export class Dispatcher {
     return threadId
   }
 
-  private async handleCloseCommand(topicSession: TopicSession): Promise<void> {
-    const threadId = topicSession.threadId
+  /**
+   * Close all children of a parent session.
+   * Handles both tracked children (in childThreadIds) and orphaned children (pointing via parentThreadId).
+   */
+  private async closeChildSessions(parent: TopicSession): Promise<void> {
+    const closedThreadIds = new Set<number>()
 
-    // Cascade close to children first
-    if (topicSession.childThreadIds) {
-      for (const childId of topicSession.childThreadIds) {
+    // Close tracked children
+    if (parent.childThreadIds) {
+      for (const childId of parent.childThreadIds) {
         const child = this.topicSessions.get(childId)
         if (child) {
-          if (child.activeSessionId) {
-            const childActive = this.sessions.get(childId)
-            this.sessions.delete(childId)
-            if (childActive) childActive.handle.kill().catch(() => {})
-          }
-          this.topicSessions.delete(childId)
-          this.telegram.deleteForumTopic(childId).catch(() => {})
-          this.removeWorkspace(child).catch(() => {})
-          process.stderr.write(`dispatcher: closed child topic ${child.slug} (thread ${childId})\n`)
+          await this.closeSingleChild(child, closedThreadIds)
         }
       }
     }
+
+    // Also close orphaned children that still point to this parent
+    for (const [candidateId, candidate] of this.topicSessions) {
+      if (candidate.parentThreadId === parent.threadId && !closedThreadIds.has(candidateId)) {
+        await this.closeSingleChild(candidate, closedThreadIds)
+      }
+    }
+
+    parent.childThreadIds = []
+  }
+
+  private async closeSingleChild(child: TopicSession, closedThreadIds: Set<number>): Promise<void> {
+    const childId = child.threadId
+    if (closedThreadIds.has(childId)) return
+
+    closedThreadIds.add(childId)
+
+    if (child.activeSessionId) {
+      const childActive = this.sessions.get(childId)
+      this.sessions.delete(childId)
+      if (childActive) childActive.handle.kill().catch(() => {})
+    }
+    this.topicSessions.delete(childId)
+    await this.telegram.deleteForumTopic(childId).catch(() => {})
+    await this.removeWorkspace(child).catch(() => {})
+    process.stderr.write(`dispatcher: closed child topic ${child.slug} (thread ${childId})\n`)
+  }
+
+  private async handleCloseCommand(topicSession: TopicSession): Promise<void> {
+    const threadId = topicSession.threadId
+
+    // Cascade close to children first (handles both tracked and orphaned)
+    await this.closeChildSessions(topicSession)
 
     // Remove from tracking and delete the topic first for instant user feedback
     this.topicSessions.delete(threadId)

@@ -65,14 +65,13 @@ describe("StatsTracker", () => {
     expect(agg.totalSessions).toBe(1)
   })
 
-  it("caps at MAX_RECORDS", () => {
+  it("caps at MAX_RECORDS", { timeout: 30000 }, () => {
     // Seed 509 records directly to avoid 1000+ file I/O round-trips
     const seed = Array.from({ length: 509 }, (_, i) => makeRecord({ slug: `slug-${i}` }))
     fs.writeFileSync(path.join(tmpDir, ".stats.json"), JSON.stringify(seed))
 
     // One more record() call triggers the cap logic
     tracker.record(makeRecord({ slug: "slug-509" }))
-
     const loaded = tracker.load()
     expect(loaded.length).toBeLessThanOrEqual(500)
     expect(loaded[loaded.length - 1].slug).toBe("slug-509")

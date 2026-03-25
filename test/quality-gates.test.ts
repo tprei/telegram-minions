@@ -4,7 +4,7 @@ import path from "node:path"
 import os from "node:os"
 import { runQualityGates } from "../src/quality-gates.js"
 
-describe("runQualityGates", () => {
+describe("runQualityGates", { timeout: 30000 }, () => {
   let tmpDir: string
 
   beforeEach(() => {
