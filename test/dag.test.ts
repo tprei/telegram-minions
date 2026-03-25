@@ -12,6 +12,10 @@ import {
   dagProgress,
   transitiveReduction,
   renderDagStatus,
+  renderDagForGitHub,
+  upsertDagSection,
+  DAG_STATUS_START,
+  DAG_STATUS_END,
   type DagGraph,
   type DagInput,
 } from "../src/dag.js"
@@ -430,5 +434,233 @@ describe("renderDagStatus", () => {
     expect(status).toContain("✅")
     expect(status).toContain("PR")
     expect(status).toContain("1/2 complete")
+  })
+})
+
+describe("renderDagForGitHub", () => {
+  it("wraps output in HTML comment markers", () => {
+    const graph = buildDag("test", [
+      { id: "a", title: "Task A", description: "A", dependsOn: [] },
+    ], 1, "repo")
+
+    const result = renderDagForGitHub(graph)
+    expect(result).toMatch(/^<!-- dag-status-start -->/)
+    expect(result).toMatch(/<!-- dag-status-end -->$/)
+  })
+
+  it("renders empty DAG", () => {
+    const graph: DagGraph = {
+      id: "empty",
+      nodes: [],
+      parentThreadId: 1,
+      repo: "repo",
+      createdAt: Date.now(),
+    }
+
+    const result = renderDagForGitHub(graph)
+    expect(result).toContain(DAG_STATUS_START)
+    expect(result).toContain(DAG_STATUS_END)
+    expect(result).toContain("No tasks in DAG")
+  })
+
+  it("renders a single node", () => {
+    const graph = buildDag("test", [
+      { id: "a", title: "Only task", description: "Solo", dependsOn: [] },
+    ], 1, "repo")
+
+    const result = renderDagForGitHub(graph)
+    expect(result).toContain("```mermaid")
+    expect(result).toContain("flowchart TD")
+    expect(result).toContain("Only task")
+    expect(result).toContain("| 1 |")
+    expect(result).toContain("0/1 complete")
+  })
+
+  it("renders a linear stack with edges", () => {
+    const graph = buildLinearDag("stack", [
+      { title: "Schema migration", description: "DB" },
+      { title: "API routes", description: "Routes" },
+      { title: "Frontend UI", description: "UI" },
+    ], 1, "repo")
+
+    graph.nodes[0].status = "done"
+    graph.nodes[0].prUrl = "https://github.com/repo/pull/1"
+    graph.nodes[1].status = "running"
+
+    const result = renderDagForGitHub(graph, "step-1")
+
+    // Mermaid edges: step-0 --> step-1, step-1 --> step-2
+    expect(result).toContain("step-0 --> step-1")
+    expect(result).toContain("step-1 --> step-2")
+
+    // Status classes
+    expect(result).toContain("class step-0 done")
+    expect(result).toContain("class step-1 running")
+    expect(result).toContain("class step-1 current")
+    expect(result).toContain("class step-2 pending")
+
+    // Table: current node highlighted
+    expect(result).toContain("**API routes** _(this PR)_")
+    expect(result).toContain("[PR](https://github.com/repo/pull/1)")
+
+    // Progress
+    expect(result).toContain("1/3 complete")
+    expect(result).toContain("1 running")
+  })
+
+  it("renders a diamond DAG", () => {
+    const graph = buildDag("diamond", [
+      { id: "a", title: "Base", description: "Foundation", dependsOn: [] },
+      { id: "b", title: "Left", description: "Left branch", dependsOn: ["a"] },
+      { id: "c", title: "Right", description: "Right branch", dependsOn: ["a"] },
+      { id: "d", title: "Merge", description: "Merge point", dependsOn: ["b", "c"] },
+    ], 1, "repo")
+
+    graph.nodes[0].status = "done"
+    graph.nodes[1].status = "running"
+    graph.nodes[2].status = "done"
+    graph.nodes[3].status = "pending"
+
+    const result = renderDagForGitHub(graph, "b")
+
+    // Edges
+    expect(result).toContain("a --> b")
+    expect(result).toContain("a --> c")
+    expect(result).toContain("b --> d")
+    expect(result).toContain("c --> d")
+
+    // Current node
+    expect(result).toContain("class b current")
+    expect(result).toContain("**Left** _(this PR)_")
+  })
+
+  it("renders all status types correctly", () => {
+    const graph = buildDag("test", [
+      { id: "done-node", title: "Done", description: "D", dependsOn: [] },
+      { id: "running-node", title: "Running", description: "R", dependsOn: [] },
+      { id: "ready-node", title: "Ready", description: "Re", dependsOn: [] },
+      { id: "pending-node", title: "Pending", description: "P", dependsOn: ["done-node"] },
+      { id: "failed-node", title: "Failed", description: "F", dependsOn: [] },
+      { id: "skipped-node", title: "Skipped", description: "S", dependsOn: ["failed-node"] },
+    ], 1, "repo")
+
+    graph.nodes[0].status = "done"
+    graph.nodes[1].status = "running"
+    graph.nodes[2].status = "ready"
+    graph.nodes[3].status = "pending"
+    graph.nodes[4].status = "failed"
+    graph.nodes[5].status = "skipped"
+
+    const result = renderDagForGitHub(graph)
+
+    expect(result).toContain("✅ Done")
+    expect(result).toContain("⚡ Running")
+    expect(result).toContain("🔜 Ready")
+    expect(result).toContain("⏳ Pending")
+    expect(result).toContain("❌ Failed")
+    expect(result).toContain("⏭️ Skipped")
+
+    expect(result).toContain("classDef done")
+    expect(result).toContain("classDef running")
+    expect(result).toContain("classDef pending")
+    expect(result).toContain("classDef ready")
+    expect(result).toContain("classDef failed")
+    expect(result).toContain("classDef skipped")
+  })
+
+  it("renders PR links as dash when absent", () => {
+    const graph = buildDag("test", [
+      { id: "a", title: "No PR", description: "A", dependsOn: [] },
+    ], 1, "repo")
+
+    const result = renderDagForGitHub(graph)
+    expect(result).toContain("| — |")
+  })
+
+  it("handles special characters in titles", () => {
+    const graph = buildDag("test", [
+      { id: "a", title: 'Fix "quotes" & <tags>', description: "A", dependsOn: [] },
+    ], 1, "repo")
+
+    const result = renderDagForGitHub(graph)
+    // Mermaid labels escape double quotes to single quotes
+    expect(result).toContain("'quotes'")
+    // Table renders title as-is (GitHub markdown handles it)
+    expect(result).toContain('Fix "quotes" & <tags>')
+  })
+
+  it("sanitizes node IDs for mermaid", () => {
+    const graph = buildDag("test", [
+      { id: "node.with.dots", title: "Dotty", description: "A", dependsOn: [] },
+    ], 1, "repo")
+
+    const result = renderDagForGitHub(graph)
+    // Dots replaced with underscores
+    expect(result).toContain("node_with_dots")
+    expect(result).not.toContain('node.with.dots["')
+  })
+
+  it("does not apply current class when currentNodeId is not set", () => {
+    const graph = buildDag("test", [
+      { id: "a", title: "A", description: "A", dependsOn: [] },
+    ], 1, "repo")
+
+    const result = renderDagForGitHub(graph)
+    // classDef current is always present, but no node should have "class X current"
+    expect(result).not.toMatch(/class \w+ current/)
+    expect(result).not.toContain("_(this PR)_")
+  })
+
+  it("shows failed and skipped counts in progress", () => {
+    const graph = buildDag("test", [
+      { id: "a", title: "A", description: "A", dependsOn: [] },
+      { id: "b", title: "B", description: "B", dependsOn: ["a"] },
+      { id: "c", title: "C", description: "C", dependsOn: ["b"] },
+    ], 1, "repo")
+
+    graph.nodes[0].status = "failed"
+    graph.nodes[1].status = "skipped"
+    graph.nodes[2].status = "skipped"
+
+    const result = renderDagForGitHub(graph)
+    expect(result).toContain("0/3 complete")
+    expect(result).toContain("1 failed")
+    expect(result).toContain("2 skipped")
+  })
+})
+
+describe("upsertDagSection", () => {
+  it("appends to empty body", () => {
+    const section = `${DAG_STATUS_START}\ncontent\n${DAG_STATUS_END}`
+    const result = upsertDagSection("", section)
+    expect(result).toBe(section)
+  })
+
+  it("appends to existing body", () => {
+    const section = `${DAG_STATUS_START}\ncontent\n${DAG_STATUS_END}`
+    const result = upsertDagSection("## My PR\n\nSome description", section)
+    expect(result).toContain("## My PR")
+    expect(result).toContain("Some description")
+    expect(result).toContain(DAG_STATUS_START)
+  })
+
+  it("replaces existing section", () => {
+    const oldSection = `${DAG_STATUS_START}\nold content\n${DAG_STATUS_END}`
+    const body = `## PR\n\n${oldSection}\n\nFooter`
+    const newSection = `${DAG_STATUS_START}\nnew content\n${DAG_STATUS_END}`
+
+    const result = upsertDagSection(body, newSection)
+    expect(result).toContain("new content")
+    expect(result).not.toContain("old content")
+    expect(result).toContain("## PR")
+    expect(result).toContain("Footer")
+  })
+
+  it("preserves content before and after markers on replace", () => {
+    const body = `Before\n${DAG_STATUS_START}\nmiddle\n${DAG_STATUS_END}\nAfter`
+    const newSection = `${DAG_STATUS_START}\nupdated\n${DAG_STATUS_END}`
+
+    const result = upsertDagSection(body, newSection)
+    expect(result).toBe(`Before\n${DAG_STATUS_START}\nupdated\n${DAG_STATUS_END}\nAfter`)
   })
 })

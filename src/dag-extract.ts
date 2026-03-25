@@ -321,13 +321,20 @@ export function buildDagChildPrompt(
   ]
 
   if (parentConversation.length > 1) {
+    const MAX_PLANNING_CHARS = 2000
+    const planMessages = parentConversation.slice(1)
+    const recentMessages = planMessages.slice(-4)
     lines.push("## Planning thread")
     lines.push("")
-    for (const msg of parentConversation.slice(1)) {
+    if (planMessages.length > recentMessages.length) {
+      lines.push(`[${planMessages.length - recentMessages.length} earlier messages omitted]`)
+      lines.push("")
+    }
+    for (const msg of recentMessages) {
       const label = msg.role === "user" ? "**User**" : "**Agent**"
       lines.push(`${label}:`)
-      if (msg.role === "assistant" && msg.text.length > MAX_ASSISTANT_CHARS) {
-        lines.push(`[earlier output truncated]\n…${msg.text.slice(-MAX_ASSISTANT_CHARS)}`)
+      if (msg.role === "assistant" && msg.text.length > MAX_PLANNING_CHARS) {
+        lines.push(`[output truncated]\n…${msg.text.slice(-MAX_PLANNING_CHARS)}`)
       } else {
         lines.push(msg.text)
       }
@@ -375,7 +382,21 @@ export function buildDagChildPrompt(
     for (const other of siblings) {
       lines.push(`- ${other.title}`)
     }
+    lines.push("")
   }
+
+  const targetBranch = isStack && upstreamBranches.length > 0
+    ? upstreamBranches[upstreamBranches.length - 1]
+    : "main"
+
+  lines.push("## Deliverable")
+  lines.push("")
+  lines.push("When your work is complete:")
+  lines.push("1. Write unit and integration tests for your changes")
+  lines.push("2. Run unit and integration tests to verify they pass (do NOT run e2e or browser tests — these are expensive and not required)")
+  lines.push("3. Commit all changes with a descriptive message")
+  lines.push("4. Push your branch")
+  lines.push(`5. Open a pull request targeting \`${targetBranch}\``)
 
   return lines.join("\n")
 }

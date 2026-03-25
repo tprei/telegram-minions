@@ -154,4 +154,6 @@ export interface TopicSession {
   interruptedAt?: number
   dagId?: string
   dagNodeId?: string
+  pendingSplitItems?: { title: string; description: string }[]
+  allSplitItems?: { title: string; description: string }[]
 }

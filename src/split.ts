@@ -330,6 +330,16 @@ export function buildSplitChildPrompt(
       lines.push(`- ${other.title}`)
     }
   }
+  lines.push("")
+
+  lines.push("## Deliverable")
+  lines.push("")
+  lines.push("When your work is complete:")
+  lines.push("1. Write unit and integration tests for your changes")
+  lines.push("2. Run unit and integration tests to verify they pass (do NOT run e2e or browser tests — these are expensive and not required)")
+  lines.push("3. Commit all changes with a descriptive message")
+  lines.push("4. Push your branch")
+  lines.push("5. Open a pull request targeting `main`")
 
   return lines.join("\n")
 }

@@ -79,8 +79,8 @@ describe("handleStopCommand", () => {
       handle: { kill: mockKill },
     } as unknown as { handle: { kill: typeof mockKill } })
 
-    const handleStop = (dispatcher as unknown as { handleStopCommand: (ts: TopicSession) => Promise<void> }).handleStopCommand.bind(dispatcher)
-    await handleStop(topicSession)
+    // Use the public API with threadId
+    await dispatcher.handleStopCommand(100)
 
     // Should kill the session
     expect(mockKill).toHaveBeenCalled()
@@ -120,8 +120,8 @@ describe("handleStopCommand", () => {
     const topicSessions = (dispatcher as unknown as { topicSessions: Map<number, TopicSession> }).topicSessions
     topicSessions.set(200, topicSession)
 
-    const handleStop = (dispatcher as unknown as { handleStopCommand: (ts: TopicSession) => Promise<void> }).handleStopCommand.bind(dispatcher)
-    await handleStop(topicSession)
+    // Use the public API with threadId
+    await dispatcher.handleStopCommand(200)
 
     // Should send warning message
     expect(telegram.sendMessage).toHaveBeenCalledWith(
@@ -163,8 +163,8 @@ describe("handleStopCommand", () => {
       handle: { kill: mockKill },
     } as unknown as { handle: { kill: typeof mockKill } })
 
-    const handleStop = (dispatcher as unknown as { handleStopCommand: (ts: TopicSession) => Promise<void> }).handleStopCommand.bind(dispatcher)
-    await handleStop(topicSession)
+    // Use the public API with threadId
+    await dispatcher.handleStopCommand(300)
 
     // Conversation should be preserved
     expect(topicSession.conversation).toHaveLength(2)
@@ -206,8 +206,8 @@ describe("handleStopCommand", () => {
       "persistTopicSessions",
     )
 
-    const handleStop = (dispatcher as unknown as { handleStopCommand: (ts: TopicSession) => Promise<void> }).handleStopCommand.bind(dispatcher)
-    await handleStop(topicSession)
+    // Use the public API with threadId
+    await dispatcher.handleStopCommand(400)
 
     expect(persistSpy).toHaveBeenCalled()
   })
@@ -235,8 +235,8 @@ describe("handleStopCommand", () => {
 
     // Don't add to sessions map - simulates orphaned activeSessionId
 
-    const handleStop = (dispatcher as unknown as { handleStopCommand: (ts: TopicSession) => Promise<void> }).handleStopCommand.bind(dispatcher)
-    await handleStop(topicSession)
+    // Use the public API with threadId
+    await dispatcher.handleStopCommand(500)
 
     // Should still clear activeSessionId and send message
     expect(topicSession.activeSessionId).toBeUndefined()

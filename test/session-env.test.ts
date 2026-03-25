@@ -32,6 +32,7 @@ function makeHandle(configOverrides?: Partial<SessionConfig>): SessionHandle {
     () => {},
     () => {},
     60_000,
+    300_000,
     { ...baseConfig, ...configOverrides },
   )
 }

@@ -81,9 +81,8 @@ describe("handleCloseCommand ordering", () => {
     const topicSessions = (dispatcher as unknown as { topicSessions: Map<number, TopicSession> }).topicSessions
     topicSessions.set(100, topicSession)
 
-    // Call handleCloseCommand
-    const handleClose = (dispatcher as unknown as { handleCloseCommand: (ts: TopicSession) => Promise<void> }).handleCloseCommand.bind(dispatcher)
-    await handleClose(topicSession)
+    // Call handleCloseCommand with threadId (public API)
+    await dispatcher.handleCloseCommand(100)
 
     expect(callOrder).toContain("deleteForumTopic")
     expect(origDelete).toHaveBeenCalledWith(100)
@@ -130,8 +129,8 @@ describe("handleCloseCommand ordering", () => {
       handle: { kill: mockKill },
     } as unknown as { handle: { kill: typeof mockKill } })
 
-    const handleClose = (dispatcher as unknown as { handleCloseCommand: (ts: TopicSession) => Promise<void> }).handleCloseCommand.bind(dispatcher)
-    await handleClose(topicSession)
+    // Call handleCloseCommand with threadId (public API)
+    await dispatcher.handleCloseCommand(200)
 
     // deleteForumTopic must have been called BEFORE kill
     expect(callOrder[0]).toBe("deleteForumTopic")

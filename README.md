@@ -22,6 +22,7 @@ Inspired by [Stripe's Minions](https://stripe.dev/blog/minions-stripes-one-shot-
   * `Context7`: Up-to-date documentation lookup for external libraries.
   * `Sentry`: Error tracking and stack trace retrieval.
   * `Z.AI`: Web search and real-time information (when using z-ai provider).
+* **Stacked PRs & DAG Orchestration**: Chain dependent tasks as stacked PRs or arbitrary dependency graphs, then land them in topological order.
 * **Workspace Isolation**: Uses Git worktrees to maintain a clean, persistent workspace for concurrent sessions without cross-contamination.
 
 ## Usage
@@ -29,16 +30,25 @@ Inspired by [Stripe's Minions](https://stripe.dev/blog/minions-stripes-one-shot-
 Interact with the bot in your authorized Telegram chat using the following commands:
 
 ### Global Commands
-* `/task [repo-url-or-alias] <description>` - Starts a coding task in a new topic.
-* `/plan [repo-url-or-alias] <description>` - Starts a read-only planning session.
-* `/think [repo-url-or-alias] <question>` - Starts a deep-research session.
+* `/task [repo] <description>` (or `/w`) - Starts a coding task in a new topic.
+* `/plan [repo] <description>` - Starts a read-only planning session.
+* `/think [repo] <question>` - Starts a deep-research session.
+* `/review [repo] <PR#>` - Reviews a pull request (or all unreviewed PRs).
 * `/status` - Lists all active and idle sessions.
 * `/stats` - Displays aggregate usage statistics (tokens, time, success rate).
-* `/clean` - Removes all idle sessions and deletes their Telegram topics.
+* `/usage` - Shows Claude ACP quota and recent activity.
+* `/config` - Manages provider profiles.
+* `/clean` - Removes all idle sessions, orphaned workspaces, and cached repos.
+* `/help` - Shows all available commands.
 
 ### Thread Commands (inside a specific topic)
 * `/reply <text>` (or `/r <text>`) - Provides feedback or follow-up instructions to the agent.
-* `/execute [optional directive]` - Finalizes a plan or research session and begins code implementation.
+* `/execute [directive]` - Finalizes a plan or research session and begins code implementation.
+* `/split [directive]` - Splits a plan into parallel, independent sub-tasks.
+* `/stack [directive]` - Creates stacked PRs from a plan (sequential chain with dependent branches).
+* `/dag [directive]` - Creates a dependency graph of tasks from a plan (parallel where possible).
+* `/land` - Merges completed stack/DAG PRs into main in topological order.
+* `/stop` - Stops the running agent but keeps the thread and workspace.
 * `/close` - Terminates the active agent, wipes the isolated workspace, and deletes the topic.
 
 ## Configuration

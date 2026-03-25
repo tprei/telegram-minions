@@ -41,10 +41,12 @@ export function configFromEnv(overrides?: Partial<MinionConfig>): MinionConfig {
     workspace: {
       root: optional("WORKSPACE_ROOT", "/workspace"),
       maxConcurrentSessions: optionalNumber("MAX_CONCURRENT_SESSIONS", 5),
+      maxDagConcurrency: optionalNumber("MAX_DAG_CONCURRENCY", 4),
       maxSplitItems: optionalNumber("MAX_SPLIT_ITEMS", 5),
       sessionTokenBudget: optionalNumber("SESSION_TOKEN_BUDGET", 200_000),
       sessionBudgetUsd: optionalNumber("SESSION_BUDGET_USD", 10),
       sessionTimeoutMs: optionalNumber("SESSION_TIMEOUT_MS", 3600000),
+      sessionInactivityTimeoutMs: optionalNumber("SESSION_INACTIVITY_TIMEOUT_MS", 300_000),
       staleTtlMs: optionalNumber("SESSION_STALE_TTL_MS", 2 * 24 * 60 * 60 * 1000),
       cleanupIntervalMs: optionalNumber("CLEANUP_INTERVAL_MS", 60 * 60 * 1000),
     },
