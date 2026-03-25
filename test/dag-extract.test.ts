@@ -173,6 +173,6 @@ describe("buildDagChildPrompt", () => {
     ]
     const node: DagInput = { id: "a", title: "A", description: "Do A", dependsOn: [] }
     const prompt = buildDagChildPrompt(longConversation, node, [node], [], false)
-    expect(prompt).toContain("[earlier output truncated]")
+    expect(prompt).toContain("[output truncated]")
   })
 })

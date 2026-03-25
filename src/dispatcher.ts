@@ -12,7 +12,7 @@ import { SessionHandle, type SessionConfig } from "./session.js"
 import { Observer } from "./observer.js"
 import type { TelegramUpdate, TelegramCallbackQuery, TelegramPhotoSize, SessionMeta, TopicSession } from "./types.js"
 import { generateSlug } from "./slugs.js"
-import type { MinionConfig } from "./config-types.js"
+import type { MinionConfig, McpConfig } from "./config-types.js"
 import { DEFAULT_PROMPTS } from "./prompts.js"
 import { SessionStore } from "./store.js"
 import { ProfileStore } from "./profile-store.js"
@@ -118,6 +118,7 @@ export class Dispatcher {
   private readonly store: SessionStore
   private readonly profileStore: ProfileStore
   private readonly dags = new Map<string, DagGraph>()
+  private readonly pendingBabysitPRs = new Map<number, Array<{ childSession: TopicSession; prUrl: string; qualityReport?: QualityReport }>>()
   private offset = 0
   private running = false
   private cleanupTimer: ReturnType<typeof setInterval> | null = null
@@ -1066,7 +1067,7 @@ export class Dispatcher {
     await this.telegram.editForumTopic(topicSession.threadId, name).catch(() => {})
   }
 
-  private async spawnTopicAgent(topicSession: TopicSession, task: string): Promise<void> {
+  private async spawnTopicAgent(topicSession: TopicSession, task: string, mcpOverrides?: Partial<McpConfig>): Promise<void> {
     if (this.sessions.size >= this.config.workspace.maxConcurrentSessions) {
       await this.telegram.sendMessage(
         `⚠️ Max concurrent sessions reached. Try again later.`,
@@ -1097,7 +1098,7 @@ export class Dispatcher {
     const sessionConfig: SessionConfig = {
       goose: this.config.goose,
       claude: this.config.claude,
-      mcp: this.config.mcp,
+      mcp: mcpOverrides ? { ...this.config.mcp, ...mcpOverrides } : this.config.mcp,
       profile,
       sessionEnvPassthrough: this.config.sessionEnvPassthrough,
     }
@@ -1210,10 +1211,21 @@ export class Dispatcher {
               if (prUrl) {
                 this.postSessionDigest(topicSession, prUrl)
                 if (this.config.ci.babysitEnabled) {
-                  this.babysitPR(topicSession, prUrl, qualityReport).catch((err) => {
-                    process.stderr.write(`dispatcher: babysitPR error: ${err}\n`)
-                    captureException(err, { operation: "babysitPR", prUrl })
-                  })
+                  if (topicSession.dagId || topicSession.parentThreadId) {
+                    const parentId = topicSession.dagId
+                      ? this.dags.get(topicSession.dagId)?.parentThreadId ?? topicSession.parentThreadId
+                      : topicSession.parentThreadId
+                    if (parentId != null) {
+                      const queue = this.pendingBabysitPRs.get(parentId) ?? []
+                      queue.push({ childSession: topicSession, prUrl, qualityReport })
+                      this.pendingBabysitPRs.set(parentId, queue)
+                    }
+                  } else {
+                    this.babysitPR(topicSession, prUrl, qualityReport).catch((err) => {
+                      process.stderr.write(`dispatcher: babysitPR error: ${err}\n`)
+                      captureException(err, { operation: "babysitPR", prUrl })
+                    })
+                  }
                 }
               }
             }
@@ -1275,6 +1287,19 @@ export class Dispatcher {
       })
     } catch (err) {
       process.stderr.write(`dispatcher: failed to post session digest: ${err}\n`)
+    }
+  }
+
+  private async runDeferredBabysit(parentThreadId: number): Promise<void> {
+    const entries = this.pendingBabysitPRs.get(parentThreadId)
+    if (!entries || entries.length === 0) return
+    this.pendingBabysitPRs.delete(parentThreadId)
+
+    for (const { childSession, prUrl, qualityReport } of entries) {
+      await this.babysitPR(childSession, prUrl, qualityReport).catch((err) => {
+        process.stderr.write(`dispatcher: deferred babysitPR error: ${err}\n`)
+        captureException(err, { operation: "deferredBabysitPR", prUrl })
+      })
     }
   }
 
@@ -1626,19 +1651,33 @@ export class Dispatcher {
     const label = childSession.splitLabel ?? childSession.slug
     const prUrl = this.extractPRFromConversation(childSession) ?? undefined
 
+    // Free child conversation memory
+    childSession.conversation = []
+
     await this.telegram.sendMessage(
       formatSplitChildComplete(childSession.slug, state, label, prUrl),
       parent.threadId,
     )
 
+    // Spawn next queued split item if any
+    if (parent.pendingSplitItems && parent.pendingSplitItems.length > 0) {
+      const nextItem = parent.pendingSplitItems.shift()!
+      const allItems = parent.allSplitItems ?? [nextItem]
+      const childThreadId = await this.spawnSplitChild(parent, nextItem, allItems)
+      if (childThreadId) {
+        parent.childThreadIds!.push(childThreadId)
+      }
+    }
+
     if (!parent.childThreadIds) return
 
     const allDone = parent.childThreadIds.every((id) => {
       const child = this.topicSessions.get(id)
-      return child && !child.activeSessionId
+      return !child || !child.activeSessionId
     })
+    const hasPending = parent.pendingSplitItems && parent.pendingSplitItems.length > 0
 
-    if (allDone) {
+    if (allDone && !hasPending) {
       let succeeded = 0
       for (const id of parent.childThreadIds) {
         const child = this.topicSessions.get(id)
@@ -1653,6 +1692,9 @@ export class Dispatcher {
         parent.threadId,
       )
       await this.updateTopicTitle(parent, succeeded === parent.childThreadIds.length ? "✅" : "⚠️")
+
+      // Run deferred CI babysitting sequentially
+      await this.runDeferredBabysit(parent.threadId)
     }
   }
 
@@ -1709,22 +1751,23 @@ export class Dispatcher {
       items.splice(maxItems)
     }
 
-    const available = this.config.workspace.maxConcurrentSessions - this.sessions.size
-    if (items.length > available) {
-      await this.telegram.sendMessage(
-        `⚠️ Found ${items.length} items but only ${available} session slot${available === 1 ? "" : "s"} available. Free up sessions or try with fewer items.`,
-        topicSession.threadId,
-      )
-      return
-    }
-
     // Close existing children before spawning new ones (handles both tracked and orphaned)
     await this.closeChildSessions(topicSession)
     topicSession.childThreadIds = []
+    topicSession.allSplitItems = items.map(i => ({ title: i.title, description: i.description }))
+    topicSession.pendingSplitItems = []
+
+    // Spawn up to available slots; queue the rest
+    const available = this.config.workspace.maxConcurrentSessions - this.sessions.size
+    const toSpawnNow = items.slice(0, Math.max(1, available))
+    const toQueue = items.slice(toSpawnNow.length)
+    if (toQueue.length > 0) {
+      topicSession.pendingSplitItems = toQueue.map(i => ({ title: i.title, description: i.description }))
+    }
 
     const childSummaries: { repo: string; slug: string; title: string }[] = []
 
-    for (const item of items) {
+    for (const item of toSpawnNow) {
       const childThreadId = await this.spawnSplitChild(topicSession, item, items)
       if (childThreadId) {
         topicSession.childThreadIds!.push(childThreadId)
@@ -1743,6 +1786,12 @@ export class Dispatcher {
         topicSession.threadId,
       )
       return
+    }
+    if (toQueue.length > 0) {
+      await this.telegram.sendMessage(
+        `⏳ Spawned ${childSummaries.length}/${items.length} items — ${toQueue.length} queued, will start as slots free up.`,
+        topicSession.threadId,
+      )
     }
 
     await this.telegram.sendMessage(
@@ -1801,7 +1850,7 @@ export class Dispatcher {
 
     this.topicSessions.set(threadId, childSession)
 
-    await this.spawnTopicAgent(childSession, task)
+    await this.spawnTopicAgent(childSession, task, { browserEnabled: false })
     return threadId
   }
 
@@ -1922,17 +1971,6 @@ export class Dispatcher {
       return
     }
 
-    // Check session slot availability for initial ready nodes
-    const initialReady = readyNodes(graph)
-    const available = this.config.workspace.maxConcurrentSessions - this.sessions.size
-    if (initialReady.length > available) {
-      await this.telegram.sendMessage(
-        `⚠️ DAG needs ${initialReady.length} initial slots but only ${available} available. Free up sessions first.`,
-        topicSession.threadId,
-      )
-      return
-    }
-
     // Close existing children before spawning new DAG
     await this.closeChildSessions(topicSession)
     topicSession.childThreadIds = []
@@ -1970,7 +2008,10 @@ export class Dispatcher {
     const ready = readyNodes(graph)
 
     for (const node of ready) {
-      const available = this.config.workspace.maxConcurrentSessions - this.sessions.size
+      const runningDagNodes = graph.nodes.filter(n => n.status === "running").length
+      const dagSlots = this.config.workspace.maxDagConcurrency - runningDagNodes
+      const globalSlots = this.config.workspace.maxConcurrentSessions - this.sessions.size
+      const available = Math.min(dagSlots, globalSlots)
       if (available <= 0) {
         process.stderr.write(`dispatcher: DAG ${graph.id} — no session slots for node ${node.id}, will retry when a slot opens\n`)
         break
@@ -2108,7 +2149,7 @@ export class Dispatcher {
       parent.threadId,
     )
 
-    await this.spawnTopicAgent(childSession, task)
+    await this.spawnTopicAgent(childSession, task, { browserEnabled: false })
     return threadId
   }
 
@@ -2132,6 +2173,9 @@ export class Dispatcher {
     if (!parent) return
 
     const prUrl = this.extractPRFromConversation(childSession) ?? undefined
+
+    // Free child conversation memory immediately — we've extracted everything we need
+    childSession.conversation = []
 
     if (state === "errored" || state === "failed") {
       const skipped = failNode(graph, node.id)
@@ -2186,6 +2230,18 @@ export class Dispatcher {
       )
       await this.updateTopicTitle(parent, progress.failed > 0 ? "⚠️" : "✅")
       this.dags.delete(graph.id)
+
+      // Run deferred CI babysitting sequentially now that the DAG is complete
+      await this.runDeferredBabysit(parent.threadId)
+
+      // Clean up child sessions
+      for (const childId of parent.childThreadIds ?? []) {
+        const child = this.topicSessions.get(childId)
+        if (child) {
+          this.topicSessions.delete(childId)
+          this.removeWorkspace(child).catch(() => {})
+        }
+      }
     }
 
     await this.persistTopicSessions()
@@ -2341,38 +2397,35 @@ export class Dispatcher {
    * Handles both tracked children (in childThreadIds) and orphaned children (pointing via parentThreadId).
    */
   private async closeChildSessions(parent: TopicSession): Promise<void> {
-    const closedThreadIds = new Set<number>()
+    const childrenToClose = new Map<number, TopicSession>()
 
-    // Close tracked children
+    // Collect tracked children
     if (parent.childThreadIds) {
       for (const childId of parent.childThreadIds) {
         const child = this.topicSessions.get(childId)
-        if (child) {
-          await this.closeSingleChild(child, closedThreadIds)
-        }
+        if (child) childrenToClose.set(childId, child)
       }
     }
 
-    // Also close orphaned children that still point to this parent
+    // Also collect orphaned children that still point to this parent
     for (const [candidateId, candidate] of this.topicSessions) {
-      if (candidate.parentThreadId === parent.threadId && !closedThreadIds.has(candidateId)) {
-        await this.closeSingleChild(candidate, closedThreadIds)
+      if (candidate.parentThreadId === parent.threadId && !childrenToClose.has(candidateId)) {
+        childrenToClose.set(candidateId, candidate)
       }
     }
+
+    await Promise.all([...childrenToClose.values()].map((child) => this.closeSingleChild(child)))
 
     parent.childThreadIds = []
   }
 
-  private async closeSingleChild(child: TopicSession, closedThreadIds: Set<number>): Promise<void> {
+  private async closeSingleChild(child: TopicSession): Promise<void> {
     const childId = child.threadId
-    if (closedThreadIds.has(childId)) return
-
-    closedThreadIds.add(childId)
 
     if (child.activeSessionId) {
       const childActive = this.sessions.get(childId)
       this.sessions.delete(childId)
-      if (childActive) childActive.handle.kill().catch(() => {})
+      if (childActive) await childActive.handle.kill().catch(() => {})
     }
     this.topicSessions.delete(childId)
     await this.telegram.deleteForumTopic(childId).catch(() => {})
