@@ -32,6 +32,7 @@ import {
   formatQualityReportForContext,
   formatBudgetWarning,
   formatStats,
+  formatUsage,
   formatCIWatching,
   formatCIFailed,
   formatCIFixing,
@@ -47,6 +48,7 @@ import {
 import { extractSplitItems, buildSplitChildPrompt } from "./split.js"
 import { runQualityGates, type QualityReport } from "./quality-gates.js"
 import { StatsTracker } from "./stats.js"
+import { fetchClaudeUsage } from "./claude-usage.js"
 import { writeSessionLog } from "./session-log.js"
 import { extractPRUrl, waitForCI, getFailedCheckLogs, buildCIFixPrompt, buildQualityGateFixPrompt } from "./ci-babysit.js"
 import { buildConversationDigest } from "./conversation-digest.js"
@@ -66,6 +68,7 @@ const REPLY_SHORT = "/r"
 const CLOSE_CMD = "/close"
 const HELP_CMD = "/help"
 const CLEAN_CMD = "/clean"
+const USAGE_CMD = "/usage"
 const CONFIG_CMD = "/config"
 const SPLIT_CMD = "/split"
 
@@ -298,6 +301,10 @@ export class Dispatcher {
         await this.handleStatsCommand()
         return
       }
+      if (text === USAGE_CMD) {
+        await this.handleUsageCommand()
+        return
+      }
       if (text === CLEAN_CMD) {
         await this.handleCleanCommand()
         return
@@ -475,6 +482,16 @@ export class Dispatcher {
   private async handleStatsCommand(): Promise<void> {
     const agg = this.stats.aggregate(7)
     await this.telegram.sendMessage(formatStats(agg))
+  }
+
+  private async handleUsageCommand(): Promise<void> {
+    const [acpUsage, agg, breakdown, recent] = await Promise.all([
+      fetchClaudeUsage(),
+      Promise.resolve(this.stats.aggregate(7)),
+      Promise.resolve(this.stats.breakdownByMode(7)),
+      Promise.resolve(this.stats.recentSessions(5)),
+    ])
+    await this.telegram.sendMessage(formatUsage(acpUsage, agg, breakdown, recent))
   }
 
   private async handleHelpCommand(): Promise<void> {

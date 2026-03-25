@@ -73,4 +73,53 @@ describe("StatsTracker", () => {
     expect(loaded.length).toBeLessThanOrEqual(500)
     expect(loaded[loaded.length - 1].slug).toBe("slug-509")
   })
+
+  describe("recentSessions", () => {
+    it("returns most recent N sessions in reverse order", () => {
+      tracker.record(makeRecord({ slug: "first" }))
+      tracker.record(makeRecord({ slug: "second" }))
+      tracker.record(makeRecord({ slug: "third" }))
+
+      const recent = tracker.recentSessions(2)
+      expect(recent).toHaveLength(2)
+      expect(recent[0].slug).toBe("third")
+      expect(recent[1].slug).toBe("second")
+    })
+
+    it("returns all sessions when N exceeds count", () => {
+      tracker.record(makeRecord({ slug: "only" }))
+      const recent = tracker.recentSessions(5)
+      expect(recent).toHaveLength(1)
+      expect(recent[0].slug).toBe("only")
+    })
+
+    it("returns empty array when no sessions", () => {
+      expect(tracker.recentSessions(5)).toEqual([])
+    })
+  })
+
+  describe("breakdownByMode", () => {
+    it("groups sessions by mode", () => {
+      tracker.record(makeRecord({ mode: "task", totalTokens: 1000 }))
+      tracker.record(makeRecord({ mode: "task", totalTokens: 2000 }))
+      tracker.record(makeRecord({ mode: "plan", totalTokens: 500 }))
+
+      const breakdown = tracker.breakdownByMode()
+      expect(breakdown.task).toEqual({ count: 2, tokens: 3000, durationMs: 120000 })
+      expect(breakdown.plan).toEqual({ count: 1, tokens: 500, durationMs: 60000 })
+    })
+
+    it("filters by time window", () => {
+      const old = Date.now() - 10 * 86400000
+      tracker.record(makeRecord({ mode: "task", timestamp: old }))
+      tracker.record(makeRecord({ mode: "task", timestamp: Date.now() }))
+
+      const breakdown = tracker.breakdownByMode(7)
+      expect(breakdown.task.count).toBe(1)
+    })
+
+    it("returns empty object when no sessions", () => {
+      expect(tracker.breakdownByMode()).toEqual({})
+    })
+  })
 })

@@ -25,6 +25,16 @@ describe("extractPRUrl", () => {
     const text = "(https://github.com/org/repo/pull/5)"
     expect(extractPRUrl(text)).toBe("https://github.com/org/repo/pull/5")
   })
+
+  it("strips markdown bold formatting from URL", () => {
+    const text = "PR created: **https://github.com/org/repo/pull/75**"
+    expect(extractPRUrl(text)).toBe("https://github.com/org/repo/pull/75")
+  })
+
+  it("strips markdown link brackets from URL", () => {
+    const text = "See [PR](https://github.com/org/repo/pull/75)"
+    expect(extractPRUrl(text)).toBe("https://github.com/org/repo/pull/75")
+  })
 })
 
 describe("buildCIFixPrompt", () => {

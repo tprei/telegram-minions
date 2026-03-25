@@ -22,7 +22,7 @@ export interface CIFailureDetail {
 const LOG_TAIL_CHARS = 3000
 
 export function extractPRUrl(conversationText: string): string | null {
-  const match = conversationText.match(/https:\/\/github\.com\/[^\s)]+\/pull\/\d+/)
+  const match = conversationText.match(/https:\/\/github\.com\/[^\s)*\]>]+\/pull\/\d+/)
   return match ? match[0] : null
 }
 
