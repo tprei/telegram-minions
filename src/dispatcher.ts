@@ -1631,15 +1631,31 @@ export class Dispatcher {
       topicSession.threadId,
     )
 
-    const items = extractSplitItems(topicSession.conversation, directive)
+    // Grace period: allow system resources to stabilize after session termination
+    const GRACE_PERIOD_MS = 2000
+    await new Promise((resolve) => setTimeout(resolve, GRACE_PERIOD_MS))
 
-    if (items.length === 0) {
+    const result = await extractSplitItems(topicSession.conversation, directive)
+
+    if (result.error === "system") {
+      await this.telegram.sendMessage(
+        `⚠️ <b>System error</b> during extraction: <code>${result.errorMessage ?? "Unknown error"}</code>\n\n` +
+        `This is likely a transient resource issue. Try <code>/split</code> again in a few seconds, ` +
+        `or use <code>/execute</code> to proceed with a single task.`,
+        topicSession.threadId,
+      )
+      return
+    }
+
+    if (result.items.length === 0) {
       await this.telegram.sendMessage(
         `⚠️ Could not extract discrete work items from the conversation. Try <code>/execute</code> instead.`,
         topicSession.threadId,
       )
       return
     }
+
+    const items = result.items
 
     if (items.length === 1) {
       await this.telegram.sendMessage(
