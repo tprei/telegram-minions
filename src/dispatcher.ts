@@ -507,11 +507,13 @@ export class Dispatcher {
       if (session.cwd) activeCwds.add(session.cwd)
     }
 
+    const parentHome = process.env["HOME"] ?? ""
     const entries = fs.readdirSync(root, { withFileTypes: true })
     for (const entry of entries) {
       if (!entry.isDirectory()) continue
       if (entry.name.startsWith(".")) continue
       const entryPath = path.join(root, entry.name)
+      if (entryPath === parentHome) continue
       if (activeCwds.has(entryPath)) continue
       if (this.sessions.has(Number(entry.name))) continue
 
