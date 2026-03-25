@@ -39,6 +39,7 @@ import { runQualityGates, type QualityReport } from "./quality-gates.js"
 import { StatsTracker } from "./stats.js"
 import { writeSessionLog } from "./session-log.js"
 import { extractPRUrl, waitForCI, getFailedCheckLogs, buildCIFixPrompt, buildQualityGateFixPrompt } from "./ci-babysit.js"
+import { buildConversationDigest } from "./conversation-digest.js"
 import { DEFAULT_CI_FIX_PROMPT } from "./prompts.js"
 
 const POLL_TIMEOUT = 30
@@ -933,13 +934,16 @@ export class Dispatcher {
 
             writeSessionLog(topicSession, m, state, durationMs, qualityReport)
 
-            if (this.config.ci.babysitEnabled && topicSession.mode === "task") {
+            if (topicSession.mode === "task") {
               const prUrl = this.extractPRFromConversation(topicSession)
               if (prUrl) {
-                this.babysitPR(topicSession, prUrl, qualityReport).catch((err) => {
-                  process.stderr.write(`dispatcher: babysitPR error: ${err}\n`)
-                  captureException(err, { operation: "babysitPR", prUrl })
-                })
+                this.postSessionDigest(topicSession, prUrl)
+                if (this.config.ci.babysitEnabled) {
+                  this.babysitPR(topicSession, prUrl, qualityReport).catch((err) => {
+                    process.stderr.write(`dispatcher: babysitPR error: ${err}\n`)
+                    captureException(err, { operation: "babysitPR", prUrl })
+                  })
+                }
               }
             }
           }).catch((err) => {
@@ -978,6 +982,24 @@ export class Dispatcher {
       }
     }
     return null
+  }
+
+  private postSessionDigest(topicSession: TopicSession, prUrl: string): void {
+    const summaryPath = path.join(topicSession.cwd, ".session-summary.md")
+    if (fs.existsSync(summaryPath)) return
+
+    const digest = buildConversationDigest(topicSession.conversation)
+    if (!digest) return
+
+    try {
+      execSync(`gh pr comment "${prUrl}" --body-file -`, {
+        input: digest,
+        cwd: topicSession.cwd,
+        stdio: ["pipe", "pipe", "pipe"],
+      })
+    } catch (err) {
+      process.stderr.write(`dispatcher: failed to post session digest: ${err}\n`)
+    }
   }
 
   private async babysitPR(topicSession: TopicSession, prUrl: string, initialQualityReport?: QualityReport): Promise<void> {

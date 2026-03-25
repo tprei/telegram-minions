@@ -62,6 +62,10 @@ Types: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`
 How the changes were verified
 ```
 
+## Session log
+
+If a `.session-summary.md` file exists at the repo root, include its contents in the PR body under a `## Session log` heading. Read the file with `cat .session-summary.md`. Do not commit or stage this file.
+
 ## Rules
 
 - Stage specific files, not `git add .`
