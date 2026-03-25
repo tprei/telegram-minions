@@ -28,6 +28,7 @@ import {
   formatSplitChildComplete,
   formatSplitAllDone,
   formatCIConflicts,
+  formatCIResolvingConflicts,
   formatCINoChecks,
   formatUsage,
 } from "../src/format.js"
@@ -594,6 +595,21 @@ describe("formatCIConflicts", () => {
     expect(msg).toContain("test-slug")
     expect(msg).toContain("PR #42")
     expect(msg).toContain("CI cannot run until conflicts are resolved")
+  })
+})
+
+describe("formatCIResolvingConflicts", () => {
+  it("includes slug, PR number, and attempt info", () => {
+    const msg = formatCIResolvingConflicts("test-slug", "https://github.com/org/repo/pull/42", 1, 3)
+    expect(msg).toContain("Resolving conflicts")
+    expect(msg).toContain("test-slug")
+    expect(msg).toContain("PR #42")
+    expect(msg).toContain("attempt 1/3")
+  })
+
+  it("shows correct attempt numbers", () => {
+    const msg = formatCIResolvingConflicts("test-slug", "https://github.com/org/repo/pull/42", 2, 5)
+    expect(msg).toContain("attempt 2/5")
   })
 })
 

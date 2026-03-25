@@ -237,6 +237,34 @@ export function buildQualityGateFixPrompt(
   return lines.join("\n")
 }
 
+export function buildMergeConflictPrompt(
+  prUrl: string,
+  attempt: number,
+  maxAttempts: number,
+): string {
+  const lines: string[] = [
+    "## Merge conflict resolution",
+    "",
+    `PR: ${prUrl}`,
+    `Attempt: ${attempt}/${maxAttempts}`,
+    "",
+    "The pull request has merge conflicts with the base branch that must be resolved before CI can run.",
+    "",
+    "### Instructions",
+    "",
+    "1. Fetch the latest base branch: `git fetch origin main` (or master)",
+    "2. Merge or rebase onto the base branch: `git merge origin/main` or `git rebase origin/main`",
+    "3. Resolve any conflicts in the affected files",
+    "4. Run local quality gates (tests, lint, typecheck) to verify the resolution didn't break anything",
+    "5. Push the resolved changes",
+    "",
+    "---",
+    "Resolve the merge conflicts above. Ensure tests pass locally before pushing.",
+  ]
+
+  return lines.join("\n")
+}
+
 export type MergeableState = "MERGEABLE" | "CONFLICTING" | "UNKNOWN"
 
 export function checkPRMergeability(prUrl: string, cwd: string): MergeableState | null {
