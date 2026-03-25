@@ -191,11 +191,14 @@ export class Dispatcher {
 
   private async cleanupStaleSessions(): Promise<void> {
     const now = Date.now()
+    const staleTtlMs = this.config.workspace.staleTtlMs
     const stale: [number, TopicSession][] = []
 
     for (const [threadId, session] of this.topicSessions) {
       if (session.activeSessionId) continue
-      if (now - session.lastActivityAt > this.config.workspace.staleTtlMs) {
+      // Consider both lastActivityAt and interruptedAt for staleness
+      const staleTime = session.interruptedAt ?? session.lastActivityAt
+      if (now - staleTime > staleTtlMs) {
         stale.push([threadId, session])
       }
     }
@@ -611,9 +614,15 @@ export class Dispatcher {
     let removedOrphans = 0
     let removedRepos = 0
 
+    const now = Date.now()
+    const staleTtlMs = this.config.workspace.staleTtlMs
     const idle: [number, TopicSession][] = []
     for (const [threadId, session] of this.topicSessions) {
-      if (!session.activeSessionId) {
+      // Clean up idle sessions OR sessions that have been interrupted too long
+      const isIdle = !session.activeSessionId
+      const isStaleInterrupted =
+        session.interruptedAt && now - session.interruptedAt >= staleTtlMs
+      if (isIdle || isStaleInterrupted) {
         idle.push([threadId, session])
       }
     }

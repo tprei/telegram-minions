@@ -151,4 +151,5 @@ export interface TopicSession {
   parentThreadId?: number
   childThreadIds?: number[]
   splitLabel?: string
+  interruptedAt?: number
 }
