@@ -39,6 +39,7 @@ import {
   formatCIPassed,
   formatCIGaveUp,
   formatCIConflicts,
+  formatCIResolvingConflicts,
   formatCINoChecks,
   formatProfileList,
   formatConfigHelp,
@@ -52,7 +53,7 @@ import { runQualityGates, type QualityReport } from "./quality-gates.js"
 import { StatsTracker } from "./stats.js"
 import { fetchClaudeUsage } from "./claude-usage.js"
 import { writeSessionLog } from "./session-log.js"
-import { extractPRUrl, waitForCI, getFailedCheckLogs, buildCIFixPrompt, buildQualityGateFixPrompt, checkPRMergeability } from "./ci-babysit.js"
+import { extractPRUrl, waitForCI, getFailedCheckLogs, buildCIFixPrompt, buildQualityGateFixPrompt, buildMergeConflictPrompt, checkPRMergeability } from "./ci-babysit.js"
 import { buildConversationDigest } from "./conversation-digest.js"
 import { DEFAULT_CI_FIX_PROMPT } from "./prompts.js"
 
@@ -1227,13 +1228,51 @@ export class Dispatcher {
       await new Promise((resolve) => setTimeout(resolve, 5_000))
       mergeState = checkPRMergeability(prUrl, topicSession.cwd)
     }
-    if (mergeState === "CONFLICTING") {
+
+    // Auto-resolve merge conflicts if detected
+    for (let conflictAttempt = 1; conflictAttempt <= maxRetries && mergeState === "CONFLICTING"; conflictAttempt++) {
       await this.telegram.sendMessage(
-        formatCIConflicts(topicSession.slug, prUrl),
+        formatCIResolvingConflicts(topicSession.slug, prUrl, conflictAttempt, maxRetries),
         topicSession.threadId,
       )
-      process.stderr.write(`dispatcher: PR ${prUrl} has merge conflicts, skipping CI babysit\n`)
-      return
+
+      process.stderr.write(`dispatcher: spawning merge conflict resolution session (attempt ${conflictAttempt}/${maxRetries}) for PR ${prUrl}\n`)
+
+      const conflictPrompt = buildMergeConflictPrompt(prUrl, conflictAttempt, maxRetries)
+      topicSession.mode = "ci-fix"
+      topicSession.conversation.push({ role: "user", text: conflictPrompt })
+
+      await new Promise<void>((resolve) => {
+        this.spawnCIFixAgent(topicSession, conflictPrompt, () => resolve())
+      })
+
+      process.stderr.write(`dispatcher: merge conflict resolution session completed (attempt ${conflictAttempt}/${maxRetries})\n`)
+
+      // Re-check mergeability after fix attempt
+      mergeState = checkPRMergeability(prUrl, topicSession.cwd)
+      if (mergeState === "UNKNOWN") {
+        await new Promise((resolve) => setTimeout(resolve, 5_000))
+        mergeState = checkPRMergeability(prUrl, topicSession.cwd)
+      }
+
+      if (mergeState === "CONFLICTING") {
+        if (conflictAttempt < maxRetries) {
+          process.stderr.write(`dispatcher: PR ${prUrl} still has merge conflicts after attempt ${conflictAttempt}, retrying\n`)
+        } else {
+          await this.telegram.sendMessage(
+            formatCIConflicts(topicSession.slug, prUrl),
+            topicSession.threadId,
+          )
+          process.stderr.write(`dispatcher: PR ${prUrl} still has merge conflicts after ${maxRetries} attempts, aborting\n`)
+          topicSession.mode = "task"
+          return
+        }
+      }
+    }
+
+    if (mergeState !== "MERGEABLE") {
+      // Couldn't determine mergeability — proceed cautiously
+      process.stderr.write(`dispatcher: PR ${prUrl} mergeability unknown, proceeding with CI watch\n`)
     }
 
     const result = await waitForCI(prUrl, topicSession.cwd, this.config.ci)

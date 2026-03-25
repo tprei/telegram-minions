@@ -396,6 +396,11 @@ export function formatCIConflicts(slug: string, prUrl: string): string {
   return `⚠️ <b>Merge conflicts</b>  ·  🏷 <code>${esc(slug)}</code>  ·  PR #${esc(prNum)}\n\nCI cannot run until conflicts are resolved.`
 }
 
+export function formatCIResolvingConflicts(slug: string, prUrl: string, attempt: number, maxAttempts: number): string {
+  const prNum = prUrl.match(/\/pull\/(\d+)/)?.[1] ?? prUrl
+  return `🔧 <b>Resolving conflicts</b>  ·  🏷 <code>${esc(slug)}</code>  ·  PR #${esc(prNum)}  ·  attempt ${attempt}/${maxAttempts}`
+}
+
 export function formatCINoChecks(slug: string, prUrl: string): string {
   const prNum = prUrl.match(/\/pull\/(\d+)/)?.[1] ?? prUrl
   return `⏳ <b>No CI checks found</b>  ·  🏷 <code>${esc(slug)}</code>  ·  PR #${esc(prNum)}\n\nTimed out waiting for checks to appear.`

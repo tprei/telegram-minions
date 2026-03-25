@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest"
-import { extractPRUrl, buildCIFixPrompt, buildQualityGateFixPrompt, checkPRMergeability, waitForCI } from "../src/ci-babysit.js"
+import { extractPRUrl, buildCIFixPrompt, buildQualityGateFixPrompt, buildMergeConflictPrompt, checkPRMergeability, waitForCI } from "../src/ci-babysit.js"
 import type { CiConfig } from "../src/config-types.js"
 
 vi.mock("node:child_process", async (importOriginal) => {
@@ -210,6 +210,48 @@ describe("buildQualityGateFixPrompt", () => {
       3,
     )
     expect(prompt).toContain("## Local quality gate failures")
+  })
+})
+
+describe("buildMergeConflictPrompt", () => {
+  it("includes PR URL and attempt info", () => {
+    const prompt = buildMergeConflictPrompt(
+      "https://github.com/org/repo/pull/42",
+      1,
+      3,
+    )
+    expect(prompt).toContain("https://github.com/org/repo/pull/42")
+    expect(prompt).toContain("Attempt: 1/3")
+  })
+
+  it("includes merge conflict resolution header", () => {
+    const prompt = buildMergeConflictPrompt(
+      "https://github.com/org/repo/pull/1",
+      1,
+      2,
+    )
+    expect(prompt).toContain("## Merge conflict resolution")
+  })
+
+  it("includes instructions for resolving conflicts", () => {
+    const prompt = buildMergeConflictPrompt(
+      "https://github.com/org/repo/pull/1",
+      1,
+      2,
+    )
+    expect(prompt).toContain("git fetch")
+    expect(prompt).toContain("git merge")
+    expect(prompt).toContain("Resolve any conflicts")
+  })
+
+  it("includes instruction to run local quality gates", () => {
+    const prompt = buildMergeConflictPrompt(
+      "https://github.com/org/repo/pull/1",
+      1,
+      2,
+    )
+    expect(prompt).toContain("Run local quality gates")
+    expect(prompt).toContain("tests pass locally")
   })
 })
 
