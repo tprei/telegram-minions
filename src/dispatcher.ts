@@ -2235,19 +2235,12 @@ export class Dispatcher {
         parent.threadId,
       )
       await this.updateTopicTitle(parent, progress.failed > 0 ? "⚠️" : "✅")
-      this.dags.delete(graph.id)
 
       // Run deferred CI babysitting sequentially now that the DAG is complete
       await this.runDeferredBabysit(parent.threadId)
 
-      // Clean up child sessions
-      for (const childId of parent.childThreadIds ?? []) {
-        const child = this.topicSessions.get(childId)
-        if (child) {
-          this.topicSessions.delete(childId)
-          this.removeWorkspace(child).catch(() => {})
-        }
-      }
+      // Close child sessions (kills processes, removes topics, cleans workspaces)
+      await this.closeChildSessions(parent)
     }
 
     await this.persistTopicSessions()
@@ -2473,6 +2466,11 @@ export class Dispatcher {
 
     // Cascade close to children first (handles both tracked and orphaned)
     await this.closeChildSessions(topicSession)
+
+    // Clean up DAG graph if this parent had one (keeps PR URLs alive until /close)
+    if (topicSession.dagId) {
+      this.dags.delete(topicSession.dagId)
+    }
 
     // Remove from tracking and delete the topic first for instant user feedback
     this.topicSessions.delete(threadId)
