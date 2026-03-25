@@ -19,12 +19,14 @@ RUN curl -fsSL -o /tmp/goose.tar.bz2 \
     && rm /tmp/goose.tar.bz2
 
 # Install Claude Code CLI + MCP servers + dev tools
+# Note: vitest is NOT installed globally to ensure projects use their local
+# vitest with its own dependencies (e.g., happy-dom). Global vitest can't
+# resolve project-local test environment packages.
 RUN npm install -g \
   @anthropic-ai/claude-code \
   @zed-industries/claude-agent-acp \
   @playwright/mcp \
   @upstash/context7-mcp \
-  vitest \
   typescript
 
 # Install GitHub MCP server (official Go binary)
