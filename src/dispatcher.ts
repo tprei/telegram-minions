@@ -203,7 +203,7 @@ export class Dispatcher {
     return this.dags
   }
 
-  async handleReplyCommand(threadId: number, text: string, photos?: string[]): Promise<void> {
+  async handleReplyCommand(threadId: number, text: string, _photos?: string[]): Promise<void> {
     const topicSession = this.topicSessions.get(threadId)
     if (!topicSession) {
       await this.telegram.sendMessage(

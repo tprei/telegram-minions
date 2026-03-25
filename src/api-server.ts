@@ -1,7 +1,5 @@
 import http from "node:http"
 import type { MinionConfig } from "./config-types.js"
-import type { TopicSession } from "./types.js"
-import type { DagGraph } from "./dag.js"
 import { StatsTracker } from "./stats.js"
 import type { Dispatcher } from "./dispatcher.js"
 import { dagProgress } from "./dag.js"
