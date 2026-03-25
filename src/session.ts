@@ -32,6 +32,14 @@ type McpServerConfig = {
   env?: Record<string, string>
 }
 
+type McpHttpServerConfig = {
+  type: "http"
+  url: string
+  headers: Record<string, string>
+}
+
+type McpConfigEntry = McpServerConfig | McpHttpServerConfig
+
 export class SessionHandle {
   private process: ChildProcess | null = null
   private state: SessionState = "spawning"
@@ -70,8 +78,8 @@ export class SessionHandle {
     }
   }
 
-  private buildMcpServers(): Record<string, McpServerConfig> {
-    const servers: Record<string, McpServerConfig> = {}
+  private buildMcpServers(): Record<string, McpConfigEntry> {
+    const servers: Record<string, McpConfigEntry> = {}
 
     if (this.sessionConfig.mcp.browserEnabled) {
       servers.playwright = {
@@ -119,6 +127,21 @@ export class SessionHandle {
       }
     }
 
+    if (this.sessionConfig.mcp.zaiEnabled && this.sessionConfig.goose.provider === "z-ai") {
+      const zaiKey = process.env["ZAI_API_KEY"]
+      if (zaiKey) {
+        servers["web-search-prime"] = {
+          type: "http",
+          url: "https://api.z.ai/api/mcp/web_search_prime/mcp",
+          headers: {
+            Authorization: `Bearer ${zaiKey}`,
+          },
+        }
+      } else {
+        process.stderr.write("MCP: Z.AI MCP enabled but ZAI_API_KEY is not set — skipping\n")
+      }
+    }
+
     return servers
   }
 
@@ -127,7 +150,12 @@ export class SessionHandle {
     const servers = this.buildMcpServers()
 
     for (const [, server] of Object.entries(servers)) {
-      const cmdWithArgs = [server.command, ...server.args].join(" ")
+      // Skip HTTP MCPs - Goose doesn't support HTTP transport
+      if ("type" in server && server.type === "http") {
+        continue
+      }
+      const stdioServer = server as McpServerConfig
+      const cmdWithArgs = [stdioServer.command, ...stdioServer.args].join(" ")
       args.push("--with-extension", cmdWithArgs)
     }
 
@@ -138,7 +166,25 @@ export class SessionHandle {
     const servers = this.buildMcpServers()
     if (Object.keys(servers).length === 0) return []
 
-    return ["--mcp-config", JSON.stringify({ mcpServers: servers })]
+    const mcpConfig: Record<string, unknown> = {}
+    for (const [name, server] of Object.entries(servers)) {
+      if ("type" in server && server.type === "http") {
+        mcpConfig[name] = {
+          type: "http",
+          url: server.url,
+          headers: server.headers,
+        }
+      } else {
+        const stdioServer = server as McpServerConfig
+        mcpConfig[name] = {
+          command: stdioServer.command,
+          args: stdioServer.args,
+          env: stdioServer.env,
+        }
+      }
+    }
+
+    return ["--mcp-config", JSON.stringify({ mcpServers: mcpConfig })]
   }
 
   private buildIsolatedEnv(): Record<string, string> {
@@ -189,6 +235,7 @@ export class SessionHandle {
       CLAUDE_CODE_STREAM_CLOSE_TIMEOUT: "30000",
       GITHUB_PERSONAL_ACCESS_TOKEN: process.env["GITHUB_TOKEN"] ?? "",
       SENTRY_ACCESS_TOKEN: process.env["SENTRY_ACCESS_TOKEN"] ?? "",
+      ZAI_API_KEY: process.env["ZAI_API_KEY"] ?? "",
     }
 
     const profile = this.sessionConfig.profile

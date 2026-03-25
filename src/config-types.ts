@@ -40,6 +40,7 @@ export interface McpConfig {
   sentryEnabled: boolean
   sentryOrgSlug: string
   sentryProjectSlug: string
+  zaiEnabled: boolean
 }
 
 export interface ObserverConfig {

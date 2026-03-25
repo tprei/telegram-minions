@@ -12,6 +12,7 @@ const baseConfig: SessionConfig = {
     sentryEnabled: false,
     sentryOrgSlug: "",
     sentryProjectSlug: "",
+    zaiEnabled: false,
   },
 }
 

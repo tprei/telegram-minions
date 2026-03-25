@@ -61,6 +61,7 @@ export function configFromEnv(overrides?: Partial<MinionConfig>): MinionConfig {
       sentryEnabled: optional("ENABLE_SENTRY_MCP", "true") === "true",
       sentryOrgSlug: process.env["SENTRY_ORG_SLUG"] ?? "",
       sentryProjectSlug: process.env["SENTRY_PROJECT_SLUG"] ?? "",
+      zaiEnabled: optional("ENABLE_ZAI_MCP", "true") === "true",
     },
     observer: {
       activityThrottleMs: optionalNumber("ACTIVITY_THROTTLE_MS", 3000),

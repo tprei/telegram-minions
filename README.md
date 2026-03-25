@@ -21,6 +21,7 @@ Inspired by [Stripe's Minions](https://stripe.dev/blog/minions-stripes-one-shot-
   * `GitHub`: PRs, issues, code search.
   * `Context7`: Up-to-date documentation lookup for external libraries.
   * `Sentry`: Error tracking and stack trace retrieval.
+  * `Z.AI`: Web search and real-time information (when using z-ai provider).
 * **Workspace Isolation**: Uses Git worktrees to maintain a clean, persistent workspace for concurrent sessions without cross-contamination.
 
 ## Usage
@@ -61,6 +62,8 @@ By default, the system uses `claude-acp` (Claude Code subscription) which requir
 * `ENABLE_CONTEXT7_MCP` - (default: `true`)
 * `ENABLE_SENTRY_MCP` - (default: `true`)
 * `SENTRY_ACCESS_TOKEN` - Required if Sentry MCP is enabled.
+* `ENABLE_ZAI_MCP` - (default: `true`) - Z.AI web search (only enabled when `GOOSE_PROVIDER=z-ai`)
+* `ZAI_API_KEY` - Required for Z.AI MCP. Get from https://z.ai/manage-apikey/apikey-list
 
 ## Deployment (Fly.io)
 

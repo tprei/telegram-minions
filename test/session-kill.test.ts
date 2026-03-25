@@ -13,6 +13,7 @@ const stubConfig: SessionConfig = {
     sentryEnabled: false,
     sentryOrgSlug: "",
     sentryProjectSlug: "",
+    zaiEnabled: false,
   },
 }
 
