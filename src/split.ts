@@ -8,13 +8,20 @@ export interface SplitItem {
 
 const SPLIT_EXTRACTION_PROMPT = [
   "You are a task splitter. Given a planning/research conversation, extract discrete, independently implementable work items.",
-  "Each item must be self-contained — it should not depend on another item being completed first.",
-  "Only include items that can run in parallel without merge conflicts (i.e., they touch different files/modules).",
+  "",
+  "Items are parallelizable if they:",
+  "1. Address different logical concerns (e.g., UI vs backend vs tests vs docs vs config)",
+  "2. Have clear scope boundaries even if some files overlap",
+  "3. Can produce independent PRs that merge without constant conflicts",
+  "",
+  "Prefer splitting by **role/responsibility** rather than strict file isolation. Minor file overlap is acceptable if each agent owns a distinct aspect.",
+  "",
+  "AVOID splitting if items are tightly coupled or require extensive back-and-forth coordination.",
   "",
   "If the user provided a directive, use it to filter or refine the items.",
   "",
   "Output ONLY a JSON array with no surrounding text or markdown fencing:",
-  '[{ "title": "short label (under 60 chars)", "description": "full task description with enough context to implement independently" }]',
+  '[{ "title": "short label (under 60 chars)", "description": "full task description with scope constraints and owned files/modules" }]',
   "",
   "If you cannot identify discrete parallelizable items, output an empty array: []",
 ].join("\n")
@@ -25,6 +32,12 @@ export function extractSplitItems(
 ): SplitItem[] {
   const MAX_ASSISTANT_CHARS = 4000
   const lines: string[] = ["## Conversation\n"]
+
+  // Log what we're analyzing
+  process.stderr.write(`split: analyzing conversation (${conversation.length} messages)\n`)
+  if (directive) {
+    process.stderr.write(`split: directive: "${directive.slice(0, 100)}${directive.length > 100 ? "..." : ""}"\n`)
+  }
 
   for (const msg of conversation) {
     const label = msg.role === "user" ? "**User**" : "**Agent**"
@@ -63,7 +76,15 @@ export function extractSplitItems(
       },
     ).toString().trim()
 
-    return parseSplitItems(output)
+    // Log raw output for debugging
+    process.stderr.write(`split: raw output (${output.length} chars)\n`)
+    const previewLen = 500
+    process.stderr.write(`split: ${output.slice(0, previewLen)}${output.length > previewLen ? "..." : ""}\n`)
+
+    const items = parseSplitItems(output)
+    process.stderr.write(`split: extracted ${items.length} valid items\n`)
+
+    return items
   } catch (err) {
     process.stderr.write(`split: extraction failed: ${err}\n`)
     return []
@@ -79,25 +100,50 @@ export function parseSplitItems(output: string): SplitItem[] {
   }
 
   const arrayMatch = text.match(/\[[\s\S]*\]/)
-  if (!arrayMatch) return []
+  if (!arrayMatch) {
+    process.stderr.write(`split: no JSON array found in output\n`)
+    return []
+  }
 
   let parsed: unknown
   try {
     parsed = JSON.parse(arrayMatch[0])
-  } catch {
+  } catch (e) {
+    process.stderr.write(`split: JSON parse error: ${e}\n`)
     return []
   }
-  if (!Array.isArray(parsed)) return []
+  if (!Array.isArray(parsed)) {
+    process.stderr.write(`split: parsed value is not an array (got ${typeof parsed})\n`)
+    return []
+  }
 
-  return parsed.filter(
-    (item: unknown): item is SplitItem =>
-      typeof item === "object" &&
-      item !== null &&
-      typeof (item as SplitItem).title === "string" &&
-      typeof (item as SplitItem).description === "string" &&
-      (item as SplitItem).title.length > 0 &&
-      (item as SplitItem).description.length > 0,
-  )
+  // Log filtering decisions
+  let filtered = 0
+  const valid = parsed.filter((item: unknown): item is SplitItem => {
+    if (typeof item !== "object" || item === null) {
+      process.stderr.write(`split: filtered non-object item\n`)
+      filtered++
+      return false
+    }
+    const obj = item as Record<string, unknown>
+    if (typeof obj.title !== "string" || !obj.title.length) {
+      process.stderr.write(`split: filtered item with missing/empty title\n`)
+      filtered++
+      return false
+    }
+    if (typeof obj.description !== "string" || !obj.description.length) {
+      process.stderr.write(`split: filtered item "${obj.title}" with missing/empty description\n`)
+      filtered++
+      return false
+    }
+    return true
+  })
+
+  if (filtered > 0) {
+    process.stderr.write(`split: filtered ${filtered} invalid items from ${parsed.length} candidates\n`)
+  }
+
+  return valid
 }
 
 export function buildSplitChildPrompt(
