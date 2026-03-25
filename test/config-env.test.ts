@@ -83,9 +83,9 @@ describe("configFromEnv", () => {
   })
 
   describe("claude config", () => {
-    it("defaults reviewModel to sonnet", () => {
+    it("defaults reviewModel to opus", () => {
       const config = configFromEnv()
-      expect(config.claude.reviewModel).toBe("sonnet")
+      expect(config.claude.reviewModel).toBe("opus")
     })
 
     it("reads REVIEW_MODEL env var", () => {
