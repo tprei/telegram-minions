@@ -96,21 +96,6 @@ function getMimeType(filePath: string): string {
   return MIME_TYPES[ext] ?? "application/octet-stream"
 }
 
-function mapSessionStatus(session: TopicSession, activeSessionId?: string): ApiSession["status"] {
-  if (session.activeSessionId || activeSessionId) {
-    return "running"
-  }
-  if (session.conversation.length === 0) {
-    return "pending"
-  }
-  // Check if the session has completed
-  const lastMessage = session.conversation[session.conversation.length - 1]
-  if (lastMessage?.role === "assistant" && lastMessage.text.includes("completed")) {
-    return "completed"
-  }
-  return "running"
-}
-
 function topicSessionToApi(
   session: TopicSession,
   activeSessionId?: string,
