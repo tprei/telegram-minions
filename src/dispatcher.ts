@@ -76,7 +76,7 @@ import { extractPRUrl, findPRByBranch, waitForCI, getFailedCheckLogs, buildCIFix
 import { buildConversationDigest } from "./conversation-digest.js"
 import { DEFAULT_CI_FIX_PROMPT, DEFAULT_RECOVERY_PROMPT } from "./prompts.js"
 import { StateBroadcaster, topicSessionToApi, dagToApi } from "./api-server.js"
-import { loggers, createSessionLogger } from "./logger.js"
+import { loggers } from "./logger.js"
 
 const log = loggers.dispatcher
 
