@@ -152,6 +152,8 @@ export interface TopicSession {
   childThreadIds?: number[]
   splitLabel?: string
   interruptedAt?: number
+  branch?: string
+  prUrl?: string
   dagId?: string
   dagNodeId?: string
   pendingSplitItems?: { title: string; description: string }[]
