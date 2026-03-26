@@ -13,6 +13,13 @@ export interface QuickAction {
   message: string
 }
 
+export type PlanActionType = 'execute' | 'split' | 'stack' | 'dag'
+
+export interface ConversationMessage {
+  role: 'user' | 'assistant'
+  text: string
+}
+
 export interface MinionSession {
   id: string
   slug: string
@@ -30,6 +37,8 @@ export interface MinionSession {
   needsAttention: boolean
   attentionReasons: AttentionReason[]
   quickActions: QuickAction[]
+  mode: string
+  conversation: ConversationMessage[]
 }
 
 export interface DagNode {
@@ -82,7 +91,13 @@ export interface CloseSessionCommand {
   sessionId: string
 }
 
-export type MinionCommand = SendReplyCommand | StopMinionCommand | CloseSessionCommand
+export interface PlanActionCommand {
+  action: 'plan_action'
+  sessionId: string
+  planAction: PlanActionType
+}
+
+export type MinionCommand = SendReplyCommand | StopMinionCommand | CloseSessionCommand | PlanActionCommand
 
 export interface CommandResult {
   success: boolean

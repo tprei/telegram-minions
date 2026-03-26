@@ -22,7 +22,7 @@ import type { MinionSession, DagNode } from './types'
 
 function handleThreadClick(session: MinionSession) {
   if (session.threadId && session.chatId) {
-    const threadUrl = `https://t.me/c/${Math.abs(session.chatId)}/${session.threadId}`
+    const threadUrl = `https://t.me/c/${String(session.chatId).replace(/^-100/, '')}/${session.threadId}`
     openTelegramLink(threadUrl)
   }
 }

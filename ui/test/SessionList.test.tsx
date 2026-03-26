@@ -73,6 +73,11 @@ describe('StatusBadge', () => {
     render(<StatusBadge status="failed" />)
     expect(screen.getByText('Failed')).toBeTruthy()
   })
+
+  it('renders skipped status with skip emoji', () => {
+    render(<StatusBadge status="skipped" />)
+    expect(screen.getByText('Skipped')).toBeTruthy()
+  })
 })
 
 describe('SessionCard', () => {

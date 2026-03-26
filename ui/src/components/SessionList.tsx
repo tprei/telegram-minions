@@ -4,7 +4,7 @@ import { ConfirmDialog, ReplyDialog } from './ConfirmDialog'
 import { PrLink } from './PrLink'
 import { useTelegram, usePopup as useTelegramPopup } from '../hooks'
 
-type StatusType = MinionSession['status']
+type StatusType = MinionSession['status'] | 'skipped'
 
 interface StatusBadgeProps {
   status: StatusType
@@ -34,6 +34,12 @@ const STATUS_CONFIG: Record<StatusType, { emoji: string; label: string; classNam
     label: 'Failed',
     className: 'bg-red-100 text-red-700',
     darkClassName: 'bg-red-900/50 text-red-300',
+  },
+  skipped: {
+    emoji: '⏭️',
+    label: 'Skipped',
+    className: 'bg-stone-100 text-stone-700',
+    darkClassName: 'bg-stone-800/50 text-stone-400',
   },
 }
 
@@ -196,7 +202,7 @@ export function SessionCard({
     if (onThreadClick) {
       onThreadClick(session)
     } else if (session.threadId && session.chatId) {
-      const threadUrl = `https://t.me/c/${Math.abs(session.chatId)}/${session.threadId}`
+      const threadUrl = `https://t.me/c/${String(session.chatId).replace(/^-100/, '')}/${session.threadId}`
       tg.navigation.openTgLink(threadUrl)
     }
   }, [session, onThreadClick, tg.navigation])
