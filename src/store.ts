@@ -23,8 +23,10 @@ export class SessionStore {
   async save(sessions: Map<number, TopicSession>, offset: number = 0): Promise<void> {
     const entries = Array.from(sessions.entries())
     const data: StoreData = { sessions: entries, offset }
+    const tmp = this.filePath + ".tmp"
     try {
-      await fs.writeFile(this.filePath, JSON.stringify(data), "utf-8")
+      await fs.writeFile(tmp, JSON.stringify(data), "utf-8")
+      await fs.rename(tmp, this.filePath)
     } catch (err) {
       process.stderr.write(`store: failed to save sessions: ${err}\n`)
       captureException(err, { operation: "store.save" })
@@ -64,8 +66,9 @@ export class SessionStore {
       }
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
-        process.stderr.write(`store: failed to load sessions: ${err}\n`)
-        captureException(err, { operation: "store.load" })
+        const isBadJson = err instanceof SyntaxError
+        process.stderr.write(`store: ${isBadJson ? "corrupt file, starting fresh" : "failed to load sessions"}: ${err}\n`)
+        if (!isBadJson) captureException(err, { operation: "store.load" })
       }
     }
     return { active, expired, offset }
