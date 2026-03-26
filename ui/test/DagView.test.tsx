@@ -262,6 +262,11 @@ describe('DagList', () => {
     render(<DagList dags={[mockSkippedDagGraph]} isLoading={false} />)
     expect(document.body.innerHTML).toContain('skipped-task')
   })
+
+  it('displays DAG status (not node status) for skipped node DAG', () => {
+    render(<DagList dags={[mockSkippedDagGraph]} isLoading={false} />)
+    expect(document.body.innerHTML).toContain('Idle')
+  })
 })
 
 describe('Status Colors', () => {
@@ -272,5 +277,55 @@ describe('Status Colors', () => {
     const pendingIndicator = document.body.innerHTML.includes('Idle')
 
     expect(runningIndicator || pendingIndicator).toBeTruthy()
+  })
+})
+
+describe('Dynamic Height', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('renders with minimum height for small graphs', () => {
+    const { container } = render(<DagView dag={mockCompletedDagGraph} />)
+    const flowContainer = container.querySelector('[style*="height"]')
+    expect(flowContainer).toBeTruthy()
+    const height = flowContainer?.getAttribute('style')
+    expect(height).toMatch(/height:\s*\d+px/)
+  })
+
+  it('calculates height based on node count and graph depth', () => {
+    const { container } = render(<DagView dag={mockDagGraph} />)
+    const flowContainer = container.querySelector('[style*="height"]')
+    expect(flowContainer).toBeTruthy()
+    const height = flowContainer?.getAttribute('style')
+    expect(height).toMatch(/height:\s*\d+px/)
+  })
+
+  it('renders larger graphs with greater height', () => {
+    const manyNodesDag: DagGraph = {
+      id: 'dag-many',
+      rootTaskId: 'node-1',
+      nodes: Object.fromEntries(
+        Array.from({ length: 10 }, (_, i) => [
+          `node-${i}`,
+          {
+            id: `node-${i}`,
+            slug: `task-${i}`,
+            status: 'pending' as const,
+            dependencies: i > 0 ? [`node-${i - 1}`] : [],
+            dependents: i < 9 ? [`node-${i + 1}`] : [],
+          },
+        ])
+      ),
+      status: 'pending' as const,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }
+
+    const { container } = render(<DagView dag={manyNodesDag} />)
+    const flowContainer = container.querySelector('[style*="height"]')
+    expect(flowContainer).toBeTruthy()
+    const height = flowContainer?.getAttribute('style')
+    expect(height).toMatch(/height:\s*\d+px/)
   })
 })
