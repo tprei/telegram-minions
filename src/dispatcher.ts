@@ -1,8 +1,4 @@
-import { execSync, execFile } from "node:child_process"
-import { promisify } from "node:util"
-
-const execFileAsync = promisify(execFile)
-import os from "node:os"
+import { execSync } from "node:child_process"
 import path from "node:path"
 import fs from "node:fs"
 import crypto from "node:crypto"
@@ -76,44 +72,25 @@ import { extractPRUrl, findPRByBranch, waitForCI, getFailedCheckLogs, buildCIFix
 import { buildConversationDigest } from "./conversation-digest.js"
 import { DEFAULT_CI_FIX_PROMPT, DEFAULT_RECOVERY_PROMPT } from "./prompts.js"
 import { StateBroadcaster, topicSessionToApi, dagToApi } from "./api-server.js"
-import { SessionNotFoundError, DefaultBranchError } from "./errors.js"
+import { SessionNotFoundError } from "./errors.js"
+// Extracted modules
+import {
+  TASK_PREFIX, TASK_SHORT, PLAN_PREFIX, THINK_PREFIX, REVIEW_PREFIX,
+  EXECUTE_CMD, STATUS_CMD, STATS_CMD, REPLY_PREFIX, REPLY_SHORT,
+  CLOSE_CMD, STOP_CMD, HELP_CMD, CLEAN_CMD, USAGE_CMD, CONFIG_CMD,
+  SPLIT_CMD, STACK_CMD, DAG_CMD, LAND_CMD, RETRY_CMD,
+  parseTaskArgs, parseReviewArgs, buildReviewAllTask,
+  buildRepoKeyboard, buildProfileKeyboard,
+  escapeHtml, extractRepoName, appendImageContext,
+} from "./command-parser.js"
+import {
+  type ActiveSession, type PendingTask,
+  buildContextPrompt, buildExecutionPrompt,
+  prepareWorkspace, removeWorkspace, cleanBuildArtifacts, dirSizeBytes,
+  downloadPhotos, prepareFanInBranch, mergeUpstreamBranches,
+} from "./session-manager.js"
 
 const POLL_TIMEOUT = 30
-const TASK_PREFIX = "/task"
-const TASK_SHORT = "/w"
-const PLAN_PREFIX = "/plan"
-const THINK_PREFIX = "/think"
-const REVIEW_PREFIX = "/review"
-const EXECUTE_CMD = "/execute"
-const STATUS_CMD = "/status"
-const STATS_CMD = "/stats"
-const REPLY_PREFIX = "/reply"
-const REPLY_SHORT = "/r"
-const CLOSE_CMD = "/close"
-const STOP_CMD = "/stop"
-const HELP_CMD = "/help"
-const CLEAN_CMD = "/clean"
-const USAGE_CMD = "/usage"
-const CONFIG_CMD = "/config"
-const SPLIT_CMD = "/split"
-const STACK_CMD = "/stack"
-const DAG_CMD = "/dag"
-const LAND_CMD = "/land"
-const RETRY_CMD = "/retry"
-
-interface ActiveSession {
-  handle: SessionHandle
-  meta: SessionMeta
-  task: string
-}
-
-interface PendingTask {
-  task: string
-  threadId?: number
-  repoSlug?: string
-  repoUrl?: string
-  mode: "task" | "plan" | "think" | "review"
-}
 
 export class Dispatcher {
   private readonly sessions = new Map<number, ActiveSession>()
@@ -2731,169 +2708,29 @@ export class Dispatcher {
     process.stderr.write(`dispatcher: stopped session ${topicSession.slug} (thread ${threadId})\n`)
   }
 
-  private async downloadPhotos(photos: TelegramPhotoSize[] | undefined, _cwd: string): Promise<string[]> {
-    if (!photos || photos.length === 0) return []
-
-    const imagesDir = fs.mkdtempSync(path.join(os.tmpdir(), "minion-images-"))
-
-    // Telegram sends multiple sizes; pick the largest (last in the array)
-    const largest = photos[photos.length - 1]
-    const filename = `${largest.file_unique_id}.jpg`
-    const destPath = path.join(imagesDir, filename)
-
-    const ok = await this.telegram.downloadFile(largest.file_id, destPath)
-    if (!ok) return []
-
-    return [destPath]
-  }
-
+  // Wrapper methods for extracted session-manager functions
   private async prepareWorkspace(slug: string, repoUrl?: string, startBranch?: string): Promise<string | null> {
-    const workDir = path.join(this.config.workspace.root, slug)
-
-    try {
-      if (repoUrl) {
-        const reposDir = path.join(this.config.workspace.root, ".repos")
-        fs.mkdirSync(reposDir, { recursive: true })
-
-        const repoName = extractRepoName(repoUrl)
-        const bareDir = path.join(reposDir, `${repoName}.git`)
-        const gitEnv = { ...process.env, GIT_TERMINAL_PROMPT: "0" }
-        const stdio: import("node:child_process").StdioOptions = ["ignore", "pipe", "pipe"]
-        const gitOpts = { stdio, timeout: 120_000, env: gitEnv }
-
-        if (fs.existsSync(bareDir)) {
-          process.stderr.write(`dispatcher: fetching ${repoUrl} in ${bareDir}\n`)
-          execSync(`git fetch --prune origin`, { ...gitOpts, cwd: bareDir })
-          updateLocalHead(bareDir, gitOpts)
-        } else {
-          process.stderr.write(`dispatcher: cloning bare ${repoUrl} into ${bareDir}\n`)
-          execSync(`git clone --bare ${JSON.stringify(repoUrl)} ${JSON.stringify(bareDir)}`, gitOpts)
-        }
-
-        const branch = `minion/${slug}`
-        const startRef = startBranch ?? resolveDefaultBranch(bareDir, gitOpts)
-        process.stderr.write(`dispatcher: adding worktree ${workDir} (branch ${branch}) from ${startRef}\n`)
-        execSync(
-          `git worktree add ${JSON.stringify(workDir)} -b ${JSON.stringify(branch)} ${startRef}`,
-          { ...gitOpts, cwd: bareDir },
-        )
-
-        execSync(`git remote set-url origin ${JSON.stringify(repoUrl)}`, { ...gitOpts, cwd: workDir })
-
-        bootstrapDependencies(workDir, reposDir, repoName)
-      } else {
-        fs.mkdirSync(workDir, { recursive: true })
-      }
-
-      return workDir
-    } catch (err) {
-      process.stderr.write(`dispatcher: prepareWorkspace failed: ${err}\n`)
-      captureException(err, { operation: "prepareWorkspace" })
-      return null
-    }
+    return prepareWorkspace(slug, this.config.workspace.root, repoUrl, startBranch)
   }
 
-  /**
-   * Merge multiple upstream branches into a single merge branch for fan-in nodes.
-   * Returns the merge branch name, or null if merge conflicts occur.
-   */
-  private async prepareFanInBranch(
-    slug: string,
-    repoUrl: string,
-    upstreamBranches: string[],
-  ): Promise<string | null> {
-    if (upstreamBranches.length <= 1) {
-      return upstreamBranches[0] ?? null
-    }
-
-    const repoName = extractRepoName(repoUrl)
-    const bareDir = path.join(this.config.workspace.root, ".repos", `${repoName}.git`)
-    const gitEnv = { ...process.env, GIT_TERMINAL_PROMPT: "0" }
-    const stdio: import("node:child_process").StdioOptions = ["ignore", "pipe", "pipe"]
-    const gitOpts = { stdio, timeout: 120_000, env: gitEnv }
-
-    try {
-      // Fetch latest state
-      execSync(`git fetch --prune origin`, { ...gitOpts, cwd: bareDir })
-
-      // Use git merge-tree to check for conflicts before creating a real merge
-      const baseBranch = upstreamBranches[0]
-      for (let i = 1; i < upstreamBranches.length; i++) {
-        const result = execSync(
-          `git merge-tree --write-tree ${baseBranch} ${upstreamBranches[i]}`,
-          { ...gitOpts, cwd: bareDir },
-        ).toString().trim()
-
-        // If merge-tree reports conflicts, the exit code is non-zero (caught by try/catch)
-        process.stderr.write(`dispatcher: merge-tree check OK for ${baseBranch} + ${upstreamBranches[i]}: ${result.slice(0, 40)}\n`)
-      }
-
-      // No conflicts detected — create the fan-in worktree from the first branch,
-      // then merge the rest in sequence
-      return upstreamBranches[0] // The actual merge happens in prepareWorkspace + post-checkout merge
-    } catch (err) {
-      process.stderr.write(`dispatcher: fan-in merge conflict detected for ${slug}: ${err}\n`)
-      return null
-    }
-  }
-
-  /**
-   * After creating a worktree from one upstream branch, merge additional upstream branches into it.
-   */
-  private mergeUpstreamBranches(workDir: string, additionalBranches: string[]): boolean {
-    const gitEnv = { ...process.env, GIT_TERMINAL_PROMPT: "0" }
-    const stdio: import("node:child_process").StdioOptions = ["ignore", "pipe", "pipe"]
-    const gitOpts = { stdio, timeout: 120_000, env: gitEnv }
-
-    for (const branch of additionalBranches) {
-      try {
-        execSync(
-          `git merge --no-edit ${JSON.stringify(branch)}`,
-          { ...gitOpts, cwd: workDir },
-        )
-        process.stderr.write(`dispatcher: merged ${branch} into worktree ${workDir}\n`)
-      } catch (err) {
-        process.stderr.write(`dispatcher: merge of ${branch} into ${workDir} failed: ${err}\n`)
-        // Abort the merge
-        try {
-          execSync(`git merge --abort`, { ...gitOpts, cwd: workDir })
-        } catch { /* best effort */ }
-        return false
-      }
-    }
-
-    return true
+  private async removeWorkspace(topicSession: TopicSession): Promise<void> {
+    return removeWorkspace(topicSession, this.config.workspace.root)
   }
 
   private cleanBuildArtifacts(cwd: string): void {
     cleanBuildArtifacts(cwd)
   }
 
-  private async removeWorkspace(topicSession: TopicSession): Promise<void> {
-    if (!topicSession.cwd || !fs.existsSync(topicSession.cwd)) return
+  private async prepareFanInBranch(slug: string, repoUrl: string, upstreamBranches: string[]): Promise<string | null> {
+    return prepareFanInBranch(slug, repoUrl, upstreamBranches, this.config.workspace.root)
+  }
 
-    try {
-      if (topicSession.repoUrl) {
-        const repoName = extractRepoName(topicSession.repoUrl)
-        const bareDir = path.join(this.config.workspace.root, ".repos", `${repoName}.git`)
-        if (fs.existsSync(bareDir)) {
-          await execFileAsync(
-            "git", ["worktree", "remove", "--force", topicSession.cwd],
-            { cwd: bareDir, timeout: 30_000 },
-          )
-          process.stderr.write(`dispatcher: removed worktree ${topicSession.cwd}\n`)
-          return
-        }
-      }
+  private async downloadPhotos(photos: TelegramPhotoSize[] | undefined, _cwd: string): Promise<string[]> {
+    return downloadPhotos(photos, this.telegram)
+  }
 
-      fs.rmSync(topicSession.cwd, { recursive: true, force: true })
-      process.stderr.write(`dispatcher: removed workspace ${topicSession.cwd}\n`)
-    } catch (err) {
-      process.stderr.write(`dispatcher: failed to remove workspace ${topicSession.cwd}: ${err}\n`)
-      try {
-        fs.rmSync(topicSession.cwd, { recursive: true, force: true })
-      } catch { /* best effort */ }
-    }
+  private mergeUpstreamBranches(workDir: string, additionalBranches: string[]): boolean {
+    return mergeUpstreamBranches(workDir, additionalBranches)
   }
 
   activeSessions(): number {
@@ -2960,352 +2797,4 @@ export class Dispatcher {
     await this.persistTopicSessions()
     this.updatePinnedSummary()
   }
-}
-
-export function updateLocalHead(bareDir: string, gitOpts: object): void {
-  const defaultBranch = resolveDefaultBranch(bareDir, gitOpts)
-  try {
-    execSync(
-      `git update-ref refs/heads/${defaultBranch} refs/remotes/origin/${defaultBranch}`,
-      { ...gitOpts, cwd: bareDir },
-    )
-  } catch { /* remote ref may not exist yet */ }
-}
-
-export function resolveDefaultBranch(bareDir: string, gitOpts: object): string {
-  try {
-    const ref = execSync("git symbolic-ref HEAD", { ...gitOpts, cwd: bareDir })
-      .toString().trim()
-    const branch = ref.replace("refs/heads/", "")
-    execSync(`git rev-parse --verify refs/heads/${branch}`, { ...gitOpts, cwd: bareDir })
-    return branch
-  } catch { /* detached HEAD, unborn branch, or not set */ }
-
-  for (const name of ["main", "master"]) {
-    try {
-      execSync(`git rev-parse --verify refs/heads/${name}`, { ...gitOpts, cwd: bareDir })
-      return name
-    } catch { /* doesn't exist */ }
-  }
-
-  throw new DefaultBranchError()
-}
-
-export function parseTaskArgs(repos: Record<string, string>, args: string): { repoUrl?: string; task: string } {
-  const urlPattern = /^(https?:\/\/[^\s]+)\s+([\s\S]+)$/
-  const match = urlPattern.exec(args)
-
-  if (match) {
-    return { repoUrl: match[1], task: match[2].trim() }
-  }
-
-  // Check for repo alias as first word
-  const spaceIdx = args.indexOf(" ")
-  if (spaceIdx > 0) {
-    const firstWord = args.slice(0, spaceIdx)
-    const aliasUrl = repos[firstWord]
-    if (aliasUrl) {
-      return { repoUrl: aliasUrl, task: args.slice(spaceIdx + 1).trim() }
-    }
-  }
-
-  return { task: args.trim() }
-}
-
-export function buildRepoKeyboard(
-  repoKeys: string[],
-  prefix: "repo" | "plan" | "think" | "review" = "repo",
-): { text: string; callback_data: string }[][] {
-  const dataPrefix = prefix === "think" ? "think-repo" : prefix === "plan" ? "plan-repo" : prefix === "review" ? "review-repo" : "repo"
-  const rows: { text: string; callback_data: string }[][] = []
-  for (let i = 0; i < repoKeys.length; i += 2) {
-    const row = [{ text: repoKeys[i], callback_data: `${dataPrefix}:${repoKeys[i]}` }]
-    if (i + 1 < repoKeys.length) {
-      row.push({ text: repoKeys[i + 1], callback_data: `${dataPrefix}:${repoKeys[i + 1]}` })
-    }
-    rows.push(row)
-  }
-  return rows
-}
-
-export function buildProfileKeyboard(
-  profiles: { id: string; name: string }[],
-): { text: string; callback_data: string }[][] {
-  const rows: { text: string; callback_data: string }[][] = []
-  for (let i = 0; i < profiles.length; i += 2) {
-    const row = [{ text: profiles[i].name, callback_data: `profile:${profiles[i].id}` }]
-    if (i + 1 < profiles.length) {
-      row.push({ text: profiles[i + 1].name, callback_data: `profile:${profiles[i + 1].id}` })
-    }
-    rows.push(row)
-  }
-  return rows
-}
-
-export function escapeHtml(text: string): string {
-  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-}
-
-export function extractRepoName(url: string): string {
-  try {
-    const parts = url.replace(/\.git$/, "").split("/")
-    return parts[parts.length - 1] ?? "repo"
-  } catch {
-    return "repo"
-  }
-}
-
-export function appendImageContext(task: string, imagePaths: string[]): string {
-  if (imagePaths.length === 0) return task
-
-  const imageRefs = imagePaths.map((p) => `- \`${p}\``).join("\n")
-  return `${task}\n\n## Attached images\n\nThe user attached the following image(s). Read them with your file-reading tool to view their contents:\n${imageRefs}`
-}
-
-export function cleanBuildArtifacts(cwd: string): void {
-  const artifacts = ["node_modules", ".next", ".turbo", ".cache", "dist", ".npm"]
-  for (const name of artifacts) {
-    const target = path.join(cwd, name)
-    try {
-      if (fs.existsSync(target)) {
-        fs.rmSync(target, { recursive: true, force: true })
-        process.stderr.write(`dispatcher: cleaned ${name} from ${cwd}\n`)
-      }
-    } catch (err) {
-      process.stderr.write(`dispatcher: failed to clean ${name} from ${cwd}: ${err}\n`)
-    }
-  }
-  // Clean nested node_modules (depth 1) — e.g. ui/node_modules
-  try {
-    const entries = fs.readdirSync(cwd, { withFileTypes: true })
-    for (const entry of entries) {
-      if (!entry.isDirectory() || entry.name === "node_modules" || entry.name.startsWith(".")) continue
-      const nested = path.join(cwd, entry.name, "node_modules")
-      try {
-        if (fs.existsSync(nested)) {
-          fs.rmSync(nested, { recursive: true, force: true })
-          process.stderr.write(`dispatcher: cleaned ${entry.name}/node_modules from ${cwd}\n`)
-        }
-      } catch { /* best effort */ }
-    }
-  } catch { /* best effort */ }
-  const homeCacheDir = path.join(cwd, ".home", ".npm")
-  try {
-    if (fs.existsSync(homeCacheDir)) {
-      fs.rmSync(homeCacheDir, { recursive: true, force: true })
-      process.stderr.write(`dispatcher: cleaned .home/.npm from ${cwd}\n`)
-    }
-  } catch { /* best effort */ }
-}
-
-function bootstrapOnePackage(
-  pkgDir: string, reposDir: string, cacheKey: string, label: string,
-): void {
-  const lockFile = path.join(pkgDir, "package-lock.json")
-  const cacheDir = path.join(reposDir, `${cacheKey}-node_modules`)
-  const cacheLockHash = path.join(reposDir, `${cacheKey}-lock.hash`)
-
-  const currentHash = fs.existsSync(lockFile)
-    ? crypto.createHash("sha256").update(fs.readFileSync(lockFile)).digest("hex")
-    : null
-
-  const cachedHash = fs.existsSync(cacheLockHash)
-    ? fs.readFileSync(cacheLockHash, "utf8").trim()
-    : null
-
-  const stdio: import("node:child_process").StdioOptions = ["ignore", "pipe", "pipe"]
-
-  if (currentHash && cachedHash === currentHash && fs.existsSync(cacheDir)) {
-    try {
-      execSync(`cp -al ${JSON.stringify(cacheDir)} ${JSON.stringify(path.join(pkgDir, "node_modules"))}`, {
-        stdio, timeout: 30_000,
-      })
-      process.stderr.write(`dispatcher: hardlinked node_modules into ${label}\n`)
-      return
-    } catch (err) {
-      process.stderr.write(`dispatcher: hardlink copy failed for ${label}, falling back to npm ci: ${err}\n`)
-    }
-  }
-
-  try {
-    const installCmd = fs.existsSync(lockFile) ? "npm ci" : "npm install"
-    process.stderr.write(`dispatcher: running ${installCmd} in ${label}\n`)
-    execSync(installCmd, { cwd: pkgDir, stdio, timeout: 120_000 })
-
-    if (fs.existsSync(cacheDir)) {
-      fs.rmSync(cacheDir, { recursive: true, force: true })
-    }
-    execSync(`cp -al ${JSON.stringify(path.join(pkgDir, "node_modules"))} ${JSON.stringify(cacheDir)}`, {
-      stdio, timeout: 60_000,
-    })
-    if (currentHash) {
-      fs.writeFileSync(cacheLockHash, currentHash)
-    }
-    process.stderr.write(`dispatcher: cached node_modules for ${label}\n`)
-  } catch (err) {
-    process.stderr.write(`dispatcher: dependency bootstrap failed for ${label} (non-fatal): ${err}\n`)
-  }
-}
-
-export function bootstrapDependencies(workDir: string, reposDir: string, repoName: string): void {
-  // Bootstrap root package
-  if (fs.existsSync(path.join(workDir, "package.json"))) {
-    bootstrapOnePackage(workDir, reposDir, repoName, workDir)
-  }
-
-  // Bootstrap nested packages (depth 1) — e.g. ui/package.json
-  try {
-    const entries = fs.readdirSync(workDir, { withFileTypes: true })
-    for (const entry of entries) {
-      if (!entry.isDirectory() || entry.name === "node_modules" || entry.name.startsWith(".")) continue
-      const nested = path.join(workDir, entry.name)
-      if (fs.existsSync(path.join(nested, "package.json"))) {
-        bootstrapOnePackage(nested, reposDir, `${repoName}-${entry.name}`, `${workDir}/${entry.name}`)
-      }
-    }
-  } catch {
-    // non-fatal — nested scan failure shouldn't block session
-  }
-}
-
-export function dirSizeBytes(dirPath: string): number {
-  try {
-    const output = execSync(`du -sb ${JSON.stringify(dirPath)}`, {
-      stdio: ["ignore", "pipe", "pipe"],
-      timeout: 30_000,
-    }).toString()
-    return parseInt(output.split("\t")[0] ?? "0", 10) || 0
-  } catch {
-    return 0
-  }
-}
-
-export function buildContextPrompt(topicSession: TopicSession): string {
-  const isThink = topicSession.mode === "think"
-  const isPlan = topicSession.mode === "plan"
-  const isReview = topicSession.mode === "review"
-  const header = isThink
-    ? "## Research context\n\nYou are continuing a deep-research conversation. Here is the history:"
-    : isPlan
-    ? "## Planning context\n\nYou are continuing a planning conversation. Here is the history:"
-    : isReview
-    ? "## Review context\n\nYou are continuing a code review conversation. Here is the history:"
-    : "## Follow-up context\n\nYou previously worked on this task. Here is the conversation history:"
-
-  const MAX_ASSISTANT_CHARS = 4000
-  const lines: string[] = [header, ""]
-
-  for (const msg of topicSession.conversation) {
-    const label = msg.role === "user" ? "**User**" : "**Agent**"
-    lines.push(`${label}:`)
-    if (msg.role === "assistant" && msg.text.length > MAX_ASSISTANT_CHARS) {
-      lines.push(`[earlier output truncated]\n…${msg.text.slice(-MAX_ASSISTANT_CHARS)}`)
-    } else {
-      lines.push(msg.text)
-    }
-    lines.push("")
-  }
-
-  lines.push("---")
-  if (isThink) {
-    lines.push("Dig deeper based on the latest question. Search the web for additional context. Be thorough.")
-  } else if (isPlan) {
-    lines.push("Refine the plan based on the latest feedback. Present the updated plan clearly.")
-  } else if (isReview) {
-    lines.push("Address the user's follow-up about the review. Look deeper at the areas they highlighted.")
-  } else {
-    lines.push("The workspace still has your previous changes (branch, commits, PR).")
-    lines.push("Address the user's latest feedback. Push updates to the existing branch.")
-  }
-
-  return lines.join("\n")
-}
-
-export function buildExecutionPrompt(topicSession: TopicSession, directive?: string): string {
-  const MAX_ASSISTANT_CHARS = 4000
-  const conversation = topicSession.conversation
-
-  const originalRequest = conversation[0]?.text ?? ""
-
-  const lines: string[] = [
-    "## Task",
-    "",
-    originalRequest,
-    "",
-  ]
-
-  if (conversation.length > 1) {
-    const isThink = topicSession.mode === "think"
-    const isReview = topicSession.mode === "review"
-    lines.push(isThink ? "## Research thread" : isReview ? "## Review thread" : "## Planning thread")
-    lines.push("")
-    for (const msg of conversation.slice(1)) {
-      const label = msg.role === "user" ? "**User**" : "**Agent**"
-      lines.push(`${label}:`)
-      if (msg.role === "assistant" && msg.text.length > MAX_ASSISTANT_CHARS) {
-        lines.push(`[earlier output truncated]\n…${msg.text.slice(-MAX_ASSISTANT_CHARS)}`)
-      } else {
-        lines.push(msg.text)
-      }
-      lines.push("")
-    }
-  }
-
-  lines.push("---")
-  if (directive) {
-    lines.push(directive)
-  } else {
-    lines.push("Implement the plan above. Follow the plan closely.")
-  }
-
-  return lines.join("\n")
-}
-
-export function parseReviewArgs(repos: Record<string, string>, args: string): { repoUrl?: string; task: string } {
-  if (!args) return { task: "" }
-
-  const urlPrPattern = /^(https?:\/\/[^\s]+)\s+(\d+)$/
-  const urlPrMatch = urlPrPattern.exec(args)
-  if (urlPrMatch) {
-    return { repoUrl: urlPrMatch[1], task: `Review PR #${urlPrMatch[2]}` }
-  }
-
-  const urlOnlyPattern = /^(https?:\/\/[^\s]+)$/
-  const urlOnlyMatch = urlOnlyPattern.exec(args)
-  if (urlOnlyMatch) {
-    return { repoUrl: urlOnlyMatch[1], task: "" }
-  }
-
-  const parts = args.split(/\s+/)
-  const firstWord = parts[0]
-  const aliasUrl = repos[firstWord]
-  if (aliasUrl) {
-    const rest = parts.slice(1).join(" ").trim()
-    if (/^\d+$/.test(rest)) {
-      return { repoUrl: aliasUrl, task: `Review PR #${rest}` }
-    }
-    if (!rest) {
-      return { repoUrl: aliasUrl, task: "" }
-    }
-    return { repoUrl: aliasUrl, task: rest }
-  }
-
-  if (/^\d+$/.test(args.trim())) {
-    return { task: `Review PR #${args.trim()}` }
-  }
-
-  return { task: args.trim() }
-}
-
-export function buildReviewAllTask(repoUrl: string): string {
-  const repo = extractRepoName(repoUrl)
-  return [
-    `Review all open pull requests in ${repo} that have no reviews yet.`,
-    "",
-    "Steps:",
-    `1. Run \`gh pr list --repo ${repoUrl} --state open --json number,title,reviewDecision\` to find open PRs`,
-    "2. Filter to PRs where reviewDecision is empty or REVIEW_REQUIRED",
-    "3. For each unreviewed PR, review it following the review workflow in your system prompt",
-    "4. If there are no unreviewed PRs, report that back",
-  ].join("\n")
 }
