@@ -438,6 +438,62 @@ async function handleApiRoute(
       return
     }
 
+    // POST /api/sessions/:id/action
+    const actionMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/action$/)
+    if (actionMatch && req.method === "POST") {
+      const slug = actionMatch[1]
+      const topicSessions = dispatcher.getTopicSessions()
+      let threadId: number | undefined
+      let topicSession: TopicSession | undefined
+
+      for (const [tid, session] of topicSessions) {
+        if (session.slug === slug || tid.toString() === slug) {
+          threadId = tid
+          topicSession = session
+          break
+        }
+      }
+
+      if (!threadId || !topicSession) {
+        res.writeHead(404, { "Content-Type": "application/json" })
+        res.end(JSON.stringify({ success: false, error: "Session not found" }))
+        return
+      }
+
+      const body = await readBody(req)
+      const { action } = JSON.parse(body) as { action?: string }
+
+      const validActions: PlanActionType[] = ["execute", "split", "stack", "dag"]
+      if (!action || !validActions.includes(action as PlanActionType)) {
+        res.writeHead(400, { "Content-Type": "application/json" })
+        res.end(JSON.stringify({ success: false, error: `Invalid action: ${action}` }))
+        return
+      }
+
+      if (topicSession.mode !== "plan" && topicSession.mode !== "think") {
+        res.writeHead(400, { "Content-Type": "application/json" })
+        res.end(JSON.stringify({ success: false, error: `Session mode '${topicSession.mode}' does not support plan actions` }))
+        return
+      }
+
+      const actionCommands: Record<PlanActionType, string> = {
+        execute: "/execute",
+        split: "/split",
+        stack: "/stack",
+        dag: "/dag",
+      }
+
+      try {
+        await dispatcher.sendReply(threadId, actionCommands[action as PlanActionType])
+        res.writeHead(200, { "Content-Type": "application/json" })
+        res.end(JSON.stringify({ success: true }))
+      } catch (err) {
+        res.writeHead(500, { "Content-Type": "application/json" })
+        res.end(JSON.stringify({ success: false, error: String(err) }))
+      }
+      return
+    }
+
     // POST /api/commands
     if (pathname === "/api/commands" && req.method === "POST") {
       const body = await readBody(req)
