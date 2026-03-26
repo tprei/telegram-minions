@@ -6,18 +6,70 @@ import {
   useNodesState,
   useEdgesState,
   MarkerType,
+  Handle,
+  Position,
 } from '@reactflow/core'
 import { Background } from '@reactflow/background'
 import { Controls } from '@reactflow/controls'
 import { MiniMap } from '@reactflow/minimap'
+import '@reactflow/core/dist/style.css'
+import '@reactflow/core/dist/base.css'
+import '@reactflow/controls/dist/style.css'
+import '@reactflow/minimap/dist/style.css'
 import dagre from 'dagre'
 import type { DagGraph, DagNode } from '../types'
 import { StatusBadge } from './SessionList'
 import { PrLink } from './PrLink'
 import { useTelegram } from '../hooks'
 
-const NODE_WIDTH = 200
-const NODE_HEIGHT = 80
+const NODE_WIDTH = 240
+const NODE_HEIGHT = 100
+
+function calculateGraphDepth(nodes: Node[], edges: Edge[]): number {
+  if (nodes.length === 0) return 0
+  const adj = new Map<string, string[]>()
+  const inDegree = new Map<string, number>()
+
+  nodes.forEach((n) => {
+    adj.set(n.id, [])
+    inDegree.set(n.id, 0)
+  })
+
+  edges.forEach((e) => {
+    adj.get(e.source)?.push(e.target)
+    inDegree.set(e.target, (inDegree.get(e.target) || 0) + 1)
+  })
+
+  const queue: string[] = []
+  inDegree.forEach((deg, id) => {
+    if (deg === 0) queue.push(id)
+  })
+
+  let depth = 0
+  while (queue.length > 0) {
+    const size = queue.length
+    for (let i = 0; i < size; i++) {
+      const curr = queue.shift()!
+      adj.get(curr)?.forEach((next) => {
+        const newDeg = (inDegree.get(next) || 1) - 1
+        inDegree.set(next, newDeg)
+        if (newDeg === 0) queue.push(next)
+      })
+    }
+    depth++
+  }
+
+  return depth
+}
+
+function calculateDynamicHeight(nodeCount: number, graphDepth: number): number {
+  const minNodeHeight = NODE_HEIGHT + 40
+  const minHeight = 300
+  const maxHeight = 800
+  const rows = Math.max(graphDepth, Math.ceil(nodeCount / 3))
+  const calculated = Math.max(rows * minNodeHeight, minHeight)
+  return Math.min(calculated, maxHeight)
+}
 
 type DagNodeStatus = DagNode['status']
 
@@ -131,7 +183,7 @@ function DagNodeComponent({ data }: DagNodeProps) {
     if (data.onNodeClick) {
       data.onNodeClick(data)
     } else if (data.session?.threadId && data.session?.chatId) {
-      const threadUrl = `https://t.me/c/${Math.abs(data.session.chatId)}/${data.session.threadId}`
+      const threadUrl = `https://t.me/c/${String(data.session.chatId).replace(/^-100/, '')}/${data.session.threadId}`
       tg.navigation.openTgLink(threadUrl)
     }
   }, [data, tg.navigation])
@@ -147,6 +199,7 @@ function DagNodeComponent({ data }: DagNodeProps) {
       onMouseEnter={() => setShowTooltip(true)}
       onMouseLeave={() => setShowTooltip(false)}
     >
+      <Handle type="target" position={Position.Top} style={{ opacity: 0 }} />
       <div
         onClick={hasThread ? handleClick : undefined}
         role={hasThread ? 'button' : undefined}
@@ -168,7 +221,7 @@ function DagNodeComponent({ data }: DagNodeProps) {
       >
         <div class="font-semibold text-sm truncate">{data.label}</div>
         <div class="mt-1">
-          <StatusBadge status={data.status === 'skipped' ? 'pending' : data.status} />
+          <StatusBadge status={data.status} />
         </div>
         {data.session?.prUrl ? (
           <div class="mt-1" onClick={(e: Event) => e.stopPropagation()}>
@@ -179,6 +232,7 @@ function DagNodeComponent({ data }: DagNodeProps) {
         ) : null}
       </div>
 
+      <Handle type="source" position={Position.Bottom} style={{ opacity: 0 }} />
       {showTooltip && (
         <div
           class="absolute z-10 p-2 text-xs rounded shadow-lg"
@@ -272,8 +326,12 @@ export function DagView({ dag, onNodeClick }: DagViewProps) {
 
   const statusColors = getStatusColors(isDark)
 
+  const nodeCount = nodes.length
+  const graphDepth = calculateGraphDepth(nodes, edges)
+  const dynamicHeight = calculateDynamicHeight(nodeCount, graphDepth)
+
   return (
-    <div style={{ width: '100%', height: '400px' }}>
+    <div style={{ width: '100%', height: `${dynamicHeight}px` }}>
       <ReactFlow
         nodes={nodes}
         edges={edges}

@@ -31,10 +31,10 @@ export function configFromEnv(overrides?: Partial<MinionConfig>): MinionConfig {
     },
     goose: {
       provider: optional("GOOSE_PROVIDER", "claude-acp"),
-      model: optional("GOOSE_MODEL", "default"),
+      model: optional("GOOSE_MODEL", "sonnet"),
     },
     claude: {
-      planModel: optional("PLAN_MODEL", "sonnet"),
+      planModel: optional("PLAN_MODEL", "opus"),
       thinkModel: optional("THINK_MODEL", "opus"),
       reviewModel: optional("REVIEW_MODEL", "opus"),
     },

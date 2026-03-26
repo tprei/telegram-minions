@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process"
 import type { TopicMessage } from "./types.js"
 import type { DagInput } from "./dag.js"
+import type { ProviderProfile } from "./config-types.js"
 import { loggers } from "./logger.js"
 
 const log = loggers.dagExtract
@@ -56,7 +57,12 @@ const MAX_RETRIES = 3
 const INITIAL_DELAY_MS = 2000
 const MAX_ASSISTANT_CHARS = 4000
 
-function runClaudeExtraction(task: string, systemPrompt: string, timeoutMs: number): Promise<string> {
+function runClaudeExtraction(
+  task: string,
+  systemPrompt: string,
+  timeoutMs: number,
+  profile?: ProviderProfile,
+): Promise<string> {
   return new Promise((resolve, reject) => {
     const args = [
       "--print",
@@ -68,7 +74,12 @@ function runClaudeExtraction(task: string, systemPrompt: string, timeoutMs: numb
 
     const child = spawn("claude", args, {
       stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env },
+      env: {
+        ...process.env,
+        ...(profile?.baseUrl && { ANTHROPIC_BASE_URL: profile.baseUrl }),
+        ...(profile?.authToken && { ANTHROPIC_AUTH_TOKEN: profile.authToken }),
+        ...(profile?.haikuModel && { ANTHROPIC_DEFAULT_HAIKU_MODEL: profile.haikuModel }),
+      },
     })
 
     let stdout = ""
@@ -139,6 +150,7 @@ function buildConversationText(conversation: TopicMessage[], directive?: string)
 export async function extractDagItems(
   conversation: TopicMessage[],
   directive?: string,
+  profile?: ProviderProfile,
 ): Promise<DagExtractResult> {
   const task = buildConversationText(conversation, directive)
   log.debug({ messageCount: conversation.length }, "analyzing conversation for DAG items")
@@ -148,7 +160,7 @@ export async function extractDagItems(
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
       log.debug({ attempt, maxRetries: MAX_RETRIES }, "attempt")
-      const output = await runClaudeExtraction(task, DAG_EXTRACTION_PROMPT, 60_000)
+      const output = await runClaudeExtraction(task, DAG_EXTRACTION_PROMPT, 60_000, profile)
       log.debug({ outputLength: output.length }, "raw output")
 
       const items = parseDagItems(output)
@@ -182,6 +194,7 @@ export async function extractDagItems(
 export async function extractStackItems(
   conversation: TopicMessage[],
   directive?: string,
+  profile?: ProviderProfile,
 ): Promise<DagExtractResult> {
   const task = buildConversationText(conversation, directive)
   log.debug({ messageCount: conversation.length }, "analyzing conversation for stack items")
@@ -191,7 +204,7 @@ export async function extractStackItems(
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
       log.debug({ attempt, maxRetries: MAX_RETRIES }, "stack attempt")
-      const output = await runClaudeExtraction(task, STACK_EXTRACTION_PROMPT, 60_000)
+      const output = await runClaudeExtraction(task, STACK_EXTRACTION_PROMPT, 60_000, profile)
       log.debug({ outputLength: output.length }, "stack raw output")
 
       const ordered = parseStackItems(output)

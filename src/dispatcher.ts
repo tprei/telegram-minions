@@ -1325,7 +1325,7 @@ export class Dispatcher {
           const feedback = topicSession.pendingFeedback.join("\n\n")
           topicSession.pendingFeedback = []
           this.handleTopicFeedback(topicSession, feedback).catch((err) => {
-            process.stderr.write(`dispatcher: queued feedback error: ${err}\n`)
+            log.error({ err }, "queued feedback error")
           })
         }
       },
@@ -1368,7 +1368,7 @@ export class Dispatcher {
         stdio: ["pipe", "pipe", "pipe"],
       })
     } catch (err) {
-      process.stderr.write(`dispatcher: failed to post session digest: ${err}\n`)
+      log.error({ err }, "failed to post session digest")
     }
   }
 
@@ -1379,7 +1379,7 @@ export class Dispatcher {
 
     for (const { childSession, prUrl, qualityReport } of entries) {
       await this.babysitPR(childSession, prUrl, qualityReport).catch((err) => {
-        process.stderr.write(`dispatcher: deferred babysitPR error: ${err}\n`)
+        log.error({ err, prUrl }, "deferred babysitPR error")
         captureException(err, { operation: "deferredBabysitPR", prUrl })
       })
     }
@@ -1396,7 +1396,7 @@ export class Dispatcher {
       topicSession.threadId,
     )
 
-    process.stderr.write(`dispatcher: watching CI for PR ${prUrl} (max ${maxRetries} retries)\n`)
+    log.info({ prUrl, maxRetries }, "watching CI for PR")
 
     // Check for merge conflicts before polling CI
     let mergeState = checkPRMergeability(prUrl, topicSession.cwd)
@@ -1413,7 +1413,7 @@ export class Dispatcher {
         topicSession.threadId,
       )
 
-      process.stderr.write(`dispatcher: spawning merge conflict resolution session (attempt ${conflictAttempt}/${maxRetries}) for PR ${prUrl}\n`)
+      log.info({ prUrl, conflictAttempt, maxRetries }, "spawning merge conflict resolution session")
 
       const conflictPrompt = buildMergeConflictPrompt(prUrl, conflictAttempt, maxRetries)
       topicSession.mode = "ci-fix"
@@ -1423,7 +1423,7 @@ export class Dispatcher {
         this.spawnCIFixAgent(topicSession, conflictPrompt, () => resolve())
       })
 
-      process.stderr.write(`dispatcher: merge conflict resolution session completed (attempt ${conflictAttempt}/${maxRetries})\n`)
+      log.info({ prUrl, conflictAttempt, maxRetries }, "merge conflict resolution session completed")
 
       // Re-check mergeability after fix attempt
       mergeState = checkPRMergeability(prUrl, topicSession.cwd)
@@ -1434,13 +1434,13 @@ export class Dispatcher {
 
       if (mergeState === "CONFLICTING") {
         if (conflictAttempt < maxRetries) {
-          process.stderr.write(`dispatcher: PR ${prUrl} still has merge conflicts after attempt ${conflictAttempt}, retrying\n`)
+          log.warn({ prUrl, conflictAttempt }, "PR still has merge conflicts, retrying")
         } else {
           await this.telegram.sendMessage(
             formatCIConflicts(topicSession.slug, prUrl),
             topicSession.threadId,
           )
-          process.stderr.write(`dispatcher: PR ${prUrl} still has merge conflicts after ${maxRetries} attempts, aborting\n`)
+          log.warn({ prUrl, maxRetries }, "PR still has merge conflicts after max attempts, aborting")
           topicSession.mode = "task"
           return
         }
@@ -1449,7 +1449,7 @@ export class Dispatcher {
 
     if (mergeState !== "MERGEABLE") {
       // Couldn't determine mergeability — proceed cautiously
-      process.stderr.write(`dispatcher: PR ${prUrl} mergeability unknown, proceeding with CI watch\n`)
+      log.warn({ prUrl }, "PR mergeability unknown, proceeding with CI watch")
     }
 
     const result = await waitForCI(prUrl, topicSession.cwd, this.config.ci)
@@ -1459,7 +1459,7 @@ export class Dispatcher {
         formatCIPassed(topicSession.slug, prUrl),
         topicSession.threadId,
       )
-      process.stderr.write(`dispatcher: CI passed for PR ${prUrl}\n`)
+      log.info({ prUrl }, "CI passed")
       return
     }
 
@@ -1468,7 +1468,7 @@ export class Dispatcher {
         formatCINoChecks(topicSession.slug, prUrl),
         topicSession.threadId,
       )
-      process.stderr.write(`dispatcher: no CI checks found for PR ${prUrl}, skipping babysit\n`)
+      log.info({ prUrl }, "no CI checks found, skipping babysit")
       return
     }
 
@@ -1505,7 +1505,7 @@ export class Dispatcher {
         topicSession.threadId,
       )
 
-      process.stderr.write(`dispatcher: spawning CI fix session (attempt ${attempt}/${maxRetries}) for PR ${prUrl}\n`)
+      log.info({ prUrl, attempt, maxRetries }, "spawning CI fix session")
 
       topicSession.mode = "ci-fix"
       topicSession.conversation.push({ role: "user", text: fixPrompt })
@@ -1514,7 +1514,7 @@ export class Dispatcher {
         this.spawnCIFixAgent(topicSession, fixPrompt, () => resolve())
       })
 
-      process.stderr.write(`dispatcher: CI fix session completed (attempt ${attempt}/${maxRetries})\n`)
+      log.info({ prUrl, attempt, maxRetries }, "CI fix session completed")
 
       // Re-run local quality gates after fix attempt
       let localFixed = true
@@ -1523,12 +1523,12 @@ export class Dispatcher {
           localReport = runQualityGates(topicSession.cwd)
           localFixed = localReport.allPassed
           if (!localFixed) {
-            process.stderr.write(`dispatcher: local quality gates still failing after fix attempt ${attempt}\n`)
+            log.warn({ prUrl, attempt }, "local quality gates still failing after fix attempt")
           } else {
             localReport = undefined
           }
         } catch (err) {
-          process.stderr.write(`dispatcher: quality gates re-check error: ${err}\n`)
+          log.error({ err, prUrl }, "quality gates re-check error")
         }
       }
 
@@ -1539,7 +1539,7 @@ export class Dispatcher {
           formatCIConflicts(topicSession.slug, prUrl),
           topicSession.threadId,
         )
-        process.stderr.write(`dispatcher: PR ${prUrl} has merge conflicts after fix attempt ${attempt}, aborting\n`)
+        log.warn({ prUrl, attempt }, "PR has merge conflicts after fix attempt, aborting")
         topicSession.mode = "task"
         return
       }
@@ -1551,14 +1551,14 @@ export class Dispatcher {
           formatCIPassed(topicSession.slug, prUrl),
           topicSession.threadId,
         )
-        process.stderr.write(`dispatcher: CI passed after fix attempt ${attempt}\n`)
+        log.info({ prUrl, attempt }, "CI passed after fix attempt")
         topicSession.mode = "task"
         return
       }
 
       const newFailed = recheck.checks.filter((c) => c.bucket === "fail")
       if (newFailed.length > failedChecks.length) {
-        process.stderr.write(`dispatcher: CI failures grew from ${failedChecks.length} to ${newFailed.length}, aborting\n`)
+        log.warn({ prUrl, from: failedChecks.length, to: newFailed.length }, "CI failures grew, aborting")
         break
       }
     }
@@ -1576,7 +1576,7 @@ export class Dispatcher {
     onComplete: () => void,
   ): Promise<void> {
     if (this.sessions.size >= this.config.workspace.maxConcurrentSessions) {
-      process.stderr.write(`dispatcher: no session slots for CI fix, skipping\n`)
+      log.warn("no session slots for CI fix, skipping")
       onComplete()
       return
     }
@@ -1605,7 +1605,7 @@ export class Dispatcher {
       meta,
       (event) => {
         this.observer.onEvent(meta, event).catch((err) => {
-          process.stderr.write(`observer: CI fix onEvent error: ${err}\n`)
+          log.error({ err }, "CI fix onEvent error")
         })
       },
       (m, state) => {
@@ -1901,7 +1901,7 @@ export class Dispatcher {
     try {
       topic = await this.telegram.createForumTopic(topicName)
     } catch (err) {
-      process.stderr.write(`dispatcher: failed to create child topic for split: ${err}\n`)
+      log.error({ err }, "failed to create child topic for split")
       captureException(err, { operation: "createForumTopic", parentSlug: parent.slug })
       return null
     }
@@ -1958,7 +1958,8 @@ export class Dispatcher {
     const GRACE_PERIOD_MS = 2000
     await new Promise((resolve) => setTimeout(resolve, GRACE_PERIOD_MS))
 
-    const result = await extractStackItems(topicSession.conversation, directive)
+    const profile = topicSession.profileId ? this.profileStore.get(topicSession.profileId) : undefined
+    const result = await extractStackItems(topicSession.conversation, directive, profile)
 
     if (result.error === "system") {
       await this.telegram.sendMessage(
@@ -2005,7 +2006,8 @@ export class Dispatcher {
     const GRACE_PERIOD_MS = 2000
     await new Promise((resolve) => setTimeout(resolve, GRACE_PERIOD_MS))
 
-    const result = await extractDagItems(topicSession.conversation, directive)
+    const profile = topicSession.profileId ? this.profileStore.get(topicSession.profileId) : undefined
+    const result = await extractDagItems(topicSession.conversation, directive, profile)
 
     if (result.error === "system") {
       await this.telegram.sendMessage(
@@ -2100,7 +2102,7 @@ export class Dispatcher {
       const globalSlots = this.config.workspace.maxConcurrentSessions - this.sessions.size
       const available = Math.min(dagSlots, globalSlots)
       if (available <= 0) {
-        process.stderr.write(`dispatcher: DAG ${graph.id} — no session slots for node ${node.id}, will retry when a slot opens\n`)
+        log.warn({ dagId: graph.id, nodeId: node.id }, "no session slots for DAG node, will retry when a slot opens")
         break
       }
 
@@ -2150,7 +2152,7 @@ export class Dispatcher {
     try {
       topic = await this.telegram.createForumTopic(topicName)
     } catch (err) {
-      process.stderr.write(`dispatcher: failed to create DAG child topic: ${err}\n`)
+      log.error({ err }, "failed to create DAG child topic")
       captureException(err, { operation: "createForumTopic", parentSlug: parent.slug, dagNode: node.id })
       return null
     }
@@ -2413,7 +2415,7 @@ export class Dispatcher {
           { input: newBody, cwd, stdio: ["pipe", "pipe", "pipe"], timeout: 30_000, env: { ...process.env } },
         )
       } catch (err) {
-        process.stderr.write(`dispatcher: failed to update DAG section in PR ${node.prUrl}: ${err}\n`)
+        log.error({ err, prUrl: node.prUrl }, "failed to update DAG section in PR")
       }
     }
   }
@@ -2655,7 +2657,7 @@ export class Dispatcher {
     this.broadcastSessionDeleted(child.slug)
     await this.telegram.deleteForumTopic(childId).catch(() => {})
     await this.removeWorkspace(child).catch(() => {})
-    process.stderr.write(`dispatcher: closed child topic ${child.slug} (thread ${childId})\n`)
+    log.info({ slug: child.slug, threadId: childId }, "closed child topic")
   }
 
   private async handleCloseCommandInternal(topicSession: TopicSession): Promise<void> {
@@ -2676,7 +2678,7 @@ export class Dispatcher {
     await this.persistTopicSessions()
     this.updatePinnedSummary()
     await this.telegram.deleteForumTopic(threadId)
-    process.stderr.write(`dispatcher: closed and deleted topic ${topicSession.slug} (thread ${threadId})\n`)
+    log.info({ slug: topicSession.slug, threadId }, "closed and deleted topic")
 
     // Kill process and clean up workspace in background (non-blocking)
     if (topicSession.activeSessionId) {
@@ -2687,14 +2689,14 @@ export class Dispatcher {
           () => this.removeWorkspace(topicSession),
           () => this.removeWorkspace(topicSession),
         ).catch((err) => {
-          process.stderr.write(`dispatcher: background cleanup failed for ${topicSession.slug}: ${err}\n`)
+          log.error({ err, slug: topicSession.slug }, "background cleanup failed")
         })
         return
       }
     }
 
     this.removeWorkspace(topicSession).catch((err) => {
-      process.stderr.write(`dispatcher: background cleanup failed for ${topicSession.slug}: ${err}\n`)
+      log.error({ err, slug: topicSession.slug }, "background cleanup failed")
     })
   }
 
@@ -2725,7 +2727,7 @@ export class Dispatcher {
       `⏹️ Session stopped. Send <b>/reply</b> to continue.`,
       threadId,
     )
-    process.stderr.write(`dispatcher: stopped session ${topicSession.slug} (thread ${threadId})\n`)
+    log.info({ slug: topicSession.slug, threadId }, "stopped session")
   }
 
   private async downloadPhotos(photos: TelegramPhotoSize[] | undefined, _cwd: string): Promise<string[]> {
@@ -2759,30 +2761,32 @@ export class Dispatcher {
         const gitOpts = { stdio, timeout: 120_000, env: gitEnv }
 
         if (fs.existsSync(bareDir)) {
-          process.stderr.write(`dispatcher: fetching ${repoUrl} in ${bareDir}\n`)
+          log.debug({ repoUrl, bareDir }, "fetching repo")
           execSync(`git fetch --prune origin`, { ...gitOpts, cwd: bareDir })
           updateLocalHead(bareDir, gitOpts)
         } else {
-          process.stderr.write(`dispatcher: cloning bare ${repoUrl} into ${bareDir}\n`)
+          log.debug({ repoUrl, bareDir }, "cloning bare repo")
           execSync(`git clone --bare ${JSON.stringify(repoUrl)} ${JSON.stringify(bareDir)}`, gitOpts)
         }
 
         const branch = `minion/${slug}`
         const startRef = startBranch ?? resolveDefaultBranch(bareDir, gitOpts)
-        process.stderr.write(`dispatcher: adding worktree ${workDir} (branch ${branch}) from ${startRef}\n`)
+        log.debug({ workDir, branch, startRef }, "adding worktree")
         execSync(
           `git worktree add ${JSON.stringify(workDir)} -b ${JSON.stringify(branch)} ${startRef}`,
           { ...gitOpts, cwd: bareDir },
         )
 
         execSync(`git remote set-url origin ${JSON.stringify(repoUrl)}`, { ...gitOpts, cwd: workDir })
+
+        bootstrapDependencies(workDir, reposDir, repoName)
       } else {
         fs.mkdirSync(workDir, { recursive: true })
       }
 
       return workDir
     } catch (err) {
-      process.stderr.write(`dispatcher: prepareWorkspace failed: ${err}\n`)
+      log.error({ err }, "prepareWorkspace failed")
       captureException(err, { operation: "prepareWorkspace" })
       return null
     }
@@ -2820,14 +2824,14 @@ export class Dispatcher {
         ).toString().trim()
 
         // If merge-tree reports conflicts, the exit code is non-zero (caught by try/catch)
-        process.stderr.write(`dispatcher: merge-tree check OK for ${baseBranch} + ${upstreamBranches[i]}: ${result.slice(0, 40)}\n`)
+        log.debug({ baseBranch, branch: upstreamBranches[i], result: result.slice(0, 40) }, "merge-tree check OK")
       }
 
       // No conflicts detected — create the fan-in worktree from the first branch,
       // then merge the rest in sequence
       return upstreamBranches[0] // The actual merge happens in prepareWorkspace + post-checkout merge
     } catch (err) {
-      process.stderr.write(`dispatcher: fan-in merge conflict detected for ${slug}: ${err}\n`)
+      log.warn({ err, slug }, "fan-in merge conflict detected")
       return null
     }
   }
@@ -2846,9 +2850,9 @@ export class Dispatcher {
           `git merge --no-edit ${JSON.stringify(branch)}`,
           { ...gitOpts, cwd: workDir },
         )
-        process.stderr.write(`dispatcher: merged ${branch} into worktree ${workDir}\n`)
+        log.debug({ branch, workDir }, "merged branch into worktree")
       } catch (err) {
-        process.stderr.write(`dispatcher: merge of ${branch} into ${workDir} failed: ${err}\n`)
+        log.error({ err, branch, workDir }, "merge of branch into worktree failed")
         // Abort the merge
         try {
           execSync(`git merge --abort`, { ...gitOpts, cwd: workDir })
@@ -2876,15 +2880,15 @@ export class Dispatcher {
             "git", ["worktree", "remove", "--force", topicSession.cwd],
             { cwd: bareDir, timeout: 30_000 },
           )
-          process.stderr.write(`dispatcher: removed worktree ${topicSession.cwd}\n`)
+          log.debug({ cwd: topicSession.cwd }, "removed worktree")
           return
         }
       }
 
       fs.rmSync(topicSession.cwd, { recursive: true, force: true })
-      process.stderr.write(`dispatcher: removed workspace ${topicSession.cwd}\n`)
+      log.debug({ cwd: topicSession.cwd }, "removed workspace")
     } catch (err) {
-      process.stderr.write(`dispatcher: failed to remove workspace ${topicSession.cwd}: ${err}\n`)
+      log.error({ err, cwd: topicSession.cwd }, "failed to remove workspace")
       try {
         fs.rmSync(topicSession.cwd, { recursive: true, force: true })
       } catch { /* best effort */ }
@@ -3064,19 +3068,103 @@ export function cleanBuildArtifacts(cwd: string): void {
     try {
       if (fs.existsSync(target)) {
         fs.rmSync(target, { recursive: true, force: true })
-        process.stderr.write(`dispatcher: cleaned ${name} from ${cwd}\n`)
+        log.debug({ name, cwd }, "cleaned artifact")
       }
     } catch (err) {
-      process.stderr.write(`dispatcher: failed to clean ${name} from ${cwd}: ${err}\n`)
+      log.error({ err, name, cwd }, "failed to clean artifact")
     }
   }
+  // Clean nested node_modules (depth 1) — e.g. ui/node_modules
+  try {
+    const entries = fs.readdirSync(cwd, { withFileTypes: true })
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name === "node_modules" || entry.name.startsWith(".")) continue
+      const nested = path.join(cwd, entry.name, "node_modules")
+      try {
+        if (fs.existsSync(nested)) {
+          fs.rmSync(nested, { recursive: true, force: true })
+          log.debug({ name: `${entry.name}/node_modules`, cwd }, "cleaned nested artifact")
+        }
+      } catch { /* best effort */ }
+    }
+  } catch { /* best effort */ }
   const homeCacheDir = path.join(cwd, ".home", ".npm")
   try {
     if (fs.existsSync(homeCacheDir)) {
       fs.rmSync(homeCacheDir, { recursive: true, force: true })
-      process.stderr.write(`dispatcher: cleaned .home/.npm from ${cwd}\n`)
+      log.debug({ cwd }, "cleaned .home/.npm")
     }
   } catch { /* best effort */ }
+}
+
+function bootstrapOnePackage(
+  pkgDir: string, reposDir: string, cacheKey: string, label: string,
+): void {
+  const lockFile = path.join(pkgDir, "package-lock.json")
+  const cacheDir = path.join(reposDir, `${cacheKey}-node_modules`)
+  const cacheLockHash = path.join(reposDir, `${cacheKey}-lock.hash`)
+
+  const currentHash = fs.existsSync(lockFile)
+    ? crypto.createHash("sha256").update(fs.readFileSync(lockFile)).digest("hex")
+    : null
+
+  const cachedHash = fs.existsSync(cacheLockHash)
+    ? fs.readFileSync(cacheLockHash, "utf8").trim()
+    : null
+
+  const stdio: import("node:child_process").StdioOptions = ["ignore", "pipe", "pipe"]
+
+  if (currentHash && cachedHash === currentHash && fs.existsSync(cacheDir)) {
+    try {
+      execSync(`cp -al ${JSON.stringify(cacheDir)} ${JSON.stringify(path.join(pkgDir, "node_modules"))}`, {
+        stdio, timeout: 30_000,
+      })
+      log.debug({ label }, "hardlinked node_modules")
+      return
+    } catch (err) {
+      log.warn({ err, label }, "hardlink copy failed, falling back to npm ci")
+    }
+  }
+
+  try {
+    const installCmd = fs.existsSync(lockFile) ? "npm ci" : "npm install"
+    log.debug({ installCmd, label }, "running package install")
+    execSync(installCmd, { cwd: pkgDir, stdio, timeout: 120_000 })
+
+    if (fs.existsSync(cacheDir)) {
+      fs.rmSync(cacheDir, { recursive: true, force: true })
+    }
+    execSync(`cp -al ${JSON.stringify(path.join(pkgDir, "node_modules"))} ${JSON.stringify(cacheDir)}`, {
+      stdio, timeout: 60_000,
+    })
+    if (currentHash) {
+      fs.writeFileSync(cacheLockHash, currentHash)
+    }
+    log.debug({ label }, "cached node_modules")
+  } catch (err) {
+    log.warn({ err, label }, "dependency bootstrap failed (non-fatal)")
+  }
+}
+
+export function bootstrapDependencies(workDir: string, reposDir: string, repoName: string): void {
+  // Bootstrap root package
+  if (fs.existsSync(path.join(workDir, "package.json"))) {
+    bootstrapOnePackage(workDir, reposDir, repoName, workDir)
+  }
+
+  // Bootstrap nested packages (depth 1) — e.g. ui/package.json
+  try {
+    const entries = fs.readdirSync(workDir, { withFileTypes: true })
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name === "node_modules" || entry.name.startsWith(".")) continue
+      const nested = path.join(workDir, entry.name)
+      if (fs.existsSync(path.join(nested, "package.json"))) {
+        bootstrapOnePackage(nested, reposDir, `${repoName}-${entry.name}`, `${workDir}/${entry.name}`)
+      }
+    }
+  } catch {
+    // non-fatal — nested scan failure shouldn't block session
+  }
 }
 
 export function dirSizeBytes(dirPath: string): number {
