@@ -211,7 +211,6 @@ export function formatSessionReadout(
 
   let body = lines.join("\n")
   if (body.length > MAX_READOUT) {
-    const omitted = conversation.length
     body = body.slice(-MAX_READOUT)
     const firstNewline = body.indexOf("\n")
     if (firstNewline > 0) body = body.slice(firstNewline + 1)
