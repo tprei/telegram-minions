@@ -416,7 +416,7 @@ describe("API Server", () => {
       const listener = vi.fn()
       broadcaster.on("event", listener)
 
-      broadcaster.broadcast({ type: "session_created", session: { id: "test", slug: "test", status: "pending", command: "", createdAt: "", updatedAt: "", childIds: [], needsAttention: false, attentionReasons: [] } })
+      broadcaster.broadcast({ type: "session_created", session: { id: "test", slug: "test", status: "pending", command: "", createdAt: "", updatedAt: "", childIds: [], needsAttention: false, attentionReasons: [], quickActions: [] } })
 
       expect(listener).toHaveBeenCalledTimes(1)
     })

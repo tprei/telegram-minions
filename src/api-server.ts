@@ -12,6 +12,17 @@ export type AttentionReason =
   | "ci_fix"
   | "idle_long"
 
+export type QuickActionType =
+  | "make_pr"
+  | "retry"
+  | "resume"
+
+export interface QuickAction {
+  type: QuickActionType
+  label: string
+  message: string
+}
+
 export interface ApiSession {
   id: string
   slug: string
@@ -28,6 +39,7 @@ export interface ApiSession {
   childIds: string[]
   needsAttention: boolean
   attentionReasons: AttentionReason[]
+  quickActions: QuickAction[]
 }
 
 export interface ApiDagNode {
@@ -140,6 +152,43 @@ export function computeAttentionReasons(
   return reasons
 }
 
+export function computeQuickActions(
+  session: TopicSession,
+  status: ApiSession["status"],
+): QuickAction[] {
+  const actions: QuickAction[] = []
+
+  if (
+    status === "completed" &&
+    session.branch &&
+    !session.prUrl
+  ) {
+    actions.push({
+      type: "make_pr",
+      label: "Make a PR",
+      message: "Please open a pull request for your changes.",
+    })
+  }
+
+  if (status === "failed") {
+    actions.push({
+      type: "retry",
+      label: "Retry",
+      message: "Please retry the task from where you left off.",
+    })
+  }
+
+  if (session.interruptedAt && !session.activeSessionId) {
+    actions.push({
+      type: "resume",
+      label: "Resume",
+      message: "Please resume the interrupted task.",
+    })
+  }
+
+  return actions
+}
+
 export function topicSessionToApi(
   session: TopicSession,
   chatId: string,
@@ -155,6 +204,7 @@ export function topicSessionToApi(
         : "pending"
 
   const attentionReasons = computeAttentionReasons(session, status)
+  const quickActions = computeQuickActions(session, status)
 
   return {
     id: session.slug,
@@ -172,6 +222,7 @@ export function topicSessionToApi(
     childIds: session.childThreadIds?.map(String) ?? [],
     needsAttention: attentionReasons.length > 0,
     attentionReasons,
+    quickActions,
   }
 }
 

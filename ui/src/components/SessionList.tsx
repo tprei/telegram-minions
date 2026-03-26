@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'preact/hooks'
-import type { AttentionReason, MinionSession } from '../types'
+import type { AttentionReason, MinionSession, QuickAction } from '../types'
 import { ConfirmDialog, ReplyDialog } from './ConfirmDialog'
 import { PrLink } from './PrLink'
 import { useTelegram, usePopup as useTelegramPopup } from '../hooks'
@@ -97,6 +97,56 @@ export function AttentionBadge({ reason, darkMode }: AttentionBadgeProps) {
       <span>{config.emoji}</span>
       <span>{config.label}</span>
     </span>
+  )
+}
+
+const QUICK_ACTION_STYLE: Record<QuickAction['type'], { emoji: string; className: string; darkClassName: string }> = {
+  make_pr: {
+    emoji: '🔀',
+    className: 'bg-green-100 text-green-700 hover:bg-green-200',
+    darkClassName: 'bg-green-900/50 text-green-300 hover:bg-green-800/50',
+  },
+  retry: {
+    emoji: '🔄',
+    className: 'bg-blue-100 text-blue-700 hover:bg-blue-200',
+    darkClassName: 'bg-blue-900/50 text-blue-300 hover:bg-blue-800/50',
+  },
+  resume: {
+    emoji: '▶️',
+    className: 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200',
+    darkClassName: 'bg-indigo-900/50 text-indigo-300 hover:bg-indigo-800/50',
+  },
+}
+
+interface QuickActionButtonProps {
+  action: QuickAction
+  darkMode: boolean
+  disabled: boolean
+  onExecute: (message: string) => void
+}
+
+function QuickActionButton({ action, darkMode, disabled, onExecute }: QuickActionButtonProps) {
+  const style = QUICK_ACTION_STYLE[action.type]
+  const className = darkMode ? style.darkClassName : style.className
+
+  const handleClick = useCallback(
+    (e: Event) => {
+      e.stopPropagation()
+      onExecute(action.message)
+    },
+    [action.message, onExecute],
+  )
+
+  return (
+    <button
+      onClick={handleClick}
+      disabled={disabled}
+      class={`inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded transition-colors disabled:opacity-50 ${className}`}
+      title={action.message}
+    >
+      <span>{style.emoji}</span>
+      <span>{action.label}</span>
+    </button>
   )
 }
 
@@ -276,6 +326,22 @@ export function SessionCard({
         {session.childIds.length > 0 && (
           <div class={`mt-2 text-xs ${hintColor}`}>
             {session.childIds.length} child{session.childIds.length > 1 ? 'ren' : ''}
+          </div>
+        )}
+
+        {session.quickActions && session.quickActions.length > 0 && onSendReply && (
+          <div class={`flex flex-wrap gap-2 mt-3 pt-3 border-t ${tg.darkMode ? 'border-gray-700' : 'border-gray-200'}`}>
+            {session.quickActions.map((action) => (
+              <QuickActionButton
+                key={action.type}
+                action={action}
+                darkMode={tg.darkMode}
+                disabled={isActionLoading}
+                onExecute={(message) => {
+                  onSendReply(session.id, message)
+                }}
+              />
+            ))}
           </div>
         )}
 
