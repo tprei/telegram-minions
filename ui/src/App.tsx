@@ -17,13 +17,13 @@ import {
 import { SessionList } from './components/SessionList'
 import { DagList } from './components/DagView'
 import { useTelegram, useMainButton } from './hooks'
+import { openTelegramLink } from './telegram'
 import type { MinionSession, DagNode } from './types'
 
 function handleThreadClick(session: MinionSession) {
-  const tg = useTelegram()
   if (session.threadId && session.chatId) {
     const threadUrl = `https://t.me/c/${Math.abs(session.chatId)}/${session.threadId}`
-    tg.navigation.openTgLink(threadUrl)
+    openTelegramLink(threadUrl)
   }
 }
 

@@ -287,6 +287,64 @@ describe("API Server", () => {
     })
   })
 
+  describe("chatId in API responses", () => {
+    it("should include parsed chatId in session response", async () => {
+      mockTopicSessions.set(123, {
+        threadId: 123,
+        slug: "test-chatid",
+        conversation: [{ role: "user", text: "/task test" }],
+        lastActivityAt: Date.now(),
+        mode: "task",
+      })
+
+      server = createApiServer(mockDispatcher, {
+        port: 0,
+        uiDistPath: "/nonexistent",
+        chatId: "-1001234567890",
+        broadcaster,
+      })
+
+      const address = await new Promise<{ port: number }>((resolve) => {
+        server.listen(0, () => {
+          resolve(server.address() as { port: number })
+        })
+      })
+
+      const response = await fetch(`http://localhost:${address.port}/api/sessions`)
+      const data = await response.json()
+
+      expect(data.data[0].chatId).toBe(-1001234567890)
+    })
+
+    it("should include chatId in single session response", async () => {
+      mockTopicSessions.set(456, {
+        threadId: 456,
+        slug: "single-chatid",
+        conversation: [{ role: "user", text: "/task hello" }],
+        lastActivityAt: Date.now(),
+        mode: "task",
+      })
+
+      server = createApiServer(mockDispatcher, {
+        port: 0,
+        uiDistPath: "/nonexistent",
+        chatId: "-1009876543210",
+        broadcaster,
+      })
+
+      const address = await new Promise<{ port: number }>((resolve) => {
+        server.listen(0, () => {
+          resolve(server.address() as { port: number })
+        })
+      })
+
+      const response = await fetch(`http://localhost:${address.port}/api/sessions/single-chatid`)
+      const data = await response.json()
+
+      expect(data.data.chatId).toBe(-1009876543210)
+    })
+  })
+
   describe("StateBroadcaster", () => {
     it("should emit events to listeners", () => {
       const listener = vi.fn()

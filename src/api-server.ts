@@ -96,8 +96,9 @@ function getMimeType(filePath: string): string {
   return MIME_TYPES[ext] ?? "application/octet-stream"
 }
 
-function topicSessionToApi(
+export function topicSessionToApi(
   session: TopicSession,
+  chatId: string,
   activeSessionId?: string,
   sessionState?: SessionState,
 ): ApiSession {
@@ -115,21 +116,22 @@ function topicSessionToApi(
     status,
     command: session.conversation[0]?.text ?? "",
     repo: session.repoUrl,
-    branch: undefined, // Branch info would need to be tracked separately
-    prUrl: undefined, // PR URL would need to be tracked separately
+    branch: undefined,
+    prUrl: undefined,
     threadId: session.threadId,
-    chatId: undefined, // Chat ID is the main forum ID
-    createdAt: new Date().toISOString(), // TopicSession doesn't track startedAt
+    chatId: parseInt(chatId, 10),
+    createdAt: new Date().toISOString(),
     updatedAt: new Date(session.lastActivityAt).toISOString(),
     parentId: session.parentThreadId?.toString(),
     childIds: session.childThreadIds?.map(String) ?? [],
   }
 }
 
-function dagToApi(
+export function dagToApi(
   graph: DagGraph,
   topicSessions: Map<number, TopicSession>,
   sessions: Map<number, { meta: { sessionId: string; threadId: number } }>,
+  chatId: string,
 ): ApiDagGraph {
   const nodes: Record<string, ApiDagNode> = {}
 
@@ -150,7 +152,7 @@ function dagToApi(
 
     let apiSession: ApiSession | undefined
     if (topicSession) {
-      apiSession = topicSessionToApi(topicSession, activeSession?.meta.sessionId)
+      apiSession = topicSessionToApi(topicSession, chatId, activeSession?.meta.sessionId)
     }
 
     nodes[node.id] = {
@@ -260,7 +262,7 @@ async function handleApiRoute(
       for (const [threadId, session] of topicSessions) {
         const activeSession = sessions.get(threadId)
         const state = dispatcher.getSessionState(threadId)
-        apiSessions.push(topicSessionToApi(session, activeSession?.meta.sessionId, state))
+        apiSessions.push(topicSessionToApi(session, chatId, activeSession?.meta.sessionId, state))
       }
 
       res.writeHead(200, { "Content-Type": "application/json" })
@@ -280,7 +282,7 @@ async function handleApiRoute(
           const activeSession = sessions.get(threadId)
           const state = dispatcher.getSessionState(threadId)
           res.writeHead(200, { "Content-Type": "application/json" })
-          res.end(JSON.stringify({ data: topicSessionToApi(session, activeSession?.meta.sessionId, state) }))
+          res.end(JSON.stringify({ data: topicSessionToApi(session, chatId, activeSession?.meta.sessionId, state) }))
           return
         }
       }
@@ -298,7 +300,7 @@ async function handleApiRoute(
       const apiDags: ApiDagGraph[] = []
 
       for (const graph of dags.values()) {
-        apiDags.push(dagToApi(graph, topicSessions, sessions))
+        apiDags.push(dagToApi(graph, topicSessions, sessions, chatId))
       }
 
       res.writeHead(200, { "Content-Type": "application/json" })
@@ -316,7 +318,7 @@ async function handleApiRoute(
         const topicSessions = dispatcher.getTopicSessions()
         const sessions = dispatcher.getSessions()
         res.writeHead(200, { "Content-Type": "application/json" })
-        res.end(JSON.stringify({ data: dagToApi(dag, topicSessions, sessions) }))
+        res.end(JSON.stringify({ data: dagToApi(dag, topicSessions, sessions, chatId) }))
         return
       }
 

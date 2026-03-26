@@ -74,6 +74,7 @@ import { writeSessionLog } from "./session-log.js"
 import { extractPRUrl, waitForCI, getFailedCheckLogs, buildCIFixPrompt, buildQualityGateFixPrompt, buildMergeConflictPrompt, checkPRMergeability } from "./ci-babysit.js"
 import { buildConversationDigest } from "./conversation-digest.js"
 import { DEFAULT_CI_FIX_PROMPT } from "./prompts.js"
+import { StateBroadcaster, topicSessionToApi, dagToApi } from "./api-server.js"
 
 const POLL_TIMEOUT = 30
 const TASK_PREFIX = "/task"
@@ -120,6 +121,7 @@ export class Dispatcher {
   private readonly profileStore: ProfileStore
   private readonly dags = new Map<string, DagGraph>()
   private readonly pendingBabysitPRs = new Map<number, Array<{ childSession: TopicSession; prUrl: string; qualityReport?: QualityReport }>>()
+  private readonly broadcaster?: StateBroadcaster
   private offset = 0
   private running = false
   private cleanupTimer: ReturnType<typeof setInterval> | null = null
@@ -131,11 +133,35 @@ export class Dispatcher {
     private readonly telegram: TelegramClient,
     private readonly observer: Observer,
     private readonly config: MinionConfig,
+    broadcaster?: StateBroadcaster,
   ) {
+    this.broadcaster = broadcaster
     this.store = new SessionStore(this.config.workspace.root)
     this.profileStore = new ProfileStore(this.config.workspace.root)
     this.stats = new StatsTracker(this.config.workspace.root)
     this.loadPinnedMessageId()
+  }
+
+  private broadcastSession(session: TopicSession, eventType: "session_created" | "session_updated", sessionState?: "completed" | "errored"): void {
+    if (!this.broadcaster) return
+    const apiSession = topicSessionToApi(session, this.config.telegram.chatId, session.activeSessionId, sessionState)
+    this.broadcaster.broadcast({ type: eventType, session: apiSession })
+  }
+
+  private broadcastSessionDeleted(slug: string): void {
+    if (!this.broadcaster) return
+    this.broadcaster.broadcast({ type: "session_deleted", sessionId: slug })
+  }
+
+  private broadcastDag(graph: DagGraph, eventType: "dag_created" | "dag_updated"): void {
+    if (!this.broadcaster) return
+    const apiDag = dagToApi(graph, this.topicSessions, this.sessions, this.config.telegram.chatId)
+    this.broadcaster.broadcast({ type: eventType, dag: apiDag })
+  }
+
+  private broadcastDagDeleted(dagId: string): void {
+    if (!this.broadcaster) return
+    this.broadcaster.broadcast({ type: "dag_deleted", dagId })
   }
 
   async loadPersistedSessions(): Promise<void> {
@@ -1092,6 +1118,7 @@ export class Dispatcher {
     }
 
     this.topicSessions.set(threadId, topicSession)
+    this.broadcastSession(topicSession, "session_created")
     this.updatePinnedSummary()
 
     await this.spawnTopicAgent(topicSession, fullTask)
@@ -1122,6 +1149,7 @@ export class Dispatcher {
 
     const sessionId = crypto.randomUUID()
     topicSession.activeSessionId = sessionId
+    this.broadcastSession(topicSession, "session_updated")
 
     const meta: SessionMeta = {
       sessionId,
@@ -1172,6 +1200,7 @@ export class Dispatcher {
         this.sessions.delete(topicSession.threadId)
         topicSession.activeSessionId = undefined
         topicSession.lastActivityAt = Date.now()
+        this.broadcastSession(topicSession, "session_updated", state)
         this.updatePinnedSummary()
 
         this.stats.record({
@@ -1895,6 +1924,7 @@ export class Dispatcher {
     }
 
     this.topicSessions.set(threadId, childSession)
+    this.broadcastSession(childSession, "session_created")
 
     await this.spawnTopicAgent(childSession, task, { browserEnabled: false })
     return threadId
@@ -2023,6 +2053,7 @@ export class Dispatcher {
     topicSession.dagId = dagId
 
     this.dags.set(dagId, graph)
+    this.broadcastDag(graph, "dag_created")
 
     // Send DAG overview
     const childSummaries = graph.nodes.map((n) => ({
@@ -2189,6 +2220,7 @@ export class Dispatcher {
     }
 
     this.topicSessions.set(threadId, childSession)
+    this.broadcastSession(childSession, "session_created")
 
     await this.telegram.sendMessage(
       formatDagNodeStarting(node.title, node.id, slug),
@@ -2266,6 +2298,8 @@ export class Dispatcher {
         await this.scheduleDagNodes(parent, graph, isStack)
       }
     }
+
+    this.broadcastDag(graph, "dag_updated")
 
     // Update DAG section in all PR descriptions
     await this.updateDagPRDescriptions(graph, childSession.cwd)
@@ -2499,6 +2533,7 @@ export class Dispatcher {
       if (childActive) await childActive.handle.kill().catch(() => {})
     }
     this.topicSessions.delete(childId)
+    this.broadcastSessionDeleted(child.slug)
     await this.telegram.deleteForumTopic(childId).catch(() => {})
     await this.removeWorkspace(child).catch(() => {})
     process.stderr.write(`dispatcher: closed child topic ${child.slug} (thread ${childId})\n`)
@@ -2512,11 +2547,13 @@ export class Dispatcher {
 
     // Clean up DAG graph if this parent had one (keeps PR URLs alive until /close)
     if (topicSession.dagId) {
+      this.broadcastDagDeleted(topicSession.dagId)
       this.dags.delete(topicSession.dagId)
     }
 
     // Remove from tracking and delete the topic first for instant user feedback
     this.topicSessions.delete(threadId)
+    this.broadcastSessionDeleted(topicSession.slug)
     await this.persistTopicSessions()
     this.updatePinnedSummary()
     await this.telegram.deleteForumTopic(threadId)
@@ -2795,6 +2832,7 @@ export class Dispatcher {
     await this.telegram.deleteForumTopic(threadId)
     await this.removeWorkspace(topicSession)
     this.topicSessions.delete(threadId)
+    this.broadcastSessionDeleted(topicSession.slug)
     await this.persistTopicSessions()
     this.updatePinnedSummary()
   }
