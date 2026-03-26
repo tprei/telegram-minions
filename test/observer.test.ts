@@ -91,7 +91,8 @@ describe("Observer", () => {
 
       expect(telegram.sendMessage).not.toHaveBeenCalled()
 
-      await vi.advanceTimersByTimeAsync(1500)
+      // Advance past debounce + interval check to ensure flush triggers
+      await vi.advanceTimersByTimeAsync(1700)
 
       expect(telegram.sendMessage).toHaveBeenCalledOnce()
       const msg = telegram.sendMessage.mock.calls[0][0]
@@ -115,7 +116,7 @@ describe("Observer", () => {
         },
       })
 
-      await vi.advanceTimersByTimeAsync(1500)
+      await vi.advanceTimersByTimeAsync(1700)
 
       expect(telegram.sendMessage).not.toHaveBeenCalled()
     })
@@ -140,7 +141,7 @@ describe("Observer", () => {
         },
       })
 
-      await vi.advanceTimersByTimeAsync(1500)
+      await vi.advanceTimersByTimeAsync(1700)
 
       expect(captured).toHaveLength(1)
       expect(captured[0]).toContain("captured text here")
@@ -165,8 +166,83 @@ describe("Observer", () => {
         })
       }
 
-      await vi.advanceTimersByTimeAsync(1500)
+      await vi.advanceTimersByTimeAsync(1700)
 
+      expect(telegram.sendMessage).toHaveBeenCalledOnce()
+    })
+
+    it("uses single interval instead of per-chunk timers", async () => {
+      const telegram = makeTelegram()
+      const observer = new Observer(telegram as any, 3000)
+      const meta = makeMeta()
+
+      await observer.onSessionStart(meta, "task")
+      telegram.sendMessage.mockClear()
+
+      // Send multiple chunks rapidly - should use single interval, not create N timers
+      const setIntervalSpy = vi.spyOn(global, "setInterval")
+      const clearTimeoutSpy = vi.spyOn(global, "clearTimeout")
+
+      for (let i = 0; i < 10; i++) {
+        await observer.onEvent(meta, {
+          type: "message",
+          message: {
+            role: "assistant",
+            created: 0,
+            content: [{ type: "text", text: `chunk ${i} `.repeat(10) }],
+          },
+        })
+      }
+
+      // Should have only called setInterval once (first chunk starts the interval)
+      expect(setIntervalSpy).toHaveBeenCalledOnce()
+      // Should not have called clearTimeout (old approach reset timer on each chunk)
+      expect(clearTimeoutSpy).not.toHaveBeenCalled()
+
+      setIntervalSpy.mockRestore()
+      clearTimeoutSpy.mockRestore()
+    })
+
+    it("resets debounce when new text arrives during wait period", async () => {
+      const telegram = makeTelegram()
+      const observer = new Observer(telegram as any, 3000)
+      const meta = makeMeta()
+
+      await observer.onSessionStart(meta, "task")
+      telegram.sendMessage.mockClear()
+
+      // Send first chunk
+      await observer.onEvent(meta, {
+        type: "message",
+        message: {
+          role: "assistant",
+          created: 0,
+          content: [{ type: "text", text: "A".repeat(100) }],
+        },
+      })
+
+      // Advance time but not enough to trigger flush
+      await vi.advanceTimersByTimeAsync(1000)
+
+      // Send another chunk - this should reset the debounce
+      await observer.onEvent(meta, {
+        type: "message",
+        message: {
+          role: "assistant",
+          created: 0,
+          content: [{ type: "text", text: "B".repeat(100) }],
+        },
+      })
+
+      // Should not have flushed yet
+      expect(telegram.sendMessage).not.toHaveBeenCalled()
+
+      // Advance by another 1000ms - still not enough (debounce was reset)
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(telegram.sendMessage).not.toHaveBeenCalled()
+
+      // Advance past the full debounce period from last chunk
+      await vi.advanceTimersByTimeAsync(1000)
       expect(telegram.sendMessage).toHaveBeenCalledOnce()
     })
   })
