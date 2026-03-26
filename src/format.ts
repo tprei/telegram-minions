@@ -297,6 +297,7 @@ export function formatHelp(): string {
     `<code>/dag [directive]</code> — create a dependency DAG of tasks (plan/think mode)`,
     `<code>/land</code> — merge completed stack/DAG PRs to main in order`,
     `<code>/retry [node-id]</code> — retry failed DAG nodes`,
+    `<code>/restack [node-id]</code> — rebase downstream branches after upstream changes`,
     `<code>/stop</code> — stop the running agent but keep the thread and data`,
     `<code>/close</code> — stop the session, wipe data, and delete the topic`,
   ].join("\n")
@@ -610,6 +611,31 @@ export function formatDagNodeSkipped(nodeTitle: string, reason: string): string 
 export function formatDagAllDone(succeeded: number, total: number, failed: number): string {
   const failedSuffix = failed > 0 ? `, ${failed} failed` : ""
   return `📊 <b>DAG complete</b>: ${succeeded}/${total} succeeded${failedSuffix}`
+}
+
+export function formatRestackStart(count: number): string {
+  return `🔄 <b>Restacking</b> ${count} downstream branch${count === 1 ? "" : "es"}…`
+}
+
+export function formatRestackProgress(nodeTitle: string, nodeId: string): string {
+  return `🔄 Restacked: <b>${esc(nodeTitle)}</b> (<code>${esc(nodeId)}</code>)`
+}
+
+export function formatRestackComplete(succeeded: number, total: number): string {
+  if (succeeded === total) {
+    return `✅ <b>Restack complete</b>: ${succeeded}/${total} branches rebased`
+  }
+  return `⚠️ <b>Restack complete</b>: ${succeeded}/${total} branches rebased (${total - succeeded} failed)`
+}
+
+export function formatRestackConflict(nodeTitle: string, nodeId: string, files: string[]): string {
+  const fileList = files.slice(0, 5).map((f) => `<code>${esc(f)}</code>`).join(", ")
+  const more = files.length > 5 ? ` (+${files.length - 5} more)` : ""
+  return `❌ <b>Conflict</b> restacking <b>${esc(nodeTitle)}</b> (<code>${esc(nodeId)}</code>): ${fileList}${more}`
+}
+
+export function formatRestackNoop(): string {
+  return `✅ All downstream branches are up to date — nothing to restack.`
 }
 
 export function formatLandStart(slug: string, count: number): string {

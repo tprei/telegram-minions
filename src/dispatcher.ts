@@ -55,13 +55,18 @@ import {
   formatLandProgress,
   formatLandComplete,
   formatLandError,
+  formatRestackStart,
+  formatRestackProgress,
+  formatRestackComplete,
+  formatRestackConflict,
+  formatRestackNoop,
 } from "./format.js"
 import { extractSplitItems, buildSplitChildPrompt } from "./split.js"
 import { extractStackItems, extractDagItems, buildDagChildPrompt } from "./dag-extract.js"
 import {
   buildDag, advanceDag, failNode, resetFailedNode, isDagComplete,
   readyNodes, dagProgress, getUpstreamBranches, topologicalSort,
-  renderDagForGitHub, upsertDagSection,
+  renderDagForGitHub, upsertDagSection, needsRestack,
   type DagGraph, type DagNode, type DagInput,
 } from "./dag.js"
 import { runQualityGates, type QualityReport } from "./quality-gates.js"
@@ -79,7 +84,7 @@ import {
   TASK_PREFIX, TASK_SHORT, PLAN_PREFIX, THINK_PREFIX, REVIEW_PREFIX,
   EXECUTE_CMD, STATUS_CMD, STATS_CMD, REPLY_PREFIX, REPLY_SHORT,
   CLOSE_CMD, STOP_CMD, HELP_CMD, CLEAN_CMD, USAGE_CMD, CONFIG_CMD,
-  SPLIT_CMD, STACK_CMD, DAG_CMD, LAND_CMD, RETRY_CMD,
+  SPLIT_CMD, STACK_CMD, DAG_CMD, LAND_CMD, RETRY_CMD, RESTACK_CMD,
   parseTaskArgs, parseReviewArgs, buildReviewAllTask,
   buildRepoKeyboard, buildProfileKeyboard,
   escapeHtml, extractRepoName, appendImageContext,
@@ -89,6 +94,7 @@ import {
   buildContextPrompt, buildExecutionPrompt,
   prepareWorkspace, removeWorkspace, cleanBuildArtifacts, dirSizeBytes,
   downloadPhotos, prepareFanInBranch, mergeUpstreamBranches,
+  restackBranch, captureMergeBase,
 } from "./session-manager.js"
 
 const log = loggers.dispatcher
@@ -487,6 +493,9 @@ export class Dispatcher {
           await this.handleDagCommand(topicSession, directive)
         } else if (text === LAND_CMD) {
           await this.handleLandCommand(topicSession)
+        } else if (text === RESTACK_CMD || text?.startsWith(RESTACK_CMD + " ")) {
+          const nodeId = text!.slice(RESTACK_CMD.length).trim() || undefined
+          await this.handleRestackCommand(topicSession, nodeId)
         } else if (text === RETRY_CMD || text?.startsWith(RETRY_CMD + " ")) {
           const nodeId = text!.slice(RETRY_CMD.length).trim() || undefined
           await this.handleRetryCommand(topicSession, nodeId)
@@ -2196,6 +2205,13 @@ export class Dispatcher {
     const branch = `minion/${slug}`
     node.branch = branch
 
+    // Record the merge base so /restack knows what the branch was originally based on
+    if (parent.repoUrl) {
+      const upstreamRef = upstreamBranches[0] ?? "main"
+      const mergeBase = captureMergeBase(this.config.workspace.root, parent.repoUrl, upstreamRef)
+      if (mergeBase) node.mergeBase = mergeBase
+    }
+
     const task = buildDagChildPrompt(
       parent.conversation,
       { id: node.id, title: node.title, description: node.description, dependsOn: node.dependsOn },
@@ -2459,6 +2475,108 @@ export class Dispatcher {
       }
     }
 
+    await this.updateDagPRDescriptions(graph, topicSession.cwd)
+    await this.persistTopicSessions()
+  }
+
+  /**
+   * Handle /restack command — rebase downstream branches after an upstream change.
+   * Optionally accepts a node ID to restack from; otherwise restacks all nodes that need it.
+   */
+  private async handleRestackCommand(topicSession: TopicSession, nodeId?: string): Promise<void> {
+    if (!topicSession.dagId) {
+      await this.telegram.sendMessage(
+        "⚠️ /restack only works in DAG/stack parent threads.",
+        topicSession.threadId,
+      )
+      return
+    }
+
+    const graph = this.dags.get(topicSession.dagId)
+    if (!graph) return
+
+    // Determine which nodes changed — either a specific node or all done nodes
+    const changedNodes = nodeId
+      ? graph.nodes.filter((n) => n.id === nodeId)
+      : graph.nodes.filter((n) => n.status === "done" && n.branch)
+
+    if (changedNodes.length === 0) {
+      await this.telegram.sendMessage(
+        nodeId
+          ? `⚠️ Node <code>${esc(nodeId)}</code> not found.`
+          : formatRestackNoop(),
+        topicSession.threadId,
+      )
+      return
+    }
+
+    // Collect all unique nodes that need restacking across all changed nodes
+    const toRestackMap = new Map<string, DagNode>()
+    for (const changed of changedNodes) {
+      for (const node of needsRestack(graph, changed.id)) {
+        toRestackMap.set(node.id, node)
+      }
+    }
+    const toRestack = [...toRestackMap.values()]
+
+    if (toRestack.length === 0) {
+      await this.telegram.sendMessage(formatRestackNoop(), topicSession.threadId)
+      return
+    }
+
+    // Safety check: no running nodes in the restack set
+    const runningNodes = toRestack.filter((n) => n.status === "running")
+    if (runningNodes.length > 0) {
+      const names = runningNodes.map((n) => `<b>${esc(n.title)}</b>`).join(", ")
+      await this.telegram.sendMessage(
+        `⚠️ Cannot restack while nodes are running: ${names}\nWait for them to complete or <code>/stop</code> them first.`,
+        topicSession.threadId,
+      )
+      return
+    }
+
+    await this.telegram.sendMessage(
+      formatRestackStart(toRestack.length),
+      topicSession.threadId,
+    )
+
+    let succeeded = 0
+    for (const node of toRestack) {
+      // Determine the upstream branch to rebase onto
+      const upstreamBranches = getUpstreamBranches(graph, node.id)
+      const upstreamBranch = upstreamBranches[0] ?? "main"
+
+      const result = await restackBranch(
+        this.config.workspace.root,
+        topicSession.repoUrl!,
+        node.branch!,
+        node.mergeBase!,
+        upstreamBranch,
+      )
+
+      if (result.success) {
+        if (result.newMergeBase) {
+          node.mergeBase = result.newMergeBase
+        }
+        succeeded++
+        await this.telegram.sendMessage(
+          formatRestackProgress(node.title, node.id),
+          topicSession.threadId,
+        )
+      } else {
+        await this.telegram.sendMessage(
+          formatRestackConflict(node.title, node.id, result.conflictFiles ?? []),
+          topicSession.threadId,
+        )
+      }
+    }
+
+    await this.telegram.sendMessage(
+      formatRestackComplete(succeeded, toRestack.length),
+      topicSession.threadId,
+    )
+
+    this.broadcastDag(graph, "dag_updated")
     await this.updateDagPRDescriptions(graph, topicSession.cwd)
     await this.persistTopicSessions()
   }
