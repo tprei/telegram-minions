@@ -31,6 +31,7 @@ import {
   formatCIResolvingConflicts,
   formatCINoChecks,
   formatUsage,
+  formatDagNodeComplete,
 } from "../src/format.js"
 import type { ClaudeUsageResponse } from "../src/claude-usage.js"
 import type { AggregateStats, SessionRecord, ModeBreakdown } from "../src/stats.js"
@@ -695,5 +696,34 @@ describe("formatUsage", () => {
     const result = formatUsage(null, emptyAgg, {}, [])
     expect(result).toContain("0 sessions")
     expect(result).not.toContain("Recent sessions")
+  })
+})
+
+describe("formatDagNodeComplete", () => {
+  it("shows error emoji for errored state", () => {
+    const result = formatDagNodeComplete("my-slug", "errored", "My Task")
+    expect(result).toContain("❌")
+  })
+
+  it("shows error emoji for failed state", () => {
+    const result = formatDagNodeComplete("my-slug", "failed", "My Task")
+    expect(result).toContain("❌")
+  })
+
+  it("shows success emoji for completed state", () => {
+    const result = formatDagNodeComplete("my-slug", "completed", "My Task")
+    expect(result).toContain("✅")
+  })
+
+  it("includes PR link when provided", () => {
+    const result = formatDagNodeComplete("my-slug", "completed", "My Task", "https://github.com/org/repo/pull/42")
+    expect(result).toContain("PR")
+    expect(result).toContain("https://github.com/org/repo/pull/42")
+  })
+
+  it("includes progress when provided", () => {
+    const result = formatDagNodeComplete("my-slug", "completed", "My Task", undefined, { done: 3, total: 5, running: 1 })
+    expect(result).toContain("3/5 complete")
+    expect(result).toContain("1 running")
   })
 })

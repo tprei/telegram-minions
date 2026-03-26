@@ -6,6 +6,7 @@ import {
   readyNodes,
   advanceDag,
   failNode,
+  resetFailedNode,
   isDagComplete,
   getUpstreamBranches,
   criticalPathLength,
@@ -662,5 +663,69 @@ describe("upsertDagSection", () => {
 
     const result = upsertDagSection(body, newSection)
     expect(result).toBe(`Before\n${DAG_STATUS_START}\nupdated\n${DAG_STATUS_END}\nAfter`)
+  })
+})
+
+describe("resetFailedNode", () => {
+  function makeGraph(): DagGraph {
+    return buildDag("test", [
+      { id: "a", title: "A", description: "", dependsOn: [] },
+      { id: "b", title: "B", description: "", dependsOn: ["a"] },
+      { id: "c", title: "C", description: "", dependsOn: ["b"] },
+    ], 1, "repo")
+  }
+
+  it("resets a failed node to ready and un-skips dependents", () => {
+    const graph = makeGraph()
+    graph.nodes[0].status = "done"
+    graph.nodes[1].status = "failed"
+    graph.nodes[1].error = "no PR"
+    graph.nodes[1].recoveryAttempted = true
+    graph.nodes[2].status = "skipped"
+    graph.nodes[2].error = 'Skipped: upstream node "b" failed'
+
+    const reset = resetFailedNode(graph, "b")
+
+    expect(graph.nodes[1].status).toBe("ready")
+    expect(graph.nodes[1].error).toBeUndefined()
+    expect(graph.nodes[1].recoveryAttempted).toBe(false)
+    expect(graph.nodes[2].status).toBe("pending")
+    expect(graph.nodes[2].error).toBeUndefined()
+    expect(reset).toEqual(["c"])
+  })
+
+  it("returns empty array for non-failed node", () => {
+    const graph = makeGraph()
+    graph.nodes[0].status = "done"
+
+    const reset = resetFailedNode(graph, "a")
+    expect(reset).toEqual([])
+    expect(graph.nodes[0].status).toBe("done")
+  })
+
+  it("returns empty array for unknown node", () => {
+    const graph = makeGraph()
+    expect(resetFailedNode(graph, "nonexistent")).toEqual([])
+  })
+
+  it("handles diamond dependency with partial skip", () => {
+    const graph = buildDag("test", [
+      { id: "a", title: "A", description: "", dependsOn: [] },
+      { id: "b", title: "B", description: "", dependsOn: ["a"] },
+      { id: "c", title: "C", description: "", dependsOn: ["a"] },
+      { id: "d", title: "D", description: "", dependsOn: ["b", "c"] },
+    ], 1, "repo")
+
+    graph.nodes[0].status = "done"
+    graph.nodes[1].status = "failed"
+    graph.nodes[1].error = "no PR"
+    graph.nodes[2].status = "done"
+    graph.nodes[3].status = "skipped"
+
+    const reset = resetFailedNode(graph, "b")
+
+    expect(graph.nodes[1].status).toBe("ready")
+    expect(graph.nodes[3].status).toBe("pending")
+    expect(reset).toEqual(["d"])
   })
 })

@@ -296,6 +296,7 @@ export function formatHelp(): string {
     `<code>/stack [directive]</code> — create stacked PRs (sequential chain, plan/think mode)`,
     `<code>/dag [directive]</code> — create a dependency DAG of tasks (plan/think mode)`,
     `<code>/land</code> — merge completed stack/DAG PRs to main in order`,
+    `<code>/retry [node-id]</code> — retry failed DAG nodes`,
     `<code>/stop</code> — stop the running agent but keep the thread and data`,
     `<code>/close</code> — stop the session, wipe data, and delete the topic`,
   ].join("\n")
@@ -593,7 +594,7 @@ export function formatDagNodeComplete(
   prUrl?: string,
   progress?: { done: number; total: number; running: number },
 ): string {
-  const emoji = state === "errored" ? "❌" : "✅"
+  const emoji = (state === "errored" || state === "failed") ? "❌" : "✅"
   const prSuffix = prUrl ? ` — <a href="${esc(prUrl)}">PR</a>` : ""
   const progressSuffix = progress
     ? `\n📊 ${progress.done}/${progress.total} complete` +

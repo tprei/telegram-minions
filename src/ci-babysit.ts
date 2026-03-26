@@ -26,6 +26,18 @@ export function extractPRUrl(conversationText: string): string | null {
   return match ? match[0] : null
 }
 
+export function findPRByBranch(branch: string, cwd: string): string | null {
+  try {
+    const output = execSync(
+      `gh pr list --head ${JSON.stringify(branch)} --json url --jq '.[0].url'`,
+      { cwd, timeout: 30_000, stdio: ["pipe", "pipe", "pipe"], env: { ...process.env } },
+    ).toString().trim()
+    return output || null
+  } catch {
+    return null
+  }
+}
+
 export async function waitForCI(prUrl: string, cwd: string, ciConfig: CiConfig): Promise<CIWaitResult> {
   const intervalMs = ciConfig.pollIntervalMs
   const timeoutMs = ciConfig.pollTimeoutMs

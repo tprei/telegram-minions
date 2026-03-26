@@ -17,6 +17,7 @@ import { DEFAULT_PROMPTS } from "./prompts.js"
 import { SessionStore } from "./store.js"
 import { ProfileStore } from "./profile-store.js"
 import {
+  esc,
   formatPlanIteration,
   formatPlanExecuting,
   formatPlanComplete,
@@ -62,7 +63,7 @@ import {
 import { extractSplitItems, buildSplitChildPrompt } from "./split.js"
 import { extractStackItems, extractDagItems, buildDagChildPrompt } from "./dag-extract.js"
 import {
-  buildDag, advanceDag, failNode, isDagComplete,
+  buildDag, advanceDag, failNode, resetFailedNode, isDagComplete,
   readyNodes, dagProgress, getUpstreamBranches, topologicalSort,
   renderDagForGitHub, upsertDagSection,
   type DagGraph, type DagNode, type DagInput,
@@ -71,9 +72,9 @@ import { runQualityGates, type QualityReport } from "./quality-gates.js"
 import { StatsTracker } from "./stats.js"
 import { fetchClaudeUsage } from "./claude-usage.js"
 import { writeSessionLog } from "./session-log.js"
-import { extractPRUrl, waitForCI, getFailedCheckLogs, buildCIFixPrompt, buildQualityGateFixPrompt, buildMergeConflictPrompt, checkPRMergeability } from "./ci-babysit.js"
+import { extractPRUrl, findPRByBranch, waitForCI, getFailedCheckLogs, buildCIFixPrompt, buildQualityGateFixPrompt, buildMergeConflictPrompt, checkPRMergeability } from "./ci-babysit.js"
 import { buildConversationDigest } from "./conversation-digest.js"
-import { DEFAULT_CI_FIX_PROMPT } from "./prompts.js"
+import { DEFAULT_CI_FIX_PROMPT, DEFAULT_RECOVERY_PROMPT } from "./prompts.js"
 import { StateBroadcaster, topicSessionToApi, dagToApi } from "./api-server.js"
 
 const POLL_TIMEOUT = 30
@@ -97,6 +98,7 @@ const SPLIT_CMD = "/split"
 const STACK_CMD = "/stack"
 const DAG_CMD = "/dag"
 const LAND_CMD = "/land"
+const RETRY_CMD = "/retry"
 
 interface ActiveSession {
   handle: SessionHandle
@@ -491,6 +493,9 @@ export class Dispatcher {
           await this.handleDagCommand(topicSession, directive)
         } else if (text === LAND_CMD) {
           await this.handleLandCommand(topicSession)
+        } else if (text === RETRY_CMD || text?.startsWith(RETRY_CMD + " ")) {
+          const nodeId = text!.slice(RETRY_CMD.length).trim() || undefined
+          await this.handleRetryCommand(topicSession, nodeId)
         } else if (text?.startsWith(REPLY_PREFIX + " ") || text?.startsWith(REPLY_SHORT + " ") || text === REPLY_PREFIX || text === REPLY_SHORT) {
           const stripped = text.startsWith(REPLY_PREFIX)
             ? text.slice(REPLY_PREFIX.length).trim()
@@ -1139,7 +1144,7 @@ export class Dispatcher {
     await this.telegram.editForumTopic(topicSession.threadId, name).catch(() => {})
   }
 
-  private async spawnTopicAgent(topicSession: TopicSession, task: string, mcpOverrides?: Partial<McpConfig>): Promise<void> {
+  private async spawnTopicAgent(topicSession: TopicSession, task: string, mcpOverrides?: Partial<McpConfig>, systemPromptOverride?: string): Promise<void> {
     if (this.sessions.size >= this.config.workspace.maxConcurrentSessions) {
       await this.telegram.sendMessage(
         `⚠️ Max concurrent sessions reached. Try again later.`,
@@ -1334,7 +1339,8 @@ export class Dispatcher {
     await this.updateTopicTitle(topicSession, "⚡")
     this.updatePinnedSummary()
     await this.observer.onSessionStart(meta, task, onTextCapture)
-    handle.start(task, topicSession.mode === "task" ? prompts.task : undefined)
+    const systemPrompt = systemPromptOverride ?? (topicSession.mode === "task" ? prompts.task : undefined)
+    handle.start(task, systemPrompt)
   }
 
   private extractPRFromConversation(topicSession: TopicSession): string | null {
@@ -2283,25 +2289,73 @@ export class Dispatcher {
         )
       }
     } else {
-      node.status = "done"
-      node.prUrl = prUrl
+      let resolvedPrUrl = prUrl
+      if (!resolvedPrUrl && node.branch) {
+        resolvedPrUrl = findPRByBranch(node.branch, childSession.cwd) ?? undefined
+      }
 
-      const progress = dagProgress(graph)
-      await this.telegram.sendMessage(
-        formatDagNodeComplete(childSession.slug, state, node.title, prUrl, {
-          done: progress.done,
-          total: progress.total,
-          running: progress.running,
-        }),
-        parent.threadId,
-      )
+      if (!resolvedPrUrl && !node.recoveryAttempted) {
+        node.recoveryAttempted = true
 
-      // Advance the DAG: find newly ready nodes
-      const newlyReady = advanceDag(graph)
-      if (newlyReady.length > 0) {
-        const isStack = !graph.nodes.some((n) => n.dependsOn.length > 1) &&
-          graph.nodes.every((n, i) => i === 0 || n.dependsOn.length === 1)
-        await this.scheduleDagNodes(parent, graph, isStack)
+        await this.telegram.sendMessage(
+          `⚠️ <b>${esc(childSession.slug)}</b> completed without a PR — spawning recovery session…`,
+          parent.threadId,
+        )
+
+        const recoveryTask = [
+          `## Recovery task`,
+          `The previous session was assigned: "${node.title}"`,
+          node.description ? `\nDescription: ${node.description}` : "",
+          `\nIt completed without opening a pull request. Check the workspace, fix any issues, and create a PR.`,
+        ].join("\n")
+
+        childSession.conversation = [{ role: "user", text: recoveryTask }]
+        await this.spawnTopicAgent(childSession, recoveryTask, undefined, DEFAULT_RECOVERY_PROMPT)
+        await this.persistTopicSessions()
+        return
+      }
+
+      if (!resolvedPrUrl) {
+        const skipped = failNode(graph, node.id)
+        node.error = "Completed without opening a PR"
+
+        const progress = dagProgress(graph)
+        await this.telegram.sendMessage(
+          formatDagNodeComplete(childSession.slug, "failed", node.title, undefined, {
+            done: progress.done,
+            total: progress.total,
+            running: progress.running,
+          }),
+          parent.threadId,
+        )
+
+        for (const skippedId of skipped) {
+          const skippedNode = graph.nodes.find((n) => n.id === skippedId)!
+          await this.telegram.sendMessage(
+            formatDagNodeSkipped(skippedNode.title, `upstream "${node.id}" completed without PR`),
+            parent.threadId,
+          )
+        }
+      } else {
+        node.status = "done"
+        node.prUrl = resolvedPrUrl
+
+        const progress = dagProgress(graph)
+        await this.telegram.sendMessage(
+          formatDagNodeComplete(childSession.slug, state, node.title, resolvedPrUrl, {
+            done: progress.done,
+            total: progress.total,
+            running: progress.running,
+          }),
+          parent.threadId,
+        )
+
+        const newlyReady = advanceDag(graph)
+        if (newlyReady.length > 0) {
+          const isStack = !graph.nodes.some((n) => n.dependsOn.length > 1) &&
+            graph.nodes.every((n, i) => i === 0 || n.dependsOn.length === 1)
+          await this.scheduleDagNodes(parent, graph, isStack)
+        }
       }
     }
 
@@ -2317,13 +2371,19 @@ export class Dispatcher {
         formatDagAllDone(progress.done, progress.total, progress.failed),
         parent.threadId,
       )
-      await this.updateTopicTitle(parent, progress.failed > 0 ? "⚠️" : "✅")
 
-      // Run deferred CI babysitting sequentially now that the DAG is complete
       await this.runDeferredBabysit(parent.threadId)
 
-      // Close child sessions (kills processes, removes topics, cleans workspaces)
-      await this.closeChildSessions(parent)
+      if (progress.failed > 0) {
+        await this.updateTopicTitle(parent, "⚠️")
+        await this.telegram.sendMessage(
+          `Send <code>/retry</code> to retry all failed nodes, or <code>/retry node-id</code> for a specific one. <code>/close</code> to finish.`,
+          parent.threadId,
+        )
+      } else {
+        await this.updateTopicTitle(parent, "✅")
+        await this.closeChildSessions(parent)
+      }
     }
 
     await this.persistTopicSessions()
@@ -2356,6 +2416,59 @@ export class Dispatcher {
         process.stderr.write(`dispatcher: failed to update DAG section in PR ${node.prUrl}: ${err}\n`)
       }
     }
+  }
+
+  private async handleRetryCommand(topicSession: TopicSession, nodeId?: string): Promise<void> {
+    if (!topicSession.dagId) {
+      await this.telegram.sendMessage("⚠️ /retry only works in DAG parent threads.", topicSession.threadId)
+      return
+    }
+
+    const graph = this.dags.get(topicSession.dagId)
+    if (!graph) return
+
+    const failedNodes = nodeId
+      ? graph.nodes.filter((n) => n.id === nodeId && n.status === "failed")
+      : graph.nodes.filter((n) => n.status === "failed")
+
+    if (failedNodes.length === 0) {
+      await this.telegram.sendMessage("No failed nodes to retry.", topicSession.threadId)
+      return
+    }
+
+    for (const node of failedNodes) {
+      resetFailedNode(graph, node.id)
+
+      const childSession = [...this.topicSessions.values()].find(
+        (s) => s.dagId === graph.id && s.dagNodeId === node.id,
+      )
+
+      if (childSession) {
+        const retryTask = [
+          `## Retry task`,
+          `Previous attempt failed: ${node.error ?? "unknown reason"}`,
+          `\nOriginal task: "${node.title}"`,
+          node.description ? `\nDescription: ${node.description}` : "",
+          `\nCheck the workspace, fix any issues, and create a PR.`,
+        ].join("\n")
+
+        childSession.conversation = [{ role: "user", text: retryTask }]
+        node.status = "running"
+        await this.spawnTopicAgent(childSession, retryTask, undefined, DEFAULT_RECOVERY_PROMPT)
+
+        await this.telegram.sendMessage(
+          `🔄 Retrying <b>${esc(node.title)}</b> (<code>${esc(node.id)}</code>)`,
+          topicSession.threadId,
+        )
+      } else {
+        const isStack = !graph.nodes.some((n) => n.dependsOn.length > 1) &&
+          graph.nodes.every((n, i) => i === 0 || n.dependsOn.length === 1)
+        await this.scheduleDagNodes(topicSession, graph, isStack)
+      }
+    }
+
+    await this.updateDagPRDescriptions(graph, topicSession.cwd)
+    await this.persistTopicSessions()
   }
 
   /**

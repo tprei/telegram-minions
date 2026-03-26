@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest"
-import { extractPRUrl, buildCIFixPrompt, buildQualityGateFixPrompt, buildMergeConflictPrompt, checkPRMergeability, waitForCI } from "../src/ci-babysit.js"
+import { extractPRUrl, findPRByBranch, buildCIFixPrompt, buildQualityGateFixPrompt, buildMergeConflictPrompt, checkPRMergeability, waitForCI } from "../src/ci-babysit.js"
 import type { CiConfig } from "../src/config-types.js"
 
 vi.mock("node:child_process", async (importOriginal) => {
@@ -43,6 +43,27 @@ describe("extractPRUrl", () => {
   it("strips markdown link brackets from URL", () => {
     const text = "See [PR](https://github.com/org/repo/pull/75)"
     expect(extractPRUrl(text)).toBe("https://github.com/org/repo/pull/75")
+  })
+})
+
+describe("findPRByBranch", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it("returns PR URL when gh pr list finds a match", () => {
+    mockExecSync.mockReturnValue(Buffer.from("https://github.com/org/repo/pull/42\n"))
+    expect(findPRByBranch("minion/test-slug", "/tmp")).toBe("https://github.com/org/repo/pull/42")
+  })
+
+  it("returns null when gh pr list returns empty output", () => {
+    mockExecSync.mockReturnValue(Buffer.from("\n"))
+    expect(findPRByBranch("minion/test-slug", "/tmp")).toBeNull()
+  })
+
+  it("returns null when gh pr list throws", () => {
+    mockExecSync.mockImplementation(() => { throw new Error("gh not found") })
+    expect(findPRByBranch("minion/test-slug", "/tmp")).toBeNull()
   })
 })
 

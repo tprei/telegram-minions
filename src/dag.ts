@@ -10,6 +10,7 @@ export interface DagNode {
   branch?: string
   prUrl?: string
   error?: string
+  recoveryAttempted?: boolean
 }
 
 export interface DagGraph {
@@ -206,6 +207,34 @@ export function failNode(graph: DagGraph, nodeId: string): string[] {
   }
 
   return skipped
+}
+
+/**
+ * Reset a failed node to "ready" and un-skip its transitive dependents.
+ * Returns the list of un-skipped node IDs.
+ */
+export function resetFailedNode(graph: DagGraph, nodeId: string): string[] {
+  const node = graph.nodes.find((n) => n.id === nodeId)
+  if (!node || node.status !== "failed") return []
+
+  node.status = "ready"
+  node.error = undefined
+  node.recoveryAttempted = false
+
+  const reset: string[] = []
+  const queue = [nodeId]
+  while (queue.length > 0) {
+    const current = queue.shift()!
+    for (const n of graph.nodes) {
+      if (n.dependsOn.includes(current) && n.status === "skipped") {
+        n.status = "pending"
+        n.error = undefined
+        reset.push(n.id)
+        queue.push(n.id)
+      }
+    }
+  }
+  return reset
 }
 
 /**

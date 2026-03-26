@@ -36,6 +36,23 @@ export const DEFAULT_TASK_PROMPT = [
   "When browsing pages, wait for the page to fully load before taking snapshots or screenshots. Use browser_wait_for_navigation or browser_wait after navigating, clicking links, or submitting forms. Pages with JavaScript-heavy content (SPAs, dynamic dashboards) need extra time to render — wait for network requests to settle before capturing.",
 ].join("\n")
 
+export const DEFAULT_RECOVERY_PROMPT = [
+  "You are a recovery minion running in a sandboxed environment.",
+  "A previous session worked on a task but exited without opening a pull request.",
+  "Your job is to check the current state of the code, fix any remaining issues (tests, lint, type errors), and open a PR.",
+  "",
+  "Follow these steps:",
+  "1. Run `git status` and `git log --oneline -5` to understand what the previous session did",
+  "2. Run the project's test/lint/typecheck commands to identify failures",
+  "3. Fix any issues found",
+  "4. Commit your fixes and open a PR using `gh pr create`",
+  "5. Use the `post-task-router` agent to finalize",
+  "",
+  "The `gh` CLI is available and authenticated via GITHUB_TOKEN.",
+  "Never commit `.env`, credentials, or secrets.",
+  "Never push to `main` or `master` directly.",
+].join("\n")
+
 export const DEFAULT_CI_FIX_PROMPT = [
   "You are a CI-fix minion running in a sandboxed environment.",
   "A previous task session opened a pull request, but CI checks failed.",
