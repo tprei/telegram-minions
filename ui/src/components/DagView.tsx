@@ -6,6 +6,8 @@ import {
   useNodesState,
   useEdgesState,
   MarkerType,
+  Handle,
+  Position,
 } from '@reactflow/core'
 import { Background } from '@reactflow/background'
 import { Controls } from '@reactflow/controls'
@@ -197,6 +199,7 @@ function DagNodeComponent({ data }: DagNodeProps) {
       onMouseEnter={() => setShowTooltip(true)}
       onMouseLeave={() => setShowTooltip(false)}
     >
+      <Handle type="target" position={Position.Top} style={{ opacity: 0 }} />
       <div
         onClick={hasThread ? handleClick : undefined}
         role={hasThread ? 'button' : undefined}
@@ -229,6 +232,7 @@ function DagNodeComponent({ data }: DagNodeProps) {
         ) : null}
       </div>
 
+      <Handle type="source" position={Position.Bottom} style={{ opacity: 0 }} />
       {showTooltip && (
         <div
           class="absolute z-10 p-2 text-xs rounded shadow-lg"
