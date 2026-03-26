@@ -1,4 +1,4 @@
-import type { ApiResponse, CommandResult, DagGraph, MinionSession, SseEvent } from './types'
+import type { ApiResponse, CommandResult, DagGraph, MinionSession, PlanActionType, SseEvent } from './types'
 
 export const API_BASE = '/api'
 
@@ -71,6 +71,18 @@ export async function closeSession(sessionId: string): Promise<CommandResult> {
   })
   if (!response.ok) {
     throw new Error(`Failed to close session: ${response.statusText}`)
+  }
+  return response.json()
+}
+
+export async function executeAction(sessionId: string, action: PlanActionType): Promise<CommandResult> {
+  const response = await fetch(`${API_BASE}/sessions/${sessionId}/action`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action }),
+  })
+  if (!response.ok) {
+    throw new Error(`Failed to execute ${action}: ${response.statusText}`)
   }
   return response.json()
 }

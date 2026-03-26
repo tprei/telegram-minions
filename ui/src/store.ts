@@ -1,11 +1,12 @@
 import { signal } from '@preact/signals'
-import type { ActionState, DagGraph, MinionSession, SseEvent } from './types'
+import type { ActionState, DagGraph, MinionSession, PlanActionType, SseEvent } from './types'
 import {
   fetchDags,
   fetchSessions,
   sendReply as apiSendReply,
   stopMinion as apiStopMinion,
   closeSession as apiCloseSession,
+  executeAction as apiExecuteAction,
   createSseConnection,
 } from './api'
 
@@ -90,6 +91,10 @@ export async function stopMinion(sessionId: string): Promise<void> {
 
 export async function closeSession(sessionId: string): Promise<void> {
   await withRetry(() => apiCloseSession(sessionId), 'closeSession')
+}
+
+export async function planAction(sessionId: string, action: PlanActionType): Promise<void> {
+  await withRetry(() => apiExecuteAction(sessionId, action), 'planAction')
 }
 
 // SSE handling

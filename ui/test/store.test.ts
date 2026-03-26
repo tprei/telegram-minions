@@ -12,6 +12,7 @@ import {
   sendReply,
   stopMinion,
   closeSession,
+  planAction,
   clearActionError,
 } from '../src/store'
 import {
@@ -20,6 +21,7 @@ import {
   sendReply as apiSendReply,
   stopMinion as apiStopMinion,
   closeSession as apiCloseSession,
+  executeAction as apiExecuteAction,
 } from '../src/api'
 import type { MinionSession, DagGraph, CommandResult } from '../src/types'
 
@@ -29,6 +31,7 @@ vi.mock('../src/api', () => ({
   sendReply: vi.fn(),
   stopMinion: vi.fn(),
   closeSession: vi.fn(),
+  executeAction: vi.fn(),
   createSseConnection: vi.fn(),
 }))
 
@@ -175,6 +178,35 @@ describe('Store', () => {
 
       await expect(closeSession('session-1')).rejects.toThrow('Not found')
       expect(actionState.value.error).toBe('Not found')
+    })
+  })
+
+  describe('planAction', () => {
+    it('should execute plan action successfully', async () => {
+      const mockResult: CommandResult = { success: true }
+      ;(apiExecuteAction as ReturnType<typeof vi.fn>).mockResolvedValue(mockResult)
+
+      await planAction('session-1', 'execute')
+
+      expect(apiExecuteAction).toHaveBeenCalledWith('session-1', 'execute')
+      expect(actionState.value.isLoading).toBe(false)
+      expect(actionState.value.lastAction).toBe('planAction')
+    })
+
+    it('should pass action type through to API', async () => {
+      const mockResult: CommandResult = { success: true }
+      ;(apiExecuteAction as ReturnType<typeof vi.fn>).mockResolvedValue(mockResult)
+
+      await planAction('session-2', 'dag')
+
+      expect(apiExecuteAction).toHaveBeenCalledWith('session-2', 'dag')
+    })
+
+    it('should handle errors', async () => {
+      ;(apiExecuteAction as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('Session not found'))
+
+      await expect(planAction('session-1', 'split')).rejects.toThrow('Session not found')
+      expect(actionState.value.error).toBe('Session not found')
     })
   })
 

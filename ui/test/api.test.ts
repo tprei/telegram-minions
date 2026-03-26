@@ -7,6 +7,7 @@ import {
   sendReply,
   stopMinion,
   closeSession,
+  executeAction,
   API_BASE,
 } from '../src/api'
 import type { ApiResponse, CommandResult } from '../src/types'
@@ -268,6 +269,52 @@ describe('API Client', () => {
       })
 
       await expect(closeSession('session-1')).rejects.toThrow('Failed to close session: Not Found')
+    })
+  })
+
+  describe('executeAction', () => {
+    it('should execute a plan action successfully', async () => {
+      const mockResult: CommandResult = { success: true }
+
+      ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve(mockResult),
+      })
+
+      const result = await executeAction('session-1', 'execute')
+
+      expect(global.fetch).toHaveBeenCalledWith(`${API_BASE}/sessions/session-1/action`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'execute' }),
+      })
+      expect(result).toEqual(mockResult)
+    })
+
+    it('should pass different action types correctly', async () => {
+      const mockResult: CommandResult = { success: true }
+
+      ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve(mockResult),
+      })
+
+      await executeAction('session-2', 'split')
+
+      expect(global.fetch).toHaveBeenCalledWith(`${API_BASE}/sessions/session-2/action`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'split' }),
+      })
+    })
+
+    it('should throw on API error', async () => {
+      ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
+        ok: false,
+        statusText: 'Bad Request',
+      })
+
+      await expect(executeAction('session-1', 'execute')).rejects.toThrow('Failed to execute execute: Bad Request')
     })
   })
 })
