@@ -1958,7 +1958,8 @@ export class Dispatcher {
     const GRACE_PERIOD_MS = 2000
     await new Promise((resolve) => setTimeout(resolve, GRACE_PERIOD_MS))
 
-    const result = await extractStackItems(topicSession.conversation, directive)
+    const profile = topicSession.profileId ? this.profileStore.get(topicSession.profileId) : undefined
+    const result = await extractStackItems(topicSession.conversation, directive, profile)
 
     if (result.error === "system") {
       await this.telegram.sendMessage(
@@ -2005,7 +2006,8 @@ export class Dispatcher {
     const GRACE_PERIOD_MS = 2000
     await new Promise((resolve) => setTimeout(resolve, GRACE_PERIOD_MS))
 
-    const result = await extractDagItems(topicSession.conversation, directive)
+    const profile = topicSession.profileId ? this.profileStore.get(topicSession.profileId) : undefined
+    const result = await extractDagItems(topicSession.conversation, directive, profile)
 
     if (result.error === "system") {
       await this.telegram.sendMessage(

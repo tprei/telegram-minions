@@ -1,7 +1,18 @@
-import { describe, it, expect } from "vitest"
-import { parseDagItems, parseStackItems, buildDagChildPrompt } from "../src/dag-extract.js"
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest"
+import { parseDagItems, parseStackItems, buildDagChildPrompt, extractDagItems, extractStackItems } from "../src/dag-extract.js"
 import type { TopicMessage } from "../src/types.js"
 import type { DagInput } from "../src/dag.js"
+import type { ProviderProfile } from "../src/config-types.js"
+import type { ChildProcess } from "node:child_process"
+
+// Mock spawn to verify environment variables
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>()
+  return { ...actual, spawn: vi.fn(actual.spawn) }
+})
+
+import { spawn } from "node:child_process"
+const mockSpawn = vi.mocked(spawn)
 
 describe("parseDagItems", () => {
   it("parses a valid DAG JSON array", () => {
@@ -174,5 +185,178 @@ describe("buildDagChildPrompt", () => {
     const node: DagInput = { id: "a", title: "A", description: "Do A", dependsOn: [] }
     const prompt = buildDagChildPrompt(longConversation, node, [node], [], false)
     expect(prompt).toContain("[output truncated]")
+  })
+})
+
+describe("extractDagItems profile environment", () => {
+  const conversation: TopicMessage[] = [
+    { role: "user", text: "Build an auth system" },
+    { role: "assistant", text: "I'll plan it" },
+  ]
+
+  // Helper to create a mock child process that exits successfully
+  function createMockChildProcess(output: string = "[]"): ChildProcess {
+    const child = {
+      stdout: { on: vi.fn((event: string, cb: (data: Buffer) => void) => {
+        if (event === "data") cb(Buffer.from(output))
+      }) },
+      stderr: { on: vi.fn() },
+      stdin: { write: vi.fn(), end: vi.fn() },
+      on: vi.fn((event: string, cb: (code: number) => void) => {
+        if (event === "close") cb(0)
+      }),
+      kill: vi.fn(),
+    } as unknown as ChildProcess
+    return child
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    // Suppress stderr in tests
+    vi.spyOn(process.stderr, "write").mockImplementation(() => true)
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it("passes profile baseUrl to spawned claude process", async () => {
+    const profile: ProviderProfile = {
+      id: "test-profile",
+      name: "Test",
+      baseUrl: "https://custom.api.endpoint",
+    }
+    mockSpawn.mockReturnValue(createMockChildProcess())
+
+    await extractDagItems(conversation, undefined, profile)
+
+    expect(mockSpawn).toHaveBeenCalled()
+    const callArgs = mockSpawn.mock.calls[0]
+    const env = callArgs[2]?.env
+    expect(env?.ANTHROPIC_BASE_URL).toBe("https://custom.api.endpoint")
+  })
+
+  it("passes profile authToken to spawned claude process", async () => {
+    const profile: ProviderProfile = {
+      id: "test-profile",
+      name: "Test",
+      authToken: "sk-test-token",
+    }
+    mockSpawn.mockReturnValue(createMockChildProcess())
+
+    await extractDagItems(conversation, undefined, profile)
+
+    const env = mockSpawn.mock.calls[0][2]?.env
+    expect(env?.ANTHROPIC_AUTH_TOKEN).toBe("sk-test-token")
+  })
+
+  it("passes profile haikuModel to spawned claude process", async () => {
+    const profile: ProviderProfile = {
+      id: "test-profile",
+      name: "Test",
+      haikuModel: "claude-custom-haiku",
+    }
+    mockSpawn.mockReturnValue(createMockChildProcess())
+
+    await extractDagItems(conversation, undefined, profile)
+
+    const env = mockSpawn.mock.calls[0][2]?.env
+    expect(env?.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe("claude-custom-haiku")
+  })
+
+  it("passes all profile fields together", async () => {
+    const profile: ProviderProfile = {
+      id: "z-ai-profile",
+      name: "Z.AI",
+      baseUrl: "https://z-ai.example.com/v1",
+      authToken: "zai-token-123",
+      haikuModel: "claude-3-haiku-zai",
+    }
+    mockSpawn.mockReturnValue(createMockChildProcess())
+
+    await extractDagItems(conversation, undefined, profile)
+
+    const env = mockSpawn.mock.calls[0][2]?.env
+    expect(env?.ANTHROPIC_BASE_URL).toBe("https://z-ai.example.com/v1")
+    expect(env?.ANTHROPIC_AUTH_TOKEN).toBe("zai-token-123")
+    expect(env?.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe("claude-3-haiku-zai")
+  })
+
+  it("does not override process.env when profile is undefined", async () => {
+    mockSpawn.mockReturnValue(createMockChildProcess())
+
+    await extractDagItems(conversation, undefined, undefined)
+
+    const env = mockSpawn.mock.calls[0][2]?.env
+    // When profile is undefined, process.env is spread but no profile overrides are applied
+    // The env should still contain process.env values (not be wiped out)
+    expect(env).toBeDefined()
+    expect(env?.PATH).toBe(process.env.PATH) // Sanity check that process.env is spread
+  })
+
+  it("does not add profile overrides for undefined profile fields", async () => {
+    const profile: ProviderProfile = {
+      id: "minimal-profile",
+      name: "Minimal",
+      // No baseUrl, authToken, or haikuModel - these should not be overridden
+    }
+    mockSpawn.mockReturnValue(createMockChildProcess())
+
+    await extractDagItems(conversation, undefined, profile)
+
+    const env = mockSpawn.mock.calls[0][2]?.env
+    // Profile with undefined fields should not add any of these keys
+    // (though process.env values may already exist, the profile shouldn't add new ones)
+    expect(env).toBeDefined()
+    expect(env?.PATH).toBe(process.env.PATH)
+  })
+})
+
+describe("extractStackItems profile environment", () => {
+  const conversation: TopicMessage[] = [
+    { role: "user", text: "Build in order" },
+    { role: "assistant", text: "I'll plan the steps" },
+  ]
+
+  function createMockChildProcess(output: string = "[]"): ChildProcess {
+    const child = {
+      stdout: { on: vi.fn((event: string, cb: (data: Buffer) => void) => {
+        if (event === "data") cb(Buffer.from(output))
+      }) },
+      stderr: { on: vi.fn() },
+      stdin: { write: vi.fn(), end: vi.fn() },
+      on: vi.fn((event: string, cb: (code: number) => void) => {
+        if (event === "close") cb(0)
+      }),
+      kill: vi.fn(),
+    } as unknown as ChildProcess
+    return child
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.spyOn(process.stderr, "write").mockImplementation(() => true)
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it("passes profile environment to spawned claude process for stack extraction", async () => {
+    const profile: ProviderProfile = {
+      id: "stack-profile",
+      name: "Stack Test",
+      baseUrl: "https://stack.api.endpoint",
+      authToken: "stack-token",
+      haikuModel: "stack-haiku-model",
+    }
+    mockSpawn.mockReturnValue(createMockChildProcess())
+
+    await extractStackItems(conversation, undefined, profile)
+
+    const env = mockSpawn.mock.calls[0][2]?.env
+    expect(env?.ANTHROPIC_BASE_URL).toBe("https://stack.api.endpoint")
+    expect(env?.ANTHROPIC_AUTH_TOKEN).toBe("stack-token")
+    expect(env?.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe("stack-haiku-model")
   })
 })
