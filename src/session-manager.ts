@@ -162,6 +162,7 @@ export function prepareWorkspace(
 
       if (fs.existsSync(bareDir)) {
         log.debug({ repoUrl, bareDir }, "fetching repo")
+        ensureBareRefspec(bareDir, gitOpts)
         execSync(`git fetch --prune origin`, { ...gitOpts, cwd: bareDir })
         updateLocalHead(bareDir, gitOpts)
       } else {
@@ -170,6 +171,7 @@ export function prepareWorkspace(
           `git clone --bare ${JSON.stringify(repoUrl)} ${JSON.stringify(bareDir)}`,
           gitOpts,
         )
+        ensureBareRefspec(bareDir, gitOpts)
       }
 
       const branch = `minion/${slug}`
@@ -184,6 +186,8 @@ export function prepareWorkspace(
         ...gitOpts,
         cwd: workDir,
       })
+
+      execSync(`git config rerere.enabled true`, { ...gitOpts, cwd: workDir })
 
       bootstrapDependencies(workDir, reposDir, repoName)
     } else {
@@ -230,6 +234,33 @@ export async function removeWorkspace(
     } catch {
       /* best effort */
     }
+  }
+}
+
+/**
+ * Ensure the bare repo has a fetch refspec configured.
+ * `git clone --bare` omits the fetch refspec, so `git fetch` won't
+ * update local refs without it.
+ */
+function ensureBareRefspec(bareDir: string, gitOpts: object): void {
+  try {
+    const existing = execSync(`git config --get remote.origin.fetch`, {
+      ...gitOpts,
+      cwd: bareDir,
+    })
+      .toString()
+      .trim()
+    if (existing) return
+  } catch {
+    /* not set — add it */
+  }
+  try {
+    execSync(
+      `git config remote.origin.fetch "+refs/heads/*:refs/heads/*"`,
+      { ...gitOpts, cwd: bareDir },
+    )
+  } catch {
+    /* best effort */
   }
 }
 
@@ -508,4 +539,318 @@ export function mergeUpstreamBranches(
   }
 
   return true
+}
+
+export interface RestackResult {
+  success: boolean
+  newMergeBase?: string
+  conflictFiles?: string[]
+  error?: string
+}
+
+/**
+ * Rebase a branch onto a new base commit.
+ *
+ * Uses `git rebase --onto` for the standard case (pre-squash, where original
+ * commits still exist). Falls back to cherry-pick when rebase fails — this
+ * handles post-squash scenarios where the original merge base no longer exists
+ * in the target branch's history.
+ *
+ * Operates in a temporary worktree so it doesn't interfere with running sessions.
+ */
+export async function rebaseBranchOnto(
+  workspaceRoot: string,
+  repoUrl: string,
+  branch: string,
+  oldMergeBase: string,
+  newBase: string,
+): Promise<RestackResult> {
+  const repoName = extractRepoName(repoUrl)
+  const bareDir = path.join(workspaceRoot, ".repos", `${repoName}.git`)
+  const gitEnv = { ...process.env, GIT_TERMINAL_PROMPT: "0" }
+  const stdio: import("node:child_process").StdioOptions = ["ignore", "pipe", "pipe"]
+  const gitOpts = { stdio, timeout: 120_000, env: gitEnv }
+
+  // Create a temporary worktree for the rebase operation
+  const tmpName = `restack-${Date.now()}`
+  const tmpDir = path.join(workspaceRoot, `.restack-tmp`, tmpName)
+  fs.mkdirSync(path.join(workspaceRoot, `.restack-tmp`), { recursive: true })
+
+  try {
+    // Fetch latest state (ensureBareRefspec so new branches are fetched as local refs)
+    ensureBareRefspec(bareDir, gitOpts)
+    execSync(`git fetch --prune origin`, { ...gitOpts, cwd: bareDir })
+
+    // Create temporary worktree on the branch to rebase
+    execSync(
+      `git worktree add ${JSON.stringify(tmpDir)} ${JSON.stringify(branch)}`,
+      { ...gitOpts, cwd: bareDir },
+    )
+
+    // Configure the worktree for rebase/cherry-pick operations
+    execSync(`git config rerere.enabled true`, { ...gitOpts, cwd: tmpDir })
+    execSync(`git config user.email "minion@restack"`, { ...gitOpts, cwd: tmpDir })
+    execSync(`git config user.name "minion"`, { ...gitOpts, cwd: tmpDir })
+
+    // Try rebase --onto first (works when original commits exist in history)
+    try {
+      execSync(
+        `git rebase --onto ${JSON.stringify(newBase)} ${JSON.stringify(oldMergeBase)}`,
+        { ...gitOpts, cwd: tmpDir },
+      )
+
+      const newHead = execSync(`git rev-parse HEAD`, { ...gitOpts, cwd: tmpDir })
+        .toString()
+        .trim()
+
+      // Force-push the rebased branch
+      execSync(
+        `git push --force origin HEAD:${JSON.stringify(branch)}`,
+        { ...gitOpts, cwd: tmpDir },
+      )
+
+      log.info({ branch, oldMergeBase, newBase, newHead }, "rebase --onto succeeded")
+
+      // New merge base is the tip of newBase
+      const mergeBase = execSync(
+        `git rev-parse ${JSON.stringify(newBase)}`,
+        { ...gitOpts, cwd: tmpDir },
+      )
+        .toString()
+        .trim()
+
+      return { success: true, newMergeBase: mergeBase }
+    } catch (rebaseErr) {
+      // Abort the failed rebase
+      try {
+        execSync(`git rebase --abort`, { ...gitOpts, cwd: tmpDir })
+      } catch {
+        /* may not be in rebase state */
+      }
+
+      log.debug({ branch, err: rebaseErr }, "rebase --onto failed, trying cherry-pick")
+    }
+
+    // Fallback: cherry-pick approach (works post-squash when merge base is gone)
+    return await cherryPickRestack(tmpDir, branch, oldMergeBase, newBase, gitOpts)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    log.error({ err, branch }, "rebaseBranchOnto failed")
+    return { success: false, error: message }
+  } finally {
+    // Clean up temporary worktree
+    try {
+      execSync(
+        `git worktree remove --force ${JSON.stringify(tmpDir)}`,
+        { ...gitOpts, cwd: bareDir },
+      )
+    } catch {
+      // Best effort — remove directory manually if worktree removal fails
+      try {
+        fs.rmSync(tmpDir, { recursive: true, force: true })
+        execSync(`git worktree prune`, { ...gitOpts, cwd: bareDir })
+      } catch {
+        /* best effort */
+      }
+    }
+  }
+}
+
+/**
+ * Cherry-pick approach for restacking after a squash merge.
+ *
+ * When upstream was squash-merged, the old merge base commit no longer exists
+ * in the target branch's history. We identify the unique commits on the branch
+ * (between old merge base and branch tip), reset to the new base, then
+ * cherry-pick each commit.
+ */
+async function cherryPickRestack(
+  workDir: string,
+  branch: string,
+  oldMergeBase: string,
+  newBase: string,
+  gitOpts: { stdio: import("node:child_process").StdioOptions; timeout: number; env: NodeJS.ProcessEnv },
+): Promise<RestackResult> {
+  // Get the list of commits to cherry-pick (oldest first)
+  const commitList = execSync(
+    `git rev-list --reverse ${JSON.stringify(oldMergeBase)}..HEAD`,
+    { ...gitOpts, cwd: workDir },
+  )
+    .toString()
+    .trim()
+
+  if (!commitList) {
+    // No unique commits — just reset to new base
+    execSync(
+      `git reset --hard ${JSON.stringify(newBase)}`,
+      { ...gitOpts, cwd: workDir },
+    )
+
+    execSync(
+      `git push --force origin HEAD:${JSON.stringify(branch)}`,
+      { ...gitOpts, cwd: workDir },
+    )
+
+    const mergeBase = execSync(
+      `git rev-parse ${JSON.stringify(newBase)}`,
+      { ...gitOpts, cwd: workDir },
+    )
+      .toString()
+      .trim()
+
+    return { success: true, newMergeBase: mergeBase }
+  }
+
+  const commits = commitList.split("\n")
+
+  // Reset to the new base
+  execSync(
+    `git reset --hard ${JSON.stringify(newBase)}`,
+    { ...gitOpts, cwd: workDir },
+  )
+
+  // Cherry-pick each commit
+  for (const commit of commits) {
+    try {
+      execSync(
+        `git cherry-pick ${JSON.stringify(commit)}`,
+        { ...gitOpts, cwd: workDir },
+      )
+    } catch {
+      // Check if rerere resolved all conflicts
+      const status = execSync(`git status --porcelain`, { ...gitOpts, cwd: workDir })
+        .toString()
+        .trim()
+
+      const unresolvedConflicts = status
+        .split("\n")
+        .filter((line) => line.startsWith("UU") || line.startsWith("AA") || line.startsWith("DD"))
+
+      if (unresolvedConflicts.length > 0) {
+        const conflictFiles = unresolvedConflicts.map((line) => line.slice(3))
+        // Abort the cherry-pick
+        try {
+          execSync(`git cherry-pick --abort`, { ...gitOpts, cwd: workDir })
+        } catch {
+          /* best effort */
+        }
+        // Reset back to the branch's original state
+        try {
+          execSync(`git checkout --force ${JSON.stringify(branch)}`, { ...gitOpts, cwd: workDir })
+        } catch {
+          /* best effort */
+        }
+        log.warn({ branch, conflictFiles }, "cherry-pick hit unresolved conflicts")
+        return { success: false, conflictFiles, error: "unresolved merge conflicts" }
+      }
+
+      // rerere resolved the conflicts — continue
+      execSync(`git add -A`, { ...gitOpts, cwd: workDir })
+      execSync(
+        `git cherry-pick --continue`,
+        { ...gitOpts, cwd: workDir, env: { ...gitOpts.env, GIT_EDITOR: "true" } },
+      )
+    }
+  }
+
+  // Force-push the rebased branch
+  execSync(
+    `git push --force origin HEAD:${JSON.stringify(branch)}`,
+    { ...gitOpts, cwd: workDir },
+  )
+
+  const newHead = execSync(`git rev-parse HEAD`, { ...gitOpts, cwd: workDir })
+    .toString()
+    .trim()
+
+  const mergeBase = execSync(
+    `git rev-parse ${JSON.stringify(newBase)}`,
+    { ...gitOpts, cwd: workDir },
+  )
+    .toString()
+    .trim()
+
+  log.info({ branch, commits: commits.length, newHead }, "cherry-pick restack succeeded")
+
+  return { success: true, newMergeBase: mergeBase }
+}
+
+/**
+ * Restack a single branch onto its updated upstream.
+ *
+ * High-level wrapper that fetches, rebases (or cherry-picks), and force-pushes.
+ * Returns the new merge base commit hash on success so the caller can update
+ * the DagNode.mergeBase field.
+ */
+export async function restackBranch(
+  workspaceRoot: string,
+  repoUrl: string,
+  branch: string,
+  oldMergeBase: string,
+  newUpstreamBranch: string,
+): Promise<RestackResult> {
+  const repoName = extractRepoName(repoUrl)
+  const bareDir = path.join(workspaceRoot, ".repos", `${repoName}.git`)
+  const gitEnv = { ...process.env, GIT_TERMINAL_PROMPT: "0" }
+  const stdio: import("node:child_process").StdioOptions = ["ignore", "pipe", "pipe"]
+  const gitOpts = { stdio, timeout: 120_000, env: gitEnv }
+
+  // Resolve the upstream branch to a commit hash (the new base)
+  try {
+    ensureBareRefspec(bareDir, gitOpts)
+    execSync(`git fetch --prune origin`, { ...gitOpts, cwd: bareDir })
+  } catch (err) {
+    log.error({ err, repoUrl }, "fetch failed during restack")
+    return { success: false, error: "git fetch failed" }
+  }
+
+  let newBase: string
+  try {
+    // With bare refspec +refs/heads/*:refs/heads/*, branches are local refs
+    newBase = execSync(
+      `git rev-parse ${JSON.stringify(newUpstreamBranch)}`,
+      { ...gitOpts, cwd: bareDir },
+    )
+      .toString()
+      .trim()
+  } catch (err) {
+    log.error({ err, newUpstreamBranch }, "could not resolve upstream branch")
+    return { success: false, error: `cannot resolve upstream branch: ${newUpstreamBranch}` }
+  }
+
+  // If the merge base hasn't changed, no restack needed
+  if (newBase === oldMergeBase) {
+    log.debug({ branch, oldMergeBase }, "branch already up to date, skipping restack")
+    return { success: true, newMergeBase: oldMergeBase }
+  }
+
+  return rebaseBranchOnto(workspaceRoot, repoUrl, branch, oldMergeBase, newBase)
+}
+
+/**
+ * Capture the current HEAD commit of a branch in the bare repo.
+ * Used to record the merge base when spawning DAG children.
+ */
+export function captureMergeBase(
+  workspaceRoot: string,
+  repoUrl: string,
+  branch: string,
+): string | null {
+  const repoName = extractRepoName(repoUrl)
+  const bareDir = path.join(workspaceRoot, ".repos", `${repoName}.git`)
+  const gitEnv = { ...process.env, GIT_TERMINAL_PROMPT: "0" }
+  const stdio: import("node:child_process").StdioOptions = ["ignore", "pipe", "pipe"]
+  const gitOpts = { stdio, timeout: 30_000, env: gitEnv }
+
+  try {
+    return execSync(
+      `git rev-parse ${JSON.stringify(branch)}`,
+      { ...gitOpts, cwd: bareDir },
+    )
+      .toString()
+      .trim()
+  } catch (err) {
+    log.warn({ err, branch }, "failed to capture merge base")
+    return null
+  }
 }
