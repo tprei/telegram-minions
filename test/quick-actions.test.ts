@@ -125,6 +125,7 @@ describe("quickActions in API response", () => {
       port: 0,
       uiDistPath: "/nonexistent",
       chatId: "-1001234567890",
+      botToken: "test-bot-token-123456",
       broadcaster,
     })
 
@@ -180,6 +181,7 @@ describe("quickActions in API response", () => {
       port: 0,
       uiDistPath: "/nonexistent",
       chatId: "-1001234567890",
+      botToken: "test-bot-token-123456",
       broadcaster,
     })
 
