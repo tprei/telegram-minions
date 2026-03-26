@@ -8,9 +8,11 @@ import {
   escapeHtml,
   extractRepoName,
   appendImageContext,
+} from "../src/command-parser.js"
+import {
   buildContextPrompt,
   buildExecutionPrompt,
-} from "../src/dispatcher.js"
+} from "../src/session-manager.js"
 import type { TopicSession } from "../src/types.js"
 
 const testRepos = {
@@ -140,8 +142,8 @@ describe("extractRepoName", () => {
     expect(extractRepoName("git@github.com:org/my-repo.git")).toBe("my-repo")
   })
 
-  it("returns empty string for empty input", () => {
-    expect(extractRepoName("")).toBe("")
+  it("returns 'repo' for empty input", () => {
+    expect(extractRepoName("")).toBe("repo")
   })
 })
 

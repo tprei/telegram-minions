@@ -4,7 +4,7 @@ import os from "node:os"
 import path from "node:path"
 
 import crypto from "node:crypto"
-import { cleanBuildArtifacts, dirSizeBytes, bootstrapDependencies } from "../src/dispatcher.js"
+import { cleanBuildArtifacts, dirSizeBytes, bootstrapDependencies } from "../src/session-manager.js"
 
 let tmpDir: string
 
