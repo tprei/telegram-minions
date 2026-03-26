@@ -60,6 +60,8 @@ import {
   formatLandComplete,
   formatLandError,
   buildPlanCompleteKeyboard,
+  buildSessionReadoutKeyboard,
+  formatSessionReadout,
 } from "./format.js"
 import { extractSplitItems, buildSplitChildPrompt } from "./split.js"
 import { extractStackItems, extractDagItems, buildDagChildPrompt } from "./dag-extract.js"
@@ -532,6 +534,16 @@ export class Dispatcher {
       return
     }
 
+    if (data.startsWith("plan-read:")) {
+      await this.handlePlanReadCallback(query, parseInt(data.slice("plan-read:".length), 10))
+      return
+    }
+
+    if (data.startsWith("plan-action:")) {
+      await this.handlePlanActionCallback(query, data.slice("plan-action:".length))
+      return
+    }
+
     if (!data.startsWith("repo:") && !data.startsWith("plan-repo:") && !data.startsWith("think-repo:") && !data.startsWith("review-repo:")) {
       await this.telegram.answerCallbackQuery(query.id)
       return
@@ -614,6 +626,63 @@ export class Dispatcher {
     }
 
     await this.telegram.answerCallbackQuery(query.id)
+  }
+
+  private async handlePlanReadCallback(query: TelegramCallbackQuery, threadId: number): Promise<void> {
+    const topicSession = this.topicSessions.get(threadId)
+    if (!topicSession) {
+      await this.telegram.answerCallbackQuery(query.id, "Session not found or expired")
+      return
+    }
+
+    const readout = formatSessionReadout(topicSession.slug, topicSession.conversation)
+    await this.telegram.sendMessageWithKeyboard(
+      readout,
+      buildSessionReadoutKeyboard(threadId),
+      topicSession.threadId,
+    )
+    await this.telegram.answerCallbackQuery(query.id)
+  }
+
+  private async handlePlanActionCallback(query: TelegramCallbackQuery, payload: string): Promise<void> {
+    const colonIdx = payload.indexOf(":")
+    if (colonIdx < 0) {
+      await this.telegram.answerCallbackQuery(query.id)
+      return
+    }
+
+    const action = payload.slice(0, colonIdx)
+    const threadId = parseInt(payload.slice(colonIdx + 1), 10)
+    const topicSession = this.topicSessions.get(threadId)
+
+    if (!topicSession) {
+      await this.telegram.answerCallbackQuery(query.id, "Session not found or expired")
+      return
+    }
+
+    if (topicSession.mode === "task") {
+      await this.telegram.answerCallbackQuery(query.id, "Session already executed")
+      return
+    }
+
+    await this.telegram.answerCallbackQuery(query.id, `Starting ${action}…`)
+
+    switch (action) {
+      case "execute":
+        await this.handleExecuteCommand(topicSession)
+        break
+      case "split":
+        await this.handleSplitCommand(topicSession)
+        break
+      case "stack":
+        await this.handleStackCommand(topicSession)
+        break
+      case "dag":
+        await this.handleDagCommand(topicSession)
+        break
+      default:
+        break
+    }
   }
 
   private async handleStatusCommand(): Promise<void> {
