@@ -455,6 +455,7 @@ export class SessionHandle {
     })
 
     proc.stderr?.on("data", (chunk: Buffer) => {
+      resetInactivityTimer()
       process.stderr.write(`session ${this.meta.sessionId} stderr: ${chunk.toString()}`)
     })
 
