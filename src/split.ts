@@ -2,6 +2,9 @@ import { spawn } from "node:child_process"
 import fs from "node:fs"
 import path from "node:path"
 import type { TopicMessage } from "./types.js"
+import { loggers } from "./logger.js"
+
+const log = loggers.split
 
 export interface SplitItem {
   title: string
@@ -64,12 +67,12 @@ export function getClaudeConfigDir(
  */
 function logResourceUsage(label: string): void {
   const mem = process.memoryUsage()
-  process.stderr.write(
-    `split: ${label} | ` +
-    `heapUsed=${Math.round(mem.heapUsed / 1024 / 1024)}MB ` +
-    `heapTotal=${Math.round(mem.heapTotal / 1024 / 1024)}MB ` +
-    `rss=${Math.round(mem.rss / 1024 / 1024)}MB\n`,
-  )
+  log.debug({
+    label,
+    heapUsedMb: Math.round(mem.heapUsed / 1024 / 1024),
+    heapTotalMb: Math.round(mem.heapTotal / 1024 / 1024),
+    rssMb: Math.round(mem.rss / 1024 / 1024),
+  }, "resource usage")
 }
 
 /**
@@ -88,7 +91,7 @@ function runClaudeExtraction(task: string, timeoutMs: number): Promise<string> {
     logResourceUsage("spawning claude CLI")
 
     const claudeConfigDir = getClaudeConfigDir()
-    process.stderr.write(`split: using CLAUDE_CONFIG_DIR=${claudeConfigDir}\n`)
+    log.debug({ claudeConfigDir }, "using CLAUDE_CONFIG_DIR")
 
     const child = spawn("claude", args, {
       stdio: ["pipe", "pipe", "pipe"],
@@ -154,10 +157,7 @@ export async function extractSplitItems(
   const lines: string[] = ["## Conversation\n"]
 
   // Log what we're analyzing
-  process.stderr.write(`split: analyzing conversation (${conversation.length} messages)\n`)
-  if (directive) {
-    process.stderr.write(`split: directive: "${directive.slice(0, 100)}${directive.length > 100 ? "..." : ""}"\n`)
-  }
+  log.debug({ messageCount: conversation.length, directive: directive?.slice(0, 100) }, "analyzing conversation")
 
   logResourceUsage("starting extraction")
 
@@ -182,17 +182,15 @@ export async function extractSplitItems(
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
-      process.stderr.write(`split: attempt ${attempt}/${MAX_RETRIES}\n`)
+      log.debug({ attempt, maxRetries: MAX_RETRIES }, "attempt")
 
       const output = await runClaudeExtraction(task, 60_000)
 
       // Log raw output for debugging
-      process.stderr.write(`split: raw output (${output.length} chars)\n`)
-      const previewLen = 500
-      process.stderr.write(`split: ${output.slice(0, previewLen)}${output.length > previewLen ? "..." : ""}\n`)
+      log.debug({ outputLength: output.length }, "raw output")
 
       const items = parseSplitItems(output)
-      process.stderr.write(`split: extracted ${items.length} valid items\n`)
+      log.debug({ itemCount: items.length }, "extracted valid items")
 
       return { items }
     } catch (err) {
@@ -205,13 +203,11 @@ export async function extractSplitItems(
 
       if (isSpawnError && attempt < MAX_RETRIES) {
         const delay = INITIAL_DELAY_MS * Math.pow(2, attempt - 1)
-        process.stderr.write(
-          `split: spawn error on attempt ${attempt}: ${err}. Retrying in ${delay}ms...\n`,
-        )
+        log.warn({ attempt, delay, err }, "spawn error, retrying")
         logResourceUsage(`before retry ${attempt + 1}`)
         await sleep(delay)
       } else {
-        process.stderr.write(`split: extraction failed: ${err}\n`)
+        log.error({ err }, "extraction failed")
         return {
           items: [],
           error: "system",
@@ -239,7 +235,7 @@ export function parseSplitItems(output: string): SplitItem[] {
 
   const arrayMatch = text.match(/\[[\s\S]*\]/)
   if (!arrayMatch) {
-    process.stderr.write(`split: no JSON array found in output\n`)
+    log.debug("no JSON array found in output")
     return []
   }
 
@@ -247,11 +243,11 @@ export function parseSplitItems(output: string): SplitItem[] {
   try {
     parsed = JSON.parse(arrayMatch[0])
   } catch (e) {
-    process.stderr.write(`split: JSON parse error: ${e}\n`)
+    log.debug({ err: String(e) }, "JSON parse error")
     return []
   }
   if (!Array.isArray(parsed)) {
-    process.stderr.write(`split: parsed value is not an array (got ${typeof parsed})\n`)
+    log.debug({ type: typeof parsed }, "parsed value is not an array")
     return []
   }
 
@@ -259,18 +255,18 @@ export function parseSplitItems(output: string): SplitItem[] {
   let filtered = 0
   const valid = parsed.filter((item: unknown): item is SplitItem => {
     if (typeof item !== "object" || item === null) {
-      process.stderr.write(`split: filtered non-object item\n`)
+      log.debug("filtered non-object item")
       filtered++
       return false
     }
     const obj = item as Record<string, unknown>
     if (typeof obj.title !== "string" || !obj.title.length) {
-      process.stderr.write(`split: filtered item with missing/empty title\n`)
+      log.debug("filtered item with missing/empty title")
       filtered++
       return false
     }
     if (typeof obj.description !== "string" || !obj.description.length) {
-      process.stderr.write(`split: filtered item "${obj.title}" with missing/empty description\n`)
+      log.debug({ title: obj.title }, "filtered item with missing/empty description")
       filtered++
       return false
     }
@@ -278,7 +274,7 @@ export function parseSplitItems(output: string): SplitItem[] {
   })
 
   if (filtered > 0) {
-    process.stderr.write(`split: filtered ${filtered} invalid items from ${parsed.length} candidates\n`)
+    log.debug({ filtered, total: parsed.length }, "filtered invalid items")
   }
 
   return valid

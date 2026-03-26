@@ -1,6 +1,9 @@
 import { execSync } from "node:child_process"
 import type { CiConfig } from "./config-types.js"
 import type { QualityReport } from "./quality-gates.js"
+import { loggers } from "./logger.js"
+
+const log = loggers.ciBabysit
 
 export interface CICheckResult {
   name: string
@@ -74,14 +77,14 @@ function getCheckStatus(prUrl: string, cwd: string): CICheckResult[] | null {
     ).toString().trim()
 
     if (!output || output === "[]") {
-      process.stderr.write(`ci-babysit: gh pr checks returned empty for ${prUrl}\n`)
+      log.debug({ prUrl }, "gh pr checks returned empty")
       return []
     }
     const checks = JSON.parse(output) as CICheckResult[]
-    process.stderr.write(`ci-babysit: gh pr checks returned ${checks.length} checks for ${prUrl}\n`)
+    log.debug({ prUrl, checkCount: checks.length }, "gh pr checks returned")
     return checks
   } catch (err) {
-    process.stderr.write(`ci-babysit: gh pr checks failed for ${prUrl}: ${err}\n`)
+    log.error({ err, prUrl }, "gh pr checks failed")
     return null
   }
 }

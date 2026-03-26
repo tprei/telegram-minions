@@ -7,6 +7,9 @@ import { TelegramClient } from "./telegram.js"
 import { Observer } from "./observer.js"
 import { Dispatcher } from "./dispatcher.js"
 import { createApiServer, StateBroadcaster, type DispatcherApi } from "./api-server.js"
+import { loggers } from "./logger.js"
+
+const log = loggers.minion
 
 export interface MinionInstance {
   start(): Promise<void>
@@ -80,7 +83,7 @@ export function createMinion(config: MinionConfig, options?: MinionOptions): Min
       if (apiServer) {
         await new Promise<void>((resolve) => {
           apiServer!.listen(apiPort!, () => {
-            process.stderr.write(`minion: API server listening on port ${apiPort}\n`)
+            log.info({ port: apiPort }, "API server listening")
             resolve()
           })
         })

@@ -7,6 +7,7 @@ import type { GooseStreamEvent, SessionMeta, SessionState } from "./types.js"
 import { translateClaudeEvents } from "./claude-stream.js"
 import { captureException, setContext, addBreadcrumb } from "./sentry.js"
 import { DEFAULT_TASK_PROMPT, DEFAULT_PLAN_PROMPT, DEFAULT_THINK_PROMPT, DEFAULT_REVIEW_PROMPT } from "./prompts.js"
+import { createSessionLogger } from "./logger.js"
 
 export const SCREENSHOTS_DIR = ".screenshots"
 
@@ -99,7 +100,7 @@ export class SessionHandle {
           env: { GITHUB_PERSONAL_ACCESS_TOKEN: token },
         }
       } else {
-        process.stderr.write("MCP: GitHub MCP enabled but GITHUB_TOKEN is not set — skipping\n")
+        createSessionLogger(this.meta.sessionId).warn("MCP: GitHub MCP enabled but GITHUB_TOKEN is not set — skipping")
       }
     }
 
@@ -125,7 +126,7 @@ export class SessionHandle {
           args: sentryArgs,
         }
       } else {
-        process.stderr.write("MCP: Sentry MCP enabled but SENTRY_ACCESS_TOKEN is not set — skipping\n")
+        createSessionLogger(this.meta.sessionId).warn("MCP: Sentry MCP enabled but SENTRY_ACCESS_TOKEN is not set — skipping")
       }
     }
 
@@ -141,7 +142,7 @@ export class SessionHandle {
           },
         }
       } else {
-        process.stderr.write("MCP: Z.AI MCP enabled but ZAI_API_KEY is not set — skipping\n")
+        createSessionLogger(this.meta.sessionId).warn("MCP: Z.AI MCP enabled but ZAI_API_KEY is not set — skipping")
       }
     }
 
@@ -400,6 +401,7 @@ export class SessionHandle {
   }
 
   private parseGooseLine(trimmed: string): void {
+    const log = createSessionLogger(this.meta.sessionId, this.meta.threadId)
     try {
       const event = JSON.parse(trimmed) as GooseStreamEvent
       if (event.type === "complete") {
@@ -407,11 +409,12 @@ export class SessionHandle {
       }
       this.onEvent(event)
     } catch {
-      process.stderr.write(`session ${this.meta.sessionId}: invalid JSON line: ${trimmed}\n`)
+      log.warn({ line: trimmed.slice(0, 200) }, "invalid JSON line")
     }
   }
 
   private parseClaudeLine(trimmed: string): void {
+    const log = createSessionLogger(this.meta.sessionId, this.meta.threadId)
     try {
       const raw = JSON.parse(trimmed)
       const events = translateClaudeEvents(raw)
@@ -422,20 +425,21 @@ export class SessionHandle {
         this.onEvent(event)
       }
     } catch {
-      process.stderr.write(`session ${this.meta.sessionId}: invalid Claude JSON line: ${trimmed}\n`)
+      log.warn({ line: trimmed.slice(0, 200) }, "invalid Claude JSON line")
     }
   }
 
   private attachProcessHandlers(parseLine: (line: string) => void): void {
     const proc = this.process!
     this.state = "working"
+    const log = createSessionLogger(this.meta.sessionId, this.meta.threadId)
 
     const rl = createInterface({ input: proc.stdout! })
 
     const resetInactivityTimer = () => {
       if (this.inactivityHandle !== null) clearTimeout(this.inactivityHandle)
       this.inactivityHandle = setTimeout(() => {
-        process.stderr.write(`session ${this.meta.sessionId}: inactivity timeout after ${this.inactivityTimeoutMs}ms — no stdout, killing\n`)
+        log.warn({ inactivityTimeoutMs: this.inactivityTimeoutMs }, "inactivity timeout — no stdout, killing")
         captureException(new Error("Session inactivity timeout"), {
           sessionId: this.meta.sessionId,
           repo: this.meta.repo,
@@ -456,7 +460,7 @@ export class SessionHandle {
 
     proc.stderr?.on("data", (chunk: Buffer) => {
       resetInactivityTimer()
-      process.stderr.write(`session ${this.meta.sessionId} stderr: ${chunk.toString()}`)
+      log.debug({ stderr: chunk.toString() }, "process stderr")
     })
 
     proc.on("close", (code) => {
@@ -475,7 +479,7 @@ export class SessionHandle {
     })
 
     proc.on("error", (err) => {
-      process.stderr.write(`session ${this.meta.sessionId}: process error: ${err}\n`)
+      log.error({ err }, "process error")
       captureException(err, {
         sessionId: this.meta.sessionId,
         repo: this.meta.repo,
@@ -488,7 +492,7 @@ export class SessionHandle {
     })
 
     this.timeoutHandle = setTimeout(() => {
-      process.stderr.write(`session ${this.meta.sessionId}: timeout after ${this.timeoutMs}ms\n`)
+      log.warn({ timeoutMs: this.timeoutMs }, "session timeout")
       captureException(new Error("Session timed out"), {
         sessionId: this.meta.sessionId,
         repo: this.meta.repo,
@@ -510,6 +514,8 @@ export class SessionHandle {
       return Promise.resolve()
     }
 
+    const log = createSessionLogger(this.meta.sessionId, this.meta.threadId)
+
     return new Promise<void>((resolve) => {
       const proc = this.process!
 
@@ -524,7 +530,7 @@ export class SessionHandle {
 
       const escalation = setTimeout(() => {
         if (this.isActive()) {
-          process.stderr.write(`session ${this.meta.sessionId}: SIGINT timeout, sending SIGKILL\n`)
+          log.warn("SIGINT timeout, sending SIGKILL")
           this.killProcessGroup(proc, "SIGKILL")
         }
       }, gracefulMs)

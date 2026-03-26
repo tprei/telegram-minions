@@ -76,6 +76,9 @@ import { extractPRUrl, findPRByBranch, waitForCI, getFailedCheckLogs, buildCIFix
 import { buildConversationDigest } from "./conversation-digest.js"
 import { DEFAULT_CI_FIX_PROMPT, DEFAULT_RECOVERY_PROMPT } from "./prompts.js"
 import { StateBroadcaster, topicSessionToApi, dagToApi } from "./api-server.js"
+import { loggers, createSessionLogger } from "./logger.js"
+
+const log = loggers.dispatcher
 
 const POLL_TIMEOUT = 30
 const TASK_PREFIX = "/task"
@@ -175,12 +178,12 @@ export class Dispatcher {
 
       // Notify about interrupted sessions
       if (session.interruptedAt) {
-        process.stderr.write(`dispatcher: session ${session.slug} was interrupted, notifying\n`)
+        log.info({ slug: session.slug, threadId }, "session was interrupted, notifying")
         this.telegram.sendMessage(
           `⚡ This session was interrupted by a deploy. Send <b>/reply</b> to continue.`,
           threadId,
         ).catch((err) => {
-          process.stderr.write(`dispatcher: failed to notify interrupted session: ${err}\n`)
+          log.warn({ err, slug: session.slug }, "failed to notify interrupted session")
         })
         // Clear the interruption flag
         session.interruptedAt = undefined
@@ -188,14 +191,14 @@ export class Dispatcher {
     }
 
     if (active.size > 0) {
-      process.stderr.write(`dispatcher: loaded ${active.size} persisted session(s), offset=${offset}\n`)
+      log.info({ count: active.size, offset }, "loaded persisted sessions")
     }
     if (expired.size > 0) {
-      process.stderr.write(`dispatcher: cleaning ${expired.size} expired session(s)\n`)
+      log.info({ count: expired.size }, "cleaning expired sessions")
       for (const [threadId, session] of expired) {
         await this.telegram.deleteForumTopic(threadId)
         await this.removeWorkspace(session)
-        process.stderr.write(`dispatcher: cleaned expired session ${session.slug} (topic ${threadId})\n`)
+        log.info({ slug: session.slug, threadId }, "cleaned expired session")
       }
     }
     this.updatePinnedSummary()
@@ -203,7 +206,7 @@ export class Dispatcher {
 
   async start(): Promise<void> {
     this.running = true
-    process.stderr.write("dispatcher: started, polling Telegram\n")
+    log.info("started, polling Telegram")
 
     while (this.running) {
       await this.poll()
@@ -218,7 +221,7 @@ export class Dispatcher {
     }
     // Mark active sessions as interrupted before persisting for restart
     this.persistTopicSessions(true).catch(() => {}) // best effort on shutdown
-    process.stderr.write("dispatcher: stopped\n")
+    log.info("stopped")
   }
 
   async handleReplyCommand(threadId: number, text: string, _photos?: string[]): Promise<void> {
@@ -266,16 +269,17 @@ export class Dispatcher {
 
   startCleanupTimer(): void {
     this.cleanupStaleSessions().catch((err) => {
-      process.stderr.write(`dispatcher: startup cleanup error: ${err}\n`)
+      log.error({ err }, "startup cleanup error")
     })
     this.cleanupTimer = setInterval(() => {
       this.cleanupStaleSessions().catch((err) => {
-        process.stderr.write(`dispatcher: cleanup error: ${err}\n`)
+        log.error({ err }, "cleanup error")
       })
     }, this.config.workspace.cleanupIntervalMs)
-    process.stderr.write(
-      `dispatcher: cleanup timer started (interval=${Math.round(this.config.workspace.cleanupIntervalMs / 60000)}m, ttl=${Math.round(this.config.workspace.staleTtlMs / 86400000)}d)\n`,
-    )
+    log.info({
+      intervalMinutes: Math.round(this.config.workspace.cleanupIntervalMs / 60000),
+      ttlDays: Math.round(this.config.workspace.staleTtlMs / 86400000),
+    }, "cleanup timer started")
   }
 
   private stopCleanupTimer(): void {
@@ -301,7 +305,7 @@ export class Dispatcher {
 
     if (stale.length === 0) return
 
-    process.stderr.write(`dispatcher: cleaning up ${stale.length} stale session(s)\n`)
+    log.info({ count: stale.length }, "cleaning up stale sessions")
 
     for (const [threadId, session] of stale) {
       // Cascade cleanup to children first (handles both tracked and orphaned)
@@ -310,7 +314,7 @@ export class Dispatcher {
       await this.telegram.deleteForumTopic(threadId)
       await this.removeWorkspace(session)
       this.topicSessions.delete(threadId)
-      process.stderr.write(`dispatcher: cleaned up stale session ${session.slug} (topic ${threadId})\n`)
+      log.info({ slug: session.slug, threadId }, "cleaned up stale session")
     }
 
     await this.persistTopicSessions()
@@ -381,7 +385,7 @@ export class Dispatcher {
         this.savePinnedMessageId(messageId)
       }
     })().catch((err) => {
-      process.stderr.write(`dispatcher: updatePinnedSummary error: ${err}\n`)
+      log.error({ err }, "updatePinnedSummary error")
     })
   }
 
@@ -392,7 +396,7 @@ export class Dispatcher {
       try {
         await this.handleUpdate(update)
       } catch (err) {
-        process.stderr.write(`dispatcher: error handling update ${update.update_id}: ${err}\n`)
+        log.error({ err, updateId: update.update_id }, "error handling update")
         captureException(err, { updateId: update.update_id })
       }
     }
@@ -507,9 +511,7 @@ export class Dispatcher {
 
       const session = this.sessions.get(message.message_thread_id)
       if (session) {
-        process.stderr.write(
-          `dispatcher: received message in active topic ${message.message_thread_id}, session still initializing\n`,
-        )
+        log.debug({ threadId: message.message_thread_id }, "received message in active topic, session still initializing")
       }
     }
   }
@@ -768,9 +770,9 @@ export class Dispatcher {
       try {
         fs.rmSync(entryPath, { recursive: true, force: true })
         removedOrphans++
-        process.stderr.write(`dispatcher: removed orphan workspace ${entryPath}\n`)
+        log.info({ path: entryPath }, "removed orphan workspace")
       } catch (err) {
-        process.stderr.write(`dispatcher: failed to remove orphan ${entryPath}: ${err}\n`)
+        log.warn({ err, path: entryPath }, "failed to remove orphan")
       }
     }
 
@@ -793,9 +795,9 @@ export class Dispatcher {
         try {
           fs.rmSync(repoPath, { recursive: true, force: true })
           removedRepos++
-          process.stderr.write(`dispatcher: removed bare repo ${repoPath}\n`)
+          log.info({ path: repoPath }, "removed bare repo")
         } catch (err) {
-          process.stderr.write(`dispatcher: failed to remove bare repo ${repoPath}: ${err}\n`)
+          log.warn({ err, path: repoPath }, "failed to remove bare repo")
         }
       }
     }
@@ -1092,7 +1094,7 @@ export class Dispatcher {
     try {
       topic = await this.telegram.createForumTopic(topicName)
     } catch (err) {
-      process.stderr.write(`dispatcher: failed to create topic: ${err}\n`)
+      log.error({ err, topicName }, "failed to create topic")
       captureException(err, { operation: "createForumTopic" })
       return
     }
@@ -1185,13 +1187,11 @@ export class Dispatcher {
       meta,
       (event) => {
         this.observer.onEvent(meta, event).catch((err) => {
-          process.stderr.write(`observer: onEvent error: ${err}\n`)
+          loggers.observer.error({ err, sessionId }, "onEvent error")
         })
 
         if (event.type === "complete" && meta.totalTokens != null && meta.totalTokens > this.config.workspace.sessionTokenBudget) {
-          process.stderr.write(
-            `dispatcher: session ${sessionId} exceeded token budget (${meta.totalTokens} > ${this.config.workspace.sessionTokenBudget})\n`,
-          )
+          log.warn({ sessionId, totalTokens: meta.totalTokens, budget: this.config.workspace.sessionTokenBudget }, "session exceeded token budget")
           this.telegram.sendMessage(
             formatBudgetWarning(topicSession.slug, meta.totalTokens, this.config.workspace.sessionTokenBudget),
             topicSession.threadId,
@@ -1222,7 +1222,7 @@ export class Dispatcher {
         if (topicSession.mode === "think") {
           this.updateTopicTitle(topicSession, "💬").catch(() => {})
           this.observer.onSessionComplete(m, state, durationMs).catch((err) => {
-            process.stderr.write(`observer: onSessionComplete error: ${err}\n`)
+            loggers.observer.error({ err, sessionId }, "onSessionComplete error")
           })
           this.telegram.sendMessage(
             formatThinkComplete(topicSession.slug),
@@ -1232,7 +1232,7 @@ export class Dispatcher {
         } else if (topicSession.mode === "review") {
           this.updateTopicTitle(topicSession, "💬").catch(() => {})
           this.observer.onSessionComplete(m, state, durationMs).catch((err) => {
-            process.stderr.write(`observer: onSessionComplete error: ${err}\n`)
+            loggers.observer.error({ err, sessionId }, "onSessionComplete error")
           })
           this.telegram.sendMessage(
             formatReviewComplete(topicSession.slug),
@@ -1242,7 +1242,7 @@ export class Dispatcher {
         } else if (topicSession.mode === "plan") {
           this.updateTopicTitle(topicSession, "💬").catch(() => {})
           this.observer.onSessionComplete(m, state, durationMs).catch((err) => {
-            process.stderr.write(`observer: onSessionComplete error: ${err}\n`)
+            loggers.observer.error({ err, sessionId }, "onSessionComplete error")
           })
           this.telegram.sendMessage(
             formatPlanComplete(topicSession.slug),
@@ -1252,7 +1252,7 @@ export class Dispatcher {
         } else if (state === "errored") {
           this.updateTopicTitle(topicSession, "❌").catch(() => {})
           this.observer.onSessionComplete(m, state, durationMs).catch((err) => {
-            process.stderr.write(`observer: onSessionComplete error: ${err}\n`)
+            loggers.observer.error({ err, sessionId }, "onSessionComplete error")
           })
           writeSessionLog(topicSession, m, state, durationMs)
         } else {
@@ -1279,7 +1279,7 @@ export class Dispatcher {
                 })
               }
             } catch (err) {
-              process.stderr.write(`dispatcher: quality gates error: ${err}\n`)
+              log.error({ err, sessionId }, "quality gates error")
               captureException(err, { operation: "qualityGates" })
             }
 
@@ -1302,7 +1302,7 @@ export class Dispatcher {
                     }
                   } else {
                     this.babysitPR(topicSession, prUrl, qualityReport).catch((err) => {
-                      process.stderr.write(`dispatcher: babysitPR error: ${err}\n`)
+                      log.error({ err, prUrl }, "babysitPR error")
                       captureException(err, { operation: "babysitPR", prUrl })
                     })
                   }
@@ -1310,7 +1310,7 @@ export class Dispatcher {
               }
             }
           }).catch((err) => {
-            process.stderr.write(`observer: flushAndComplete error: ${err}\n`)
+            loggers.observer.error({ err, sessionId }, "flushAndComplete error")
           })
         }
 
@@ -1318,7 +1318,7 @@ export class Dispatcher {
         this.cleanBuildArtifacts(topicSession.cwd)
 
         this.notifyParentOfChildComplete(topicSession, state).catch((err) => {
-          process.stderr.write(`dispatcher: parent notify error: ${err}\n`)
+          log.warn({ err, slug: topicSession.slug }, "parent notify error")
         })
 
         if (topicSession.pendingFeedback.length > 0) {

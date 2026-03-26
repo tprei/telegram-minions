@@ -2,9 +2,11 @@ import fs from "node:fs/promises"
 import path from "node:path"
 import type { TopicSession } from "./types.js"
 import { captureException } from "./sentry.js"
+import { loggers } from "./logger.js"
 
 const STORE_FILENAME = ".sessions.json"
 const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000 // 24 hours
+const log = loggers.store
 
 interface StoreData {
   sessions: [number, TopicSession][]
@@ -28,7 +30,7 @@ export class SessionStore {
       await fs.writeFile(tmp, JSON.stringify(data), "utf-8")
       await fs.rename(tmp, this.filePath)
     } catch (err) {
-      process.stderr.write(`store: failed to save sessions: ${err}\n`)
+      log.error({ err, operation: "store.save" }, "failed to save sessions")
       captureException(err, { operation: "store.save" })
     }
   }
@@ -67,7 +69,7 @@ export class SessionStore {
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
         const isBadJson = err instanceof SyntaxError
-        process.stderr.write(`store: ${isBadJson ? "corrupt file, starting fresh" : "failed to load sessions"}: ${err}\n`)
+        log.error({ err, isBadJson, operation: "store.load" }, isBadJson ? "corrupt file, starting fresh" : "failed to load sessions")
         if (!isBadJson) captureException(err, { operation: "store.load" })
       }
     }

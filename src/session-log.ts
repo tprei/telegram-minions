@@ -2,6 +2,9 @@ import fs from "node:fs"
 import path from "node:path"
 import type { TopicSession, SessionMeta } from "./types.js"
 import type { QualityReport } from "./quality-gates.js"
+import { loggers } from "./logger.js"
+
+const log = loggers.sessionLog
 
 export interface SessionLogEntry {
   slug: string
@@ -43,6 +46,6 @@ export function writeSessionLog(
     fs.mkdirSync(topicSession.cwd, { recursive: true })
     fs.writeFileSync(logPath, JSON.stringify(entry, null, 2), "utf-8")
   } catch (err) {
-    process.stderr.write(`session-log: failed to write ${logPath}: ${err}\n`)
+    log.error({ err, logPath, slug: topicSession.slug }, "failed to write session log")
   }
 }

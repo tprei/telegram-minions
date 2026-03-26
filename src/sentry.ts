@@ -1,12 +1,14 @@
 import type { Scope } from "@sentry/node"
+import { loggers } from "./logger.js"
 
 type SentryModule = typeof import("@sentry/node")
 
 let sentry: SentryModule | null = null
+const log = loggers.sentry
 
 export async function initSentry(dsn: string | undefined): Promise<void> {
   if (!dsn) {
-    process.stderr.write("sentry: no DSN configured, error reporting disabled\n")
+    log.info("no DSN configured, error reporting disabled")
     return
   }
 
@@ -25,9 +27,9 @@ export async function initSentry(dsn: string | undefined): Promise<void> {
       },
     })
     sentry = mod
-    process.stderr.write("sentry: initialized\n")
+    log.info("initialized")
   } catch (err) {
-    process.stderr.write(`sentry: failed to initialize: ${err}\n`)
+    log.error({ err }, "failed to initialize")
   }
 }
 

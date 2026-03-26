@@ -2,8 +2,10 @@ import fs from "node:fs"
 import path from "node:path"
 import type { ProviderProfile } from "./config-types.js"
 import { captureException } from "./sentry.js"
+import { loggers } from "./logger.js"
 
 const STORE_FILENAME = "profiles.json"
+const log = loggers.profileStore
 
 interface ProfileStoreData {
   profiles: ProviderProfile[]
@@ -44,7 +46,7 @@ export class ProfileStore {
         this.defaultProfileId = data.defaultProfileId
       }
     } catch (err) {
-      process.stderr.write(`profile-store: failed to load profiles: ${err}\n`)
+      log.error({ err, operation: "profile-store.load" }, "failed to load profiles")
       captureException(err, { operation: "profile-store.load" })
       this.profiles = [DEFAULT_PROFILE]
     }
@@ -58,7 +60,7 @@ export class ProfileStore {
       }
       fs.writeFileSync(this.filePath, JSON.stringify(data, null, 2), "utf-8")
     } catch (err) {
-      process.stderr.write(`profile-store: failed to save profiles: ${err}\n`)
+      log.error({ err, operation: "profile-store.save" }, "failed to save profiles")
       captureException(err, { operation: "profile-store.save" })
     }
   }

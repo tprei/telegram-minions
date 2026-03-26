@@ -1,9 +1,11 @@
 import fs from "node:fs/promises"
 import path from "node:path"
 import { captureException } from "./sentry.js"
+import { loggers } from "./logger.js"
 
 const STATS_FILENAME = ".stats.json"
 const MAX_RECORDS = 500
+const log = loggers.stats
 
 export interface SessionRecord {
   slug: string
@@ -48,7 +50,7 @@ export class StatsTracker {
     try {
       await fs.writeFile(this.filePath, JSON.stringify(records), "utf-8")
     } catch (err) {
-      process.stderr.write(`stats: failed to save: ${err}\n`)
+      log.error({ err, operation: "stats.save" }, "failed to save")
       captureException(err, { operation: "stats.save" })
     }
   }

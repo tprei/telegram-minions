@@ -2,45 +2,43 @@
 import "dotenv/config"
 import { createMinion, configFromEnv } from "./index.js"
 import { initSentry, captureException, flush as flushSentry } from "./sentry.js"
+import { loggers } from "./logger.js"
 
 const config = configFromEnv()
+const log = loggers.main
 
 await initSentry(config.sentry?.dsn)
 
-process.stderr.write(`main: starting telegram-minions\n`)
-process.stderr.write(`main: chatId=${config.telegram.chatId}\n`)
-process.stderr.write(`main: allowedUsers=${config.telegram.allowedUserIds.join(",")}\n`)
-process.stderr.write(`main: workspace=${config.workspace.root}\n`)
-process.stderr.write(`main: maxSessions=${config.workspace.maxConcurrentSessions}\n`)
+log.info({ chatId: config.telegram.chatId, allowedUsers: config.telegram.allowedUserIds, workspace: config.workspace.root, maxSessions: config.workspace.maxConcurrentSessions }, "starting telegram-minions")
 
 const minion = createMinion(config)
 
 process.on("SIGTERM", () => {
-  process.stderr.write("main: received SIGTERM, shutting down\n")
+  log.info("received SIGTERM, shutting down")
   minion.stop()
   flushSentry().finally(() => process.exit(0))
 })
 
 process.on("SIGINT", () => {
-  process.stderr.write("main: received SIGINT, shutting down\n")
+  log.info("received SIGINT, shutting down")
   minion.stop()
   flushSentry().finally(() => process.exit(0))
 })
 
 process.on("uncaughtException", (err) => {
-  process.stderr.write(`main: uncaught exception: ${err}\n`)
+  log.error({ err, handler: "uncaughtException" }, "uncaught exception")
   captureException(err, { handler: "uncaughtException" })
   flushSentry().finally(() => process.exit(1))
 })
 
 process.on("unhandledRejection", (reason) => {
-  process.stderr.write(`main: unhandled rejection: ${reason}\n`)
+  log.error({ reason, handler: "unhandledRejection" }, "unhandled rejection")
   captureException(reason, { handler: "unhandledRejection" })
   flushSentry().finally(() => process.exit(1))
 })
 
 minion.start().catch((err) => {
-  process.stderr.write(`main: minion crashed: ${err}\n`)
+  log.error({ err, handler: "minion.start" }, "minion crashed")
   captureException(err, { handler: "minion.start" })
   flushSentry().finally(() => process.exit(1))
 })
