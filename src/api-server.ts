@@ -23,6 +23,13 @@ export interface QuickAction {
   message: string
 }
 
+export type PlanActionType = "execute" | "split" | "stack" | "dag"
+
+export interface ConversationMessage {
+  role: "user" | "assistant"
+  text: string
+}
+
 export interface ApiSession {
   id: string
   slug: string
@@ -40,6 +47,8 @@ export interface ApiSession {
   needsAttention: boolean
   attentionReasons: AttentionReason[]
   quickActions: QuickAction[]
+  mode: string
+  conversation: ConversationMessage[]
 }
 
 export interface ApiDagNode {
@@ -82,6 +91,7 @@ export type MinionCommand =
   | { action: "reply"; sessionId: string; message: string }
   | { action: "stop"; sessionId: string }
   | { action: "close"; sessionId: string }
+  | { action: "plan_action"; sessionId: string; planAction: PlanActionType }
 
 export interface DispatcherApi {
   getSessions(): Map<number, { handle: unknown; meta: { sessionId: string; threadId: number }; task: string }>
@@ -223,6 +233,8 @@ export function topicSessionToApi(
     needsAttention: attentionReasons.length > 0,
     attentionReasons,
     quickActions,
+    mode: session.mode,
+    conversation: session.conversation.map((m) => ({ role: m.role, text: m.text })),
   }
 }
 
@@ -459,6 +471,22 @@ async function handleApiRoute(
           case "close":
             await dispatcher.closeSession(threadId)
             break
+          case "plan_action": {
+            const actionCommands: Record<PlanActionType, string> = {
+              execute: "/execute",
+              split: "/split",
+              stack: "/stack",
+              dag: "/dag",
+            }
+            const replyText = actionCommands[command.planAction]
+            if (!replyText) {
+              res.writeHead(400, { "Content-Type": "application/json" })
+              res.end(JSON.stringify({ success: false, error: `Invalid plan action: ${command.planAction}` }))
+              return
+            }
+            await dispatcher.sendReply(threadId, replyText)
+            break
+          }
         }
 
         res.writeHead(200, { "Content-Type": "application/json" })
