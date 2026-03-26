@@ -91,6 +91,72 @@ describe("API Server", () => {
       expect(data.data[0].slug).toBe("bold-meadow")
       expect(data.data[0].command).toBe("/task Add feature")
     })
+
+    it("should expose prUrl and branch fields from topic session", async () => {
+      mockTopicSessions.set(456, {
+        threadId: 456,
+        slug: "swift-river",
+        conversation: [{ role: "user", text: "/task Fix bug" }],
+        repo: "org/repo",
+        repoUrl: "https://github.com/org/repo",
+        lastActivityAt: Date.now(),
+        mode: "task",
+        branch: "minion/swift-river",
+        prUrl: "https://github.com/org/repo/pull/42",
+      })
+
+      server = createApiServer(mockDispatcher, {
+        port: 0,
+        uiDistPath: "/nonexistent",
+        chatId: "-1001234567890",
+        broadcaster,
+      })
+
+      const address = await new Promise<{ port: number }>((resolve) => {
+        server.listen(0, () => {
+          resolve(server.address() as { port: number })
+        })
+      })
+
+      const response = await fetch(`http://localhost:${address.port}/api/sessions`)
+      const data = await response.json()
+
+      expect(response.status).toBe(200)
+      expect(data.data).toHaveLength(1)
+      expect(data.data[0].branch).toBe("minion/swift-river")
+      expect(data.data[0].prUrl).toBe("https://github.com/org/repo/pull/42")
+    })
+
+    it("should return undefined prUrl and branch when not set", async () => {
+      mockTopicSessions.set(789, {
+        threadId: 789,
+        slug: "quiet-pond",
+        conversation: [{ role: "user", text: "/plan Design feature" }],
+        lastActivityAt: Date.now(),
+        mode: "plan",
+      })
+
+      server = createApiServer(mockDispatcher, {
+        port: 0,
+        uiDistPath: "/nonexistent",
+        chatId: "-1001234567890",
+        broadcaster,
+      })
+
+      const address = await new Promise<{ port: number }>((resolve) => {
+        server.listen(0, () => {
+          resolve(server.address() as { port: number })
+        })
+      })
+
+      const response = await fetch(`http://localhost:${address.port}/api/sessions`)
+      const data = await response.json()
+
+      expect(response.status).toBe(200)
+      expect(data.data).toHaveLength(1)
+      expect(data.data[0].branch).toBeUndefined()
+      expect(data.data[0].prUrl).toBeUndefined()
+    })
   })
 
   describe("GET /api/sessions/:id", () => {

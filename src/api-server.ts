@@ -115,8 +115,8 @@ function topicSessionToApi(
     status,
     command: session.conversation[0]?.text ?? "",
     repo: session.repoUrl,
-    branch: undefined, // Branch info would need to be tracked separately
-    prUrl: undefined, // PR URL would need to be tracked separately
+    branch: session.branch,
+    prUrl: session.prUrl,
     threadId: session.threadId,
     chatId: undefined, // Chat ID is the main forum ID
     createdAt: new Date().toISOString(), // TopicSession doesn't track startedAt

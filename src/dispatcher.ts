@@ -1089,6 +1089,7 @@ export class Dispatcher {
       mode,
       lastActivityAt: Date.now(),
       profileId,
+      branch: repoUrl ? `minion/${slug}` : undefined,
     }
 
     this.topicSessions.set(threadId, topicSession)
@@ -1253,6 +1254,7 @@ export class Dispatcher {
             if (topicSession.mode === "task") {
               const prUrl = this.extractPRFromConversation(topicSession)
               if (prUrl) {
+                topicSession.prUrl = prUrl
                 this.postSessionDigest(topicSession, prUrl)
                 if (this.config.ci.babysitEnabled) {
                   if (topicSession.dagId || topicSession.parentThreadId) {
@@ -1696,6 +1698,7 @@ export class Dispatcher {
 
     const label = childSession.splitLabel ?? childSession.slug
     const prUrl = this.extractPRFromConversation(childSession) ?? undefined
+    if (prUrl) childSession.prUrl = prUrl
 
     // Free child conversation memory
     childSession.conversation = []
@@ -1892,6 +1895,7 @@ export class Dispatcher {
       profileId: parent.profileId,
       parentThreadId: parent.threadId,
       splitLabel: item.title,
+      branch: parent.repoUrl ? `minion/${slug}` : undefined,
     }
 
     this.topicSessions.set(threadId, childSession)
@@ -2184,6 +2188,7 @@ export class Dispatcher {
       profileId: parent.profileId,
       parentThreadId: parent.threadId,
       splitLabel: node.title,
+      branch: parent.repoUrl ? `minion/${slug}` : undefined,
       dagId: graph.id,
       dagNodeId: node.id,
     }
@@ -2219,6 +2224,7 @@ export class Dispatcher {
     if (!parent) return
 
     const prUrl = this.extractPRFromConversation(childSession) ?? undefined
+    if (prUrl) childSession.prUrl = prUrl
 
     // Free child conversation memory immediately — we've extracted everything we need
     childSession.conversation = []
