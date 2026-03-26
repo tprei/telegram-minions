@@ -225,6 +225,48 @@ describe("bootstrapDependencies", () => {
     expect(fs.readFileSync(path.join(child1, "node_modules", "shared-pkg", "index.js"), "utf8")).toBe("original")
     expect(fs.readFileSync(path.join(child2, "node_modules", "shared-pkg", "index.js"), "utf8")).toBe("original")
   })
+
+  it("bootstraps nested package.json at depth 1", () => {
+    const reposDir = path.join(tmpDir, ".repos")
+    fs.mkdirSync(reposDir, { recursive: true })
+    const workDir = path.join(tmpDir, "work")
+    fs.mkdirSync(workDir)
+
+    // Root package
+    fs.writeFileSync(path.join(workDir, "package.json"), "{}")
+
+    // Nested ui/ package with its own lock + cached node_modules
+    const uiDir = path.join(workDir, "ui")
+    fs.mkdirSync(uiDir)
+    fs.writeFileSync(path.join(uiDir, "package.json"), "{}")
+    const uiLock = JSON.stringify({ lockfileVersion: 3, packages: { "ui-pkg": {} } })
+    fs.writeFileSync(path.join(uiDir, "package-lock.json"), uiLock)
+
+    // Pre-populate cache for nested package
+    const uiHash = crypto.createHash("sha256").update(uiLock).digest("hex")
+    const uiCache = path.join(reposDir, "test-repo-ui-node_modules")
+    fs.mkdirSync(path.join(uiCache, "ui-pkg"), { recursive: true })
+    fs.writeFileSync(path.join(uiCache, "ui-pkg", "index.js"), "ui module")
+    fs.writeFileSync(path.join(reposDir, "test-repo-ui-lock.hash"), uiHash)
+
+    bootstrapDependencies(workDir, reposDir, "test-repo")
+
+    // Nested ui/node_modules should be hardlinked from cache
+    expect(fs.existsSync(path.join(uiDir, "node_modules", "ui-pkg", "index.js"))).toBe(true)
+    expect(fs.readFileSync(path.join(uiDir, "node_modules", "ui-pkg", "index.js"), "utf8")).toBe("ui module")
+  })
+})
+
+describe("cleanBuildArtifacts - nested", () => {
+  it("cleans nested node_modules at depth 1", () => {
+    const workDir = path.join(tmpDir, "work")
+    fs.mkdirSync(path.join(workDir, "ui", "node_modules", "some-pkg"), { recursive: true })
+    fs.writeFileSync(path.join(workDir, "ui", "node_modules", "some-pkg", "index.js"), "x")
+
+    cleanBuildArtifacts(workDir)
+
+    expect(fs.existsSync(path.join(workDir, "ui", "node_modules"))).toBe(false)
+  })
 })
 
 describe("dirSizeBytes", () => {

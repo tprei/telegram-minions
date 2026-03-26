@@ -3074,6 +3074,20 @@ export function cleanBuildArtifacts(cwd: string): void {
       process.stderr.write(`dispatcher: failed to clean ${name} from ${cwd}: ${err}\n`)
     }
   }
+  // Clean nested node_modules (depth 1) — e.g. ui/node_modules
+  try {
+    const entries = fs.readdirSync(cwd, { withFileTypes: true })
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name === "node_modules" || entry.name.startsWith(".")) continue
+      const nested = path.join(cwd, entry.name, "node_modules")
+      try {
+        if (fs.existsSync(nested)) {
+          fs.rmSync(nested, { recursive: true, force: true })
+          process.stderr.write(`dispatcher: cleaned ${entry.name}/node_modules from ${cwd}\n`)
+        }
+      } catch { /* best effort */ }
+    }
+  } catch { /* best effort */ }
   const homeCacheDir = path.join(cwd, ".home", ".npm")
   try {
     if (fs.existsSync(homeCacheDir)) {
@@ -3083,13 +3097,12 @@ export function cleanBuildArtifacts(cwd: string): void {
   } catch { /* best effort */ }
 }
 
-export function bootstrapDependencies(workDir: string, reposDir: string, repoName: string): void {
-  const pkgPath = path.join(workDir, "package.json")
-  if (!fs.existsSync(pkgPath)) return
-
-  const cacheDir = path.join(reposDir, `${repoName}-node_modules`)
-  const lockFile = path.join(workDir, "package-lock.json")
-  const cacheLockHash = path.join(reposDir, `${repoName}-lock.hash`)
+function bootstrapOnePackage(
+  pkgDir: string, reposDir: string, cacheKey: string, label: string,
+): void {
+  const lockFile = path.join(pkgDir, "package-lock.json")
+  const cacheDir = path.join(reposDir, `${cacheKey}-node_modules`)
+  const cacheLockHash = path.join(reposDir, `${cacheKey}-lock.hash`)
 
   const currentHash = fs.existsSync(lockFile)
     ? crypto.createHash("sha256").update(fs.readFileSync(lockFile)).digest("hex")
@@ -3103,34 +3116,54 @@ export function bootstrapDependencies(workDir: string, reposDir: string, repoNam
 
   if (currentHash && cachedHash === currentHash && fs.existsSync(cacheDir)) {
     try {
-      execSync(`cp -al ${JSON.stringify(cacheDir)} ${JSON.stringify(path.join(workDir, "node_modules"))}`, {
+      execSync(`cp -al ${JSON.stringify(cacheDir)} ${JSON.stringify(path.join(pkgDir, "node_modules"))}`, {
         stdio, timeout: 30_000,
       })
-      process.stderr.write(`dispatcher: hardlinked node_modules into ${workDir}\n`)
+      process.stderr.write(`dispatcher: hardlinked node_modules into ${label}\n`)
       return
     } catch (err) {
-      process.stderr.write(`dispatcher: hardlink copy failed, falling back to npm ci: ${err}\n`)
+      process.stderr.write(`dispatcher: hardlink copy failed for ${label}, falling back to npm ci: ${err}\n`)
     }
   }
 
   try {
     const installCmd = fs.existsSync(lockFile) ? "npm ci" : "npm install"
-    process.stderr.write(`dispatcher: running ${installCmd} in ${workDir}\n`)
-    execSync(installCmd, { cwd: workDir, stdio, timeout: 120_000 })
+    process.stderr.write(`dispatcher: running ${installCmd} in ${label}\n`)
+    execSync(installCmd, { cwd: pkgDir, stdio, timeout: 120_000 })
 
-    // Update cache for future worktrees
     if (fs.existsSync(cacheDir)) {
       fs.rmSync(cacheDir, { recursive: true, force: true })
     }
-    execSync(`cp -al ${JSON.stringify(path.join(workDir, "node_modules"))} ${JSON.stringify(cacheDir)}`, {
+    execSync(`cp -al ${JSON.stringify(path.join(pkgDir, "node_modules"))} ${JSON.stringify(cacheDir)}`, {
       stdio, timeout: 60_000,
     })
     if (currentHash) {
       fs.writeFileSync(cacheLockHash, currentHash)
     }
-    process.stderr.write(`dispatcher: cached node_modules for ${repoName}\n`)
+    process.stderr.write(`dispatcher: cached node_modules for ${label}\n`)
   } catch (err) {
-    process.stderr.write(`dispatcher: dependency bootstrap failed (non-fatal): ${err}\n`)
+    process.stderr.write(`dispatcher: dependency bootstrap failed for ${label} (non-fatal): ${err}\n`)
+  }
+}
+
+export function bootstrapDependencies(workDir: string, reposDir: string, repoName: string): void {
+  // Bootstrap root package
+  if (fs.existsSync(path.join(workDir, "package.json"))) {
+    bootstrapOnePackage(workDir, reposDir, repoName, workDir)
+  }
+
+  // Bootstrap nested packages (depth 1) — e.g. ui/package.json
+  try {
+    const entries = fs.readdirSync(workDir, { withFileTypes: true })
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name === "node_modules" || entry.name.startsWith(".")) continue
+      const nested = path.join(workDir, entry.name)
+      if (fs.existsSync(path.join(nested, "package.json"))) {
+        bootstrapOnePackage(nested, reposDir, `${repoName}-${entry.name}`, `${workDir}/${entry.name}`)
+      }
+    }
+  } catch {
+    // non-fatal — nested scan failure shouldn't block session
   }
 }
 
