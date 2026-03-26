@@ -91,6 +91,35 @@ describe("API Server", () => {
       expect(data.data[0].slug).toBe("bold-meadow")
       expect(data.data[0].command).toBe("/task Add feature")
     })
+
+    it("should include chatId from server config", async () => {
+      mockTopicSessions.set(123, {
+        threadId: 123,
+        slug: "bold-meadow",
+        conversation: [{ role: "user", text: "/task Add feature" }],
+        lastActivityAt: Date.now(),
+        mode: "task",
+      })
+
+      server = createApiServer(mockDispatcher, {
+        port: 0,
+        uiDistPath: "/nonexistent",
+        chatId: "-1001234567890",
+        broadcaster,
+      })
+
+      const address = await new Promise<{ port: number }>((resolve) => {
+        server.listen(0, () => {
+          resolve(server.address() as { port: number })
+        })
+      })
+
+      const response = await fetch(`http://localhost:${address.port}/api/sessions`)
+      const data = await response.json()
+
+      expect(response.status).toBe(200)
+      expect(data.data[0].chatId).toBe(-1001234567890)
+    })
   })
 
   describe("GET /api/sessions/:id", () => {
@@ -143,6 +172,7 @@ describe("API Server", () => {
 
       expect(response.status).toBe(200)
       expect(data.data.slug).toBe("calm-lake")
+      expect(data.data.chatId).toBe(-1001234567890)
     })
   })
 
