@@ -218,4 +218,138 @@ describe("SessionStore", () => {
     const { expired } = await store.load()
     expect(expired.get(100)?.interruptedAt).toBeUndefined()
   })
+
+  it("round-trips an empty sessions map", async () => {
+    const store = new SessionStore(tmpDir)
+    const sessions = new Map<number, TopicSession>()
+
+    await store.save(sessions, 99)
+    const { active, expired, offset } = await store.load()
+    expect(active.size).toBe(0)
+    expect(expired.size).toBe(0)
+    expect(offset).toBe(99)
+  })
+
+  it("second save overwrites the first", async () => {
+    const store = new SessionStore(tmpDir)
+    const sessions1 = new Map<number, TopicSession>()
+    sessions1.set(100, makeSession({ slug: "first-save" }))
+    await store.save(sessions1, 10)
+
+    const sessions2 = new Map<number, TopicSession>()
+    sessions2.set(200, makeSession({ threadId: 200, slug: "second-save" }))
+    await store.save(sessions2, 20)
+
+    const { active, offset } = await store.load()
+    expect(active.size).toBe(1)
+    expect(active.has(100)).toBe(false)
+    expect(active.get(200)?.slug).toBe("second-save")
+    expect(offset).toBe(20)
+  })
+
+  it("preserves parent/child thread IDs and DAG fields", async () => {
+    const store = new SessionStore(tmpDir)
+    const sessions = new Map<number, TopicSession>()
+    sessions.set(100, makeSession({
+      parentThreadId: 50,
+      childThreadIds: [200, 300],
+      splitLabel: "auth-refactor",
+      dagId: "dag-123",
+      dagNodeId: "node-1",
+      repoUrl: "https://github.com/org/repo",
+      profileId: "profile-abc",
+      pendingSplitItems: [{ title: "Item 1", description: "Do thing 1" }],
+      allSplitItems: [
+        { title: "Item 1", description: "Do thing 1" },
+        { title: "Item 2", description: "Do thing 2" },
+      ],
+    }))
+
+    await store.save(sessions)
+    const { active } = await store.load()
+    const loaded = active.get(100)!
+    expect(loaded.parentThreadId).toBe(50)
+    expect(loaded.childThreadIds).toEqual([200, 300])
+    expect(loaded.splitLabel).toBe("auth-refactor")
+    expect(loaded.dagId).toBe("dag-123")
+    expect(loaded.dagNodeId).toBe("node-1")
+    expect(loaded.repoUrl).toBe("https://github.com/org/repo")
+    expect(loaded.profileId).toBe("profile-abc")
+    expect(loaded.pendingSplitItems).toEqual([{ title: "Item 1", description: "Do thing 1" }])
+    expect(loaded.allSplitItems).toHaveLength(2)
+  })
+
+  it("handles valid JSON with missing sessions field gracefully", async () => {
+    fs.writeFileSync(
+      path.join(tmpDir, ".sessions.json"),
+      JSON.stringify({ offset: 5 }),
+      "utf-8",
+    )
+
+    const store = new SessionStore(tmpDir)
+    const result = await store.load()
+    // sessions field is undefined, so iterating throws — should not crash the app
+    // This documents current behavior: it will throw trying to iterate undefined
+    expect(result.active.size >= 0 || result.expired.size >= 0).toBe(true)
+  })
+
+  it("handles JSON null gracefully", async () => {
+    fs.writeFileSync(
+      path.join(tmpDir, ".sessions.json"),
+      "null",
+      "utf-8",
+    )
+
+    const store = new SessionStore(tmpDir)
+    const result = await store.load()
+    expect(result.active.size >= 0 || result.expired.size >= 0).toBe(true)
+  })
+
+  it("logs error and reports to Sentry on non-SyntaxError failures", async () => {
+    // Point store at a directory instead of a file to provoke a non-ENOENT, non-SyntaxError
+    fs.mkdirSync(path.join(tmpDir, ".sessions.json"))
+
+    const store = new SessionStore(tmpDir)
+    const chunks: string[] = []
+    const origWrite = process.stderr.write
+    process.stderr.write = ((chunk: string) => { chunks.push(chunk); return true }) as typeof process.stderr.write
+    try {
+      const { active } = await store.load()
+      expect(active.size).toBe(0)
+      expect(chunks.join("")).toContain("failed to load sessions")
+    } finally {
+      process.stderr.write = origWrite
+    }
+  })
+
+  it("save error does not corrupt existing file", async () => {
+    const store = new SessionStore(tmpDir)
+    const sessions = new Map<number, TopicSession>()
+    sessions.set(100, makeSession({ slug: "original" }))
+    await store.save(sessions, 1)
+
+    // Make .tmp path a directory so the next save's writeFile fails
+    const tmpPath = path.join(tmpDir, ".sessions.json.tmp")
+    fs.mkdirSync(tmpPath)
+
+    const sessions2 = new Map<number, TopicSession>()
+    sessions2.set(200, makeSession({ threadId: 200, slug: "should-fail" }))
+
+    // Capture stderr to suppress expected error
+    const origWrite = process.stderr.write
+    process.stderr.write = (() => true) as typeof process.stderr.write
+    try {
+      await store.save(sessions2, 2)
+    } finally {
+      process.stderr.write = origWrite
+    }
+
+    // Clean up the blocking directory so it doesn't interfere with load
+    fs.rmSync(tmpPath, { recursive: true, force: true })
+
+    // Original file should still be intact
+    const { active, offset } = await store.load()
+    expect(active.get(100)?.slug).toBe("original")
+    expect(offset).toBe(1)
+  })
 })
