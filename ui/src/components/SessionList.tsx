@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'preact/hooks'
-import type { AttentionReason, MinionSession, QuickAction } from '../types'
+import type { AttentionReason, MinionSession, PlanActionType, QuickAction } from '../types'
 import { ConfirmDialog, ReplyDialog } from './ConfirmDialog'
+import { SessionReadoutModal } from './SessionReadoutModal'
 import { PrLink } from './PrLink'
 import { useTelegram, usePopup as useTelegramPopup } from '../hooks'
 
@@ -156,6 +157,7 @@ interface SessionCardProps {
   onSendReply?: (sessionId: string, message: string) => Promise<void>
   onStopMinion?: (sessionId: string) => Promise<void>
   onCloseSession?: (sessionId: string) => Promise<void>
+  onPlanAction?: (sessionId: string, action: PlanActionType) => Promise<void>
   isActionLoading?: boolean
 }
 
@@ -180,11 +182,13 @@ export function SessionCard({
   onSendReply,
   onStopMinion,
   onCloseSession,
+  onPlanAction,
   isActionLoading = false,
 }: SessionCardProps) {
   const [showStopConfirm, setShowStopConfirm] = useState(false)
   const [showCloseConfirm, setShowCloseConfirm] = useState(false)
   const [showReplyDialog, setShowReplyDialog] = useState(false)
+  const [showReadout, setShowReadout] = useState(false)
   const tg = useTelegram()
   const telegramConfirm = useTelegramPopup()
 
@@ -261,6 +265,14 @@ export function SessionCard({
     },
     [session.id, onSendReply]
   )
+
+  const handleReadoutClick = useCallback((e: Event) => {
+    e.stopPropagation()
+    setShowReadout(true)
+  }, [])
+
+  const isPlanAwaitingFeedback =
+    (session.mode === 'plan' || session.mode === 'think') && session.status === 'pending'
 
   const isActive = session.status === 'running' || session.status === 'pending'
   const isClickable = Boolean(session.threadId && session.chatId)
@@ -345,6 +357,47 @@ export function SessionCard({
           </div>
         )}
 
+        {isPlanAwaitingFeedback && onPlanAction && (
+          <div class={`flex flex-wrap gap-2 mt-3 pt-3 border-t ${tg.darkMode ? 'border-gray-700' : 'border-gray-200'}`}>
+            <button
+              onClick={handleReadoutClick}
+              disabled={isActionLoading}
+              class={`flex-1 px-3 py-1.5 text-xs font-medium rounded transition-colors disabled:opacity-50 ${tg.darkMode ? 'bg-gray-700 text-gray-200 hover:bg-gray-600' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+              title="Read the session conversation"
+            >
+              Read session
+            </button>
+            <button
+              onClick={(e: Event) => { e.stopPropagation(); onPlanAction(session.id, 'execute') }}
+              disabled={isActionLoading}
+              class={`px-3 py-1.5 text-xs font-medium rounded transition-colors disabled:opacity-50 ${tg.darkMode ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-blue-500 text-white hover:bg-blue-600'}`}
+            >
+              Execute
+            </button>
+            <button
+              onClick={(e: Event) => { e.stopPropagation(); onPlanAction(session.id, 'split') }}
+              disabled={isActionLoading}
+              class={`px-3 py-1.5 text-xs font-medium rounded transition-colors disabled:opacity-50 ${tg.darkMode ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-blue-500 text-white hover:bg-blue-600'}`}
+            >
+              Split
+            </button>
+            <button
+              onClick={(e: Event) => { e.stopPropagation(); onPlanAction(session.id, 'stack') }}
+              disabled={isActionLoading}
+              class={`px-3 py-1.5 text-xs font-medium rounded transition-colors disabled:opacity-50 ${tg.darkMode ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-blue-500 text-white hover:bg-blue-600'}`}
+            >
+              Stack
+            </button>
+            <button
+              onClick={(e: Event) => { e.stopPropagation(); onPlanAction(session.id, 'dag') }}
+              disabled={isActionLoading}
+              class={`px-3 py-1.5 text-xs font-medium rounded transition-colors disabled:opacity-50 ${tg.darkMode ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-blue-500 text-white hover:bg-blue-600'}`}
+            >
+              DAG
+            </button>
+          </div>
+        )}
+
         {/* Action buttons for active sessions */}
         {isActive && (onSendReply || onStopMinion || onCloseSession) && (
           <div class={`flex gap-2 mt-3 pt-3 border-t ${tg.darkMode ? 'border-gray-700' : 'border-gray-200'}`}>
@@ -413,6 +466,18 @@ export function SessionCard({
         onSend={handleSendReply}
         onCancel={() => setShowReplyDialog(false)}
       />
+
+      {showReadout && onPlanAction && (
+        <SessionReadoutModal
+          session={session}
+          isActionLoading={isActionLoading}
+          onAction={(action) => {
+            setShowReadout(false)
+            onPlanAction(session.id, action)
+          }}
+          onClose={() => setShowReadout(false)}
+        />
+      )}
     </>
   )
 }
@@ -424,6 +489,7 @@ interface SessionListProps {
   onSendReply?: (sessionId: string, message: string) => Promise<void>
   onStopMinion?: (sessionId: string) => Promise<void>
   onCloseSession?: (sessionId: string) => Promise<void>
+  onPlanAction?: (sessionId: string, action: PlanActionType) => Promise<void>
   isActionLoading?: boolean
 }
 
@@ -434,6 +500,7 @@ export function SessionList({
   onSendReply,
   onStopMinion,
   onCloseSession,
+  onPlanAction,
   isActionLoading = false,
 }: SessionListProps) {
   const tg = useTelegram()
@@ -478,6 +545,7 @@ export function SessionList({
               onSendReply={onSendReply}
               onStopMinion={onStopMinion}
               onCloseSession={onCloseSession}
+              onPlanAction={onPlanAction}
               isActionLoading={isActionLoading}
             />
           ))}
@@ -497,6 +565,7 @@ export function SessionList({
               onSendReply={onSendReply}
               onStopMinion={onStopMinion}
               onCloseSession={onCloseSession}
+              onPlanAction={onPlanAction}
               isActionLoading={isActionLoading}
             />
           ))}
@@ -514,6 +583,7 @@ export function SessionList({
               session={session}
               onThreadClick={onThreadClick}
               onCloseSession={onCloseSession}
+              onPlanAction={onPlanAction}
               isActionLoading={isActionLoading}
             />
           ))}
