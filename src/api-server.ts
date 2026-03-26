@@ -1,6 +1,7 @@
 import http from "node:http"
 import fs from "node:fs"
 import path from "node:path"
+import crypto from "node:crypto"
 import { EventEmitter } from "node:events"
 import type { TopicSession, SessionState } from "./types.js"
 import type { DagGraph } from "./dag.js"
@@ -305,6 +306,7 @@ export interface ApiServerOptions {
   port: number
   uiDistPath: string
   chatId: string
+  botToken: string
   broadcaster: StateBroadcaster
 }
 
@@ -312,7 +314,7 @@ export function createApiServer(
   dispatcher: DispatcherApi,
   options: ApiServerOptions,
 ): http.Server {
-  const { port, uiDistPath, chatId, broadcaster } = options
+  const { port, uiDistPath, chatId, botToken, broadcaster } = options
   const sseClients = new Set<http.ServerResponse>()
 
   // Broadcast events to all SSE clients
@@ -345,7 +347,7 @@ export function createApiServer(
 
     // Telegram Mini App validation endpoint
     if (url.pathname === "/validate") {
-      await handleValidation(req, res, chatId)
+      await handleValidation(req, res, chatId, botToken)
       return
     }
 
@@ -535,6 +537,7 @@ async function handleValidation(
   req: http.IncomingMessage,
   res: http.ServerResponse,
   expectedChatId: string,
+  botToken: string,
 ): Promise<void> {
   if (req.method !== "POST") {
     res.writeHead(405, { "Content-Type": "application/json" })
@@ -549,6 +552,13 @@ async function handleValidation(
     if (!initData) {
       res.writeHead(400, { "Content-Type": "application/json" })
       res.end(JSON.stringify({ valid: false, error: "Missing initData" }))
+      return
+    }
+
+    // Validate HMAC signature
+    if (!validateTelegramInitData(initData, botToken)) {
+      res.writeHead(403, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ valid: false, error: "Invalid signature" }))
       return
     }
 
@@ -591,6 +601,57 @@ async function handleValidation(
   } catch (err) {
     res.writeHead(400, { "Content-Type": "application/json" })
     res.end(JSON.stringify({ valid: false, error: String(err) }))
+  }
+}
+
+/**
+ * Validates Telegram WebApp init data using HMAC-SHA256.
+ * @see https://core.telegram.org/bots/webapps#validating-data-received-via-the-web-app
+ */
+export function validateTelegramInitData(initData: string, botToken: string): boolean {
+  const params = new URLSearchParams(initData)
+  const hash = params.get("hash")
+
+  if (!hash) {
+    return false
+  }
+
+  // SHA256 produces 32 bytes = 64 hex characters
+  const expectedHashLength = 64
+  if (hash.length !== expectedHashLength) {
+    return false
+  }
+
+  // Remove hash from params for signature calculation
+  params.delete("hash")
+
+  // Sort keys alphabetically and create data-check string
+  const keys = Array.from(params.keys()).sort()
+  const dataCheckString = keys
+    .map((key) => `${key}=${params.get(key)}`)
+    .join("\n")
+
+  // Create secret key: HMAC-SHA256(botToken, "WebAppData")
+  const secretKey = crypto
+    .createHmac("sha256", "WebAppData")
+    .update(botToken)
+    .digest()
+
+  // Calculate signature: HMAC-SHA256(secretKey, dataCheckString)
+  const calculatedHash = crypto
+    .createHmac("sha256", secretKey)
+    .update(dataCheckString)
+    .digest("hex")
+
+  // Use timing-safe comparison
+  try {
+    return crypto.timingSafeEqual(
+      Buffer.from(calculatedHash, "hex"),
+      Buffer.from(hash, "hex"),
+    )
+  } catch {
+    // Buffer comparison failed (e.g., invalid hex encoding)
+    return false
   }
 }
 

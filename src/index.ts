@@ -11,7 +11,29 @@ export type {
   ObserverConfig,
   AgentDefinitions,
   SystemPrompts,
+  ApiServerConfig,
+  SentryConfig,
+  CiConfig,
+  ProviderProfile,
 } from "./config-types.js"
+export {
+  validateMinionConfig,
+  validateConfigOrThrow,
+  assertValidConfig,
+  ConfigValidationError,
+  validateTelegramConfig,
+  validateGooseConfig,
+  validateClaudeConfig,
+  validateWorkspaceConfig,
+  validateCiConfig,
+  validateMcpConfig,
+  validateObserverConfig,
+  validateSentryConfig,
+  validateAgentDefinitions,
+  validateApiServerConfig,
+  validateProviderProfile,
+} from "./config-validator.js"
+export type { ValidationResult } from "./config-validator.js"
 export { DEFAULT_PROMPTS, DEFAULT_TASK_PROMPT, DEFAULT_PLAN_PROMPT, DEFAULT_THINK_PROMPT, DEFAULT_REVIEW_PROMPT } from "./prompts.js"
 export { TelegramClient } from "./telegram.js"
 export { Observer } from "./observer.js"

@@ -26,6 +26,7 @@ export interface WorkspaceConfig {
   sessionInactivityTimeoutMs: number
   staleTtlMs: number
   cleanupIntervalMs: number
+  maxConversationLength: number
 }
 
 export interface CiConfig {

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import http from "node:http"
-import { createApiServer, StateBroadcaster, type DispatcherApi } from "../src/api-server.js"
+import crypto from "node:crypto"
+import { createApiServer, StateBroadcaster, type DispatcherApi, validateTelegramInitData } from "../src/api-server.js"
 
 describe("API Server", () => {
   let server: http.Server
@@ -42,6 +43,7 @@ describe("API Server", () => {
         port: 0,
         uiDistPath: "/nonexistent",
         chatId: "-1001234567890",
+        botToken: "test-bot-token-123456",
         broadcaster,
       })
 
@@ -74,6 +76,7 @@ describe("API Server", () => {
         port: 0,
         uiDistPath: "/nonexistent",
         chatId: "-1001234567890",
+        botToken: "test-bot-token-123456",
         broadcaster,
       })
 
@@ -109,6 +112,7 @@ describe("API Server", () => {
         port: 0,
         uiDistPath: "/nonexistent",
         chatId: "-1001234567890",
+        botToken: "test-bot-token-123456",
         broadcaster,
       })
 
@@ -140,6 +144,7 @@ describe("API Server", () => {
         port: 0,
         uiDistPath: "/nonexistent",
         chatId: "-1001234567890",
+        botToken: "test-bot-token-123456",
         broadcaster,
       })
 
@@ -165,6 +170,7 @@ describe("API Server", () => {
         port: 0,
         uiDistPath: "/nonexistent",
         chatId: "-1001234567890",
+        botToken: "test-bot-token-123456",
         broadcaster,
       })
 
@@ -195,6 +201,7 @@ describe("API Server", () => {
         port: 0,
         uiDistPath: "/nonexistent",
         chatId: "-1001234567890",
+        botToken: "test-bot-token-123456",
         broadcaster,
       })
 
@@ -218,6 +225,7 @@ describe("API Server", () => {
         port: 0,
         uiDistPath: "/nonexistent",
         chatId: "-1001234567890",
+        botToken: "test-bot-token-123456",
         broadcaster,
       })
 
@@ -249,6 +257,7 @@ describe("API Server", () => {
         port: 0,
         uiDistPath: "/nonexistent",
         chatId: "-1001234567890",
+        botToken: "test-bot-token-123456",
         broadcaster,
       })
 
@@ -283,6 +292,7 @@ describe("API Server", () => {
         port: 0,
         uiDistPath: "/nonexistent",
         chatId: "-1001234567890",
+        botToken: "test-bot-token-123456",
         broadcaster,
       })
 
@@ -309,6 +319,7 @@ describe("API Server", () => {
         port: 0,
         uiDistPath: "/nonexistent",
         chatId: "-1001234567890",
+        botToken: "test-bot-token-123456",
         broadcaster,
       })
 
@@ -337,6 +348,7 @@ describe("API Server", () => {
         port: 0,
         uiDistPath: "/nonexistent",
         chatId: "-1001234567890",
+        botToken: "test-bot-token-123456",
         broadcaster,
       })
 
@@ -367,6 +379,7 @@ describe("API Server", () => {
         port: 0,
         uiDistPath: "/nonexistent",
         chatId: "-1001234567890",
+        botToken: "test-bot-token-123456",
         broadcaster,
       })
 
@@ -395,6 +408,7 @@ describe("API Server", () => {
         port: 0,
         uiDistPath: "/nonexistent",
         chatId: "-1009876543210",
+        botToken: "test-bot-token-123456",
         broadcaster,
       })
 
@@ -440,6 +454,7 @@ describe("API Server", () => {
         port: 0,
         uiDistPath: "/nonexistent",
         chatId: "-1001234567890",
+        botToken: "test-bot-token-123456",
         broadcaster,
       })
 
@@ -455,6 +470,349 @@ describe("API Server", () => {
 
       expect(response.status).toBe(204)
       expect(response.headers.get("access-control-allow-origin")).toBe("*")
+    })
+  })
+
+  describe("POST /validate", () => {
+    const botToken = "test-bot-token-123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
+    const chatId = "-1001234567890"
+
+    /**
+     * Generate valid Telegram init data with proper HMAC signature
+     */
+    function generateValidInitData(
+      user: { id: number; first_name: string; username?: string },
+      authDate: number,
+      chatIdOverride?: string,
+    ): string {
+      const params = new URLSearchParams()
+      params.set("user", JSON.stringify(user))
+      params.set("auth_date", authDate.toString())
+      if (chatIdOverride !== undefined) {
+        params.set("chat_id", chatIdOverride)
+      }
+
+      // Sort and create data-check string
+      const keys = Array.from(params.keys()).sort()
+      const dataCheckString = keys
+        .map((key) => `${key}=${params.get(key)}`)
+        .join("\n")
+
+      // Create secret key: HMAC-SHA256(botToken, "WebAppData")
+      const secretKey = crypto
+        .createHmac("sha256", "WebAppData")
+        .update(botToken)
+        .digest()
+
+      // Calculate signature: HMAC-SHA256(secretKey, dataCheckString)
+      const hash = crypto
+        .createHmac("sha256", secretKey)
+        .update(dataCheckString)
+        .digest("hex")
+
+      params.set("hash", hash)
+      return params.toString()
+    }
+
+    it("should return 405 for GET requests", async () => {
+      server = createApiServer(mockDispatcher, {
+        port: 0,
+        uiDistPath: "/nonexistent",
+        chatId,
+        botToken,
+        broadcaster,
+      })
+
+      const address = await new Promise<{ port: number }>((resolve) => {
+        server.listen(0, () => {
+          resolve(server.address() as { port: number })
+        })
+      })
+
+      const response = await fetch(`http://localhost:${address.port}/validate`)
+      const data = await response.json()
+
+      expect(response.status).toBe(405)
+      expect(data.error).toBe("Method not allowed")
+    })
+
+    it("should return 400 for missing initData", async () => {
+      server = createApiServer(mockDispatcher, {
+        port: 0,
+        uiDistPath: "/nonexistent",
+        chatId,
+        botToken,
+        broadcaster,
+      })
+
+      const address = await new Promise<{ port: number }>((resolve) => {
+        server.listen(0, () => {
+          resolve(server.address() as { port: number })
+        })
+      })
+
+      const response = await fetch(`http://localhost:${address.port}/validate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      })
+      const data = await response.json()
+
+      expect(response.status).toBe(400)
+      expect(data.valid).toBe(false)
+      expect(data.error).toBe("Missing initData")
+    })
+
+    it("should return 403 for invalid HMAC signature", async () => {
+      server = createApiServer(mockDispatcher, {
+        port: 0,
+        uiDistPath: "/nonexistent",
+        chatId,
+        botToken,
+        broadcaster,
+      })
+
+      const address = await new Promise<{ port: number }>((resolve) => {
+        server.listen(0, () => {
+          resolve(server.address() as { port: number })
+        })
+      })
+
+      // Init data with invalid hash
+      const initData = new URLSearchParams({
+        user: JSON.stringify({ id: 123456, first_name: "Test", username: "testuser" }),
+        auth_date: Math.floor(Date.now() / 1000).toString(),
+        hash: "invalidhash123",
+      }).toString()
+
+      const response = await fetch(`http://localhost:${address.port}/validate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ initData }),
+      })
+      const data = await response.json()
+
+      expect(response.status).toBe(403)
+      expect(data.valid).toBe(false)
+      expect(data.error).toBe("Invalid signature")
+    })
+
+    it("should return 403 for missing hash", async () => {
+      server = createApiServer(mockDispatcher, {
+        port: 0,
+        uiDistPath: "/nonexistent",
+        chatId,
+        botToken,
+        broadcaster,
+      })
+
+      const address = await new Promise<{ port: number }>((resolve) => {
+        server.listen(0, () => {
+          resolve(server.address() as { port: number })
+        })
+      })
+
+      // Init data without hash
+      const initData = new URLSearchParams({
+        user: JSON.stringify({ id: 123456, first_name: "Test", username: "testuser" }),
+        auth_date: Math.floor(Date.now() / 1000).toString(),
+      }).toString()
+
+      const response = await fetch(`http://localhost:${address.port}/validate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ initData }),
+      })
+      const data = await response.json()
+
+      expect(response.status).toBe(403)
+      expect(data.valid).toBe(false)
+      expect(data.error).toBe("Invalid signature")
+    })
+
+    it("should return 403 for unauthorized chat", async () => {
+      server = createApiServer(mockDispatcher, {
+        port: 0,
+        uiDistPath: "/nonexistent",
+        chatId,
+        botToken,
+        broadcaster,
+      })
+
+      const address = await new Promise<{ port: number }>((resolve) => {
+        server.listen(0, () => {
+          resolve(server.address() as { port: number })
+        })
+      })
+
+      const initData = generateValidInitData(
+        { id: 123456, first_name: "Test", username: "testuser" },
+        Math.floor(Date.now() / 1000),
+        "-999999999999", // Different chat ID
+      )
+
+      const response = await fetch(`http://localhost:${address.port}/validate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ initData }),
+      })
+      const data = await response.json()
+
+      expect(response.status).toBe(403)
+      expect(data.valid).toBe(false)
+      expect(data.error).toBe("Unauthorized chat")
+    })
+
+    it("should return 403 for expired init data", async () => {
+      server = createApiServer(mockDispatcher, {
+        port: 0,
+        uiDistPath: "/nonexistent",
+        chatId,
+        botToken,
+        broadcaster,
+      })
+
+      const address = await new Promise<{ port: number }>((resolve) => {
+        server.listen(0, () => {
+          resolve(server.address() as { port: number })
+        })
+      })
+
+      // Auth date is 25 hours ago (beyond 24h limit)
+      const expiredAuthDate = Math.floor((Date.now() - 25 * 60 * 60 * 1000) / 1000)
+      const initData = generateValidInitData(
+        { id: 123456, first_name: "Test", username: "testuser" },
+        expiredAuthDate,
+        chatId,
+      )
+
+      const response = await fetch(`http://localhost:${address.port}/validate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ initData }),
+      })
+      const data = await response.json()
+
+      expect(response.status).toBe(403)
+      expect(data.valid).toBe(false)
+      expect(data.error).toBe("Init data expired")
+    })
+
+    it("should return 200 for valid init data", async () => {
+      server = createApiServer(mockDispatcher, {
+        port: 0,
+        uiDistPath: "/nonexistent",
+        chatId,
+        botToken,
+        broadcaster,
+      })
+
+      const address = await new Promise<{ port: number }>((resolve) => {
+        server.listen(0, () => {
+          resolve(server.address() as { port: number })
+        })
+      })
+
+      const initData = generateValidInitData(
+        { id: 123456, first_name: "Test", username: "testuser" },
+        Math.floor(Date.now() / 1000),
+        chatId,
+      )
+
+      const response = await fetch(`http://localhost:${address.port}/validate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ initData }),
+      })
+      const data = await response.json()
+
+      expect(response.status).toBe(200)
+      expect(data.valid).toBe(true)
+      expect(data.user).toEqual({
+        id: 123456,
+        username: "testuser",
+        firstName: "Test",
+      })
+    })
+  })
+
+  describe("validateTelegramInitData", () => {
+    const botToken = "test-bot-token-123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
+
+    function generateInitData(params: Record<string, string>): string {
+      const searchParams = new URLSearchParams()
+
+      // Sort keys alphabetically for data-check string
+      const sortedKeys = Object.keys(params).filter((k) => k !== "hash").sort()
+      for (const key of sortedKeys) {
+        searchParams.set(key, params[key])
+      }
+
+      // Create data-check string
+      const dataCheckString = sortedKeys
+        .map((key) => `${key}=${params[key]}`)
+        .join("\n")
+
+      // Create secret key and hash
+      const secretKey = crypto
+        .createHmac("sha256", "WebAppData")
+        .update(botToken)
+        .digest()
+
+      const hash = crypto
+        .createHmac("sha256", secretKey)
+        .update(dataCheckString)
+        .digest("hex")
+
+      searchParams.set("hash", hash)
+      return searchParams.toString()
+    }
+
+    it("should return false for missing hash", () => {
+      const initData = new URLSearchParams({
+        user: JSON.stringify({ id: 123 }),
+        auth_date: "1234567890",
+      }).toString()
+
+      expect(validateTelegramInitData(initData, botToken)).toBe(false)
+    })
+
+    it("should return false for invalid hash", () => {
+      const initData = new URLSearchParams({
+        user: JSON.stringify({ id: 123 }),
+        auth_date: "1234567890",
+        hash: "invalidhash",
+      }).toString()
+
+      expect(validateTelegramInitData(initData, botToken)).toBe(false)
+    })
+
+    it("should return true for valid signature", () => {
+      const initData = generateInitData({
+        user: JSON.stringify({ id: 123456, first_name: "Test" }),
+        auth_date: "1234567890",
+      })
+
+      expect(validateTelegramInitData(initData, botToken)).toBe(true)
+    })
+
+    it("should return false when signed with wrong token", () => {
+      const initData = generateInitData({
+        user: JSON.stringify({ id: 123456, first_name: "Test" }),
+        auth_date: "1234567890",
+      })
+
+      expect(validateTelegramInitData(initData, "wrong-token")).toBe(false)
+    })
+
+    it("should handle special characters in values", () => {
+      const initData = generateInitData({
+        user: JSON.stringify({ id: 123456, first_name: "Test User & Co." }),
+        auth_date: "1234567890",
+        query_id: "AAHdF5e6r9kVFwAAoR9h7jI",
+      })
+
+      expect(validateTelegramInitData(initData, botToken)).toBe(true)
     })
   })
 })

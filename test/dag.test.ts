@@ -20,6 +20,7 @@ import {
   type DagGraph,
   type DagInput,
 } from "../src/dag.js"
+import { DagCycleError, DagSelfDependencyError, UnknownNodeError } from "../src/errors.js"
 
 describe("buildDag", () => {
   it("builds a simple linear DAG", () => {
@@ -62,35 +63,66 @@ describe("buildDag", () => {
     expect(graph.nodes.every((n) => n.status === "ready")).toBe(true)
   })
 
-  it("throws on unknown dependency", () => {
+  it("throws UnknownNodeError on unknown dependency with available nodes suggestion", () => {
     const items: DagInput[] = [
       { id: "a", title: "A", description: "A", dependsOn: ["nonexistent"] },
+      { id: "b", title: "B", description: "B", dependsOn: [] },
     ]
-    expect(() => buildDag("bad", items, 1, "repo")).toThrow("unknown node")
+    expect(() => buildDag("bad", items, 1, "repo")).toThrow(UnknownNodeError)
+    try {
+      buildDag("bad", items, 1, "repo")
+    } catch (err) {
+      expect(err).toBeInstanceOf(UnknownNodeError)
+      expect((err as UnknownNodeError).nodeId).toBe("a")
+      expect((err as UnknownNodeError).unknownDependency).toBe("nonexistent")
+      expect((err as UnknownNodeError).availableNodes).toEqual(["a", "b"])
+      expect((err as Error).message).toContain("Available:")
+    }
   })
 
-  it("throws on self-dependency", () => {
+  it("throws DagSelfDependencyError on self-dependency", () => {
     const items: DagInput[] = [
       { id: "a", title: "A", description: "A", dependsOn: ["a"] },
     ]
-    expect(() => buildDag("bad", items, 1, "repo")).toThrow("depends on itself")
+    expect(() => buildDag("bad", items, 1, "repo")).toThrow(DagSelfDependencyError)
+    try {
+      buildDag("bad", items, 1, "repo")
+    } catch (err) {
+      expect(err).toBeInstanceOf(DagSelfDependencyError)
+      expect((err as DagSelfDependencyError).nodeId).toBe("a")
+    }
   })
 
-  it("throws on cycle", () => {
+  it("throws DagCycleError on cycle with cycle path in message", () => {
     const items: DagInput[] = [
       { id: "a", title: "A", description: "A", dependsOn: ["b"] },
       { id: "b", title: "B", description: "B", dependsOn: ["a"] },
     ]
-    expect(() => buildDag("cycle", items, 1, "repo")).toThrow("cycle")
+    expect(() => buildDag("cycle", items, 1, "repo")).toThrow(DagCycleError)
+    try {
+      buildDag("cycle", items, 1, "repo")
+    } catch (err) {
+      expect(err).toBeInstanceOf(DagCycleError)
+      expect((err as DagCycleError).cycleNodes).toBeDefined()
+      expect((err as DagCycleError).cycleNodes!.length).toBeGreaterThan(0)
+      expect((err as Error).message).toContain("→")
+    }
   })
 
-  it("throws on longer cycle", () => {
+  it("throws DagCycleError on longer cycle with path", () => {
     const items: DagInput[] = [
       { id: "a", title: "A", description: "A", dependsOn: ["c"] },
       { id: "b", title: "B", description: "B", dependsOn: ["a"] },
       { id: "c", title: "C", description: "C", dependsOn: ["b"] },
     ]
-    expect(() => buildDag("cycle", items, 1, "repo")).toThrow("cycle")
+    expect(() => buildDag("cycle", items, 1, "repo")).toThrow(DagCycleError)
+    try {
+      buildDag("cycle", items, 1, "repo")
+    } catch (err) {
+      expect(err).toBeInstanceOf(DagCycleError)
+      expect((err as DagCycleError).cycleNodes).toBeDefined()
+      expect((err as Error).message).toContain("→")
+    }
   })
 })
 

@@ -1,3 +1,5 @@
+import { DagCycleError, DagSelfDependencyError, UnknownNodeError } from "./errors.js"
+
 export type DagNodeStatus = "pending" | "ready" | "running" | "done" | "failed" | "skipped"
 
 export interface DagNode {
@@ -30,6 +32,51 @@ export interface DagInput {
 }
 
 /**
+ * Detect a cycle in the DAG and return the nodes involved.
+ * Uses DFS to find the first cycle path.
+ */
+function findCycle(nodes: DagNode[] | DagInput[]): string[] {
+  const visited = new Set<string>()
+  const recursionStack = new Set<string>()
+  const path: string[] = []
+  const nodeMap = new Map(nodes.map((n) => [n.id, n]))
+
+  function dfs(nodeId: string): string[] | null {
+    if (recursionStack.has(nodeId)) {
+      // Found a cycle - return the path from this node back to itself
+      const cycleStart = path.indexOf(nodeId)
+      return path.slice(cycleStart)
+    }
+    if (visited.has(nodeId)) return null
+
+    visited.add(nodeId)
+    recursionStack.add(nodeId)
+    path.push(nodeId)
+
+    const node = nodeMap.get(nodeId)
+    if (node) {
+      for (const dep of node.dependsOn) {
+        const cycle = dfs(dep)
+        if (cycle) return cycle
+      }
+    }
+
+    recursionStack.delete(nodeId)
+    path.pop()
+    return null
+  }
+
+  for (const node of nodes) {
+    if (!visited.has(node.id)) {
+      const cycle = dfs(node.id)
+      if (cycle) return cycle
+    }
+  }
+
+  return []
+}
+
+/**
  * Build a DagGraph from extracted items.
  * Validates acyclicity and referential integrity.
  */
@@ -46,11 +93,11 @@ export function buildDag(
   for (const item of items) {
     for (const dep of item.dependsOn) {
       if (!ids.has(dep)) {
-        throw new Error(`Node "${item.id}" depends on unknown node "${dep}"`)
+        throw new UnknownNodeError(item.id, dep, Array.from(ids))
       }
     }
     if (item.dependsOn.includes(item.id)) {
-      throw new Error(`Node "${item.id}" depends on itself`)
+      throw new DagSelfDependencyError(item.id)
     }
   }
 
@@ -74,7 +121,8 @@ export function buildDag(
   // Validate acyclicity
   const sorted = topologicalSort(graph)
   if (sorted.length !== nodes.length) {
-    throw new Error("DAG contains a cycle")
+    const cycleNodes = findCycle(nodes)
+    throw new DagCycleError(cycleNodes)
   }
 
   // Set initial ready status for nodes with no dependencies

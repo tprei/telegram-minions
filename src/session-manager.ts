@@ -13,6 +13,7 @@ import type { SessionHandle } from "./session.js"
 import type { SessionMeta, TopicSession } from "./types.js"
 import { extractRepoName } from "./command-parser.js"
 import { loggers } from "./logger.js"
+import { DefaultBranchError } from "./errors.js"
 
 const log = loggers.session
 
@@ -172,7 +173,7 @@ export function prepareWorkspace(
       }
 
       const branch = `minion/${slug}`
-      const startRef = startBranch ?? resolveDefaultBranch(bareDir, gitOpts)
+      const startRef = startBranch ?? resolveDefaultBranch(bareDir, gitOpts, repoUrl)
       log.debug({ workDir, branch, startRef }, "adding worktree")
       execSync(
         `git worktree add ${JSON.stringify(workDir)} -b ${JSON.stringify(branch)} ${startRef}`,
@@ -251,7 +252,7 @@ export function updateLocalHead(bareDir: string, gitOpts: object): void {
  * Resolve the default branch name from a bare git repo.
  * Tries HEAD symbolic-ref, then main, then master.
  */
-export function resolveDefaultBranch(bareDir: string, gitOpts: object): string {
+export function resolveDefaultBranch(bareDir: string, gitOpts: object, repoUrl?: string): string {
   try {
     const ref = execSync("git symbolic-ref HEAD", { ...gitOpts, cwd: bareDir })
       .toString()
@@ -278,7 +279,7 @@ export function resolveDefaultBranch(bareDir: string, gitOpts: object): string {
     }
   }
 
-  throw new Error("cannot determine default branch")
+  throw new DefaultBranchError(repoUrl)
 }
 
 function bootstrapOnePackage(

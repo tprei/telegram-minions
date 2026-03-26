@@ -20,6 +20,8 @@ const log = loggers.observer
 
 // Text flush delay: if no new text chunk arrives within this window, send what's buffered.
 const TEXT_FLUSH_DEBOUNCE_MS = 1500
+// How often to check if buffered text should be flushed (interval-based instead of per-chunk timer).
+const FLUSH_CHECK_INTERVAL_MS = 200
 
 // Maximum number of recent tool lines to keep in the activity log.
 const MAX_ACTIVITY_LINES = 6
@@ -34,7 +36,8 @@ export type TextCaptureCallback = (sessionId: string, text: string) => void
 interface SessionState {
   // Text buffering: Goose streams text token-by-token; we accumulate and flush.
   textBuffer: string
-  flushTimer: ReturnType<typeof setTimeout> | null
+  lastTextAt: number // timestamp of last text chunk
+  flushInterval: ReturnType<typeof setInterval> | null
   // Tool activity tracking (per-flush window)
   activityMessageId: number | null
   activityLastSentAt: number
@@ -65,7 +68,8 @@ export class Observer {
   ): Promise<void> {
     this.sessions.set(meta.sessionId, {
       textBuffer: "",
-      flushTimer: null,
+      lastTextAt: 0,
+      flushInterval: null,
       activityMessageId: null,
       activityLastSentAt: 0,
       toolCount: 0,
@@ -186,15 +190,28 @@ export class Observer {
     if (!state) return
 
     state.textBuffer += chunk
+    state.lastTextAt = Date.now()
 
-    // Reset debounce timer
-    if (state.flushTimer !== null) clearTimeout(state.flushTimer)
-    state.flushTimer = setTimeout(() => {
-      this.flushTextBuffer(meta).catch((err) => {
-        log.error({ err, sessionId: meta.sessionId }, "flush error")
-        captureException(err, { operation: "observer.flush", sessionId: meta.sessionId })
-      })
-    }, TEXT_FLUSH_DEBOUNCE_MS)
+    if (state.flushInterval === null) {
+      state.flushInterval = setInterval(() => {
+        const currentState = this.sessions.get(meta.sessionId)
+        if (!currentState) {
+          if (state.flushInterval !== null) {
+            clearInterval(state.flushInterval)
+            state.flushInterval = null
+          }
+          return
+        }
+
+        const now = Date.now()
+        if (now - currentState.lastTextAt >= TEXT_FLUSH_DEBOUNCE_MS && currentState.textBuffer.length > 0) {
+          this.flushTextBuffer(meta).catch((err) => {
+            log.error({ err, sessionId: meta.sessionId }, "flush error")
+            captureException(err, { operation: "observer.flush", sessionId: meta.sessionId })
+          })
+        }
+      }, FLUSH_CHECK_INTERVAL_MS)
+    }
   }
 
   private async flushTextBuffer(
@@ -204,9 +221,9 @@ export class Observer {
     const state = this.sessions.get(meta.sessionId)
     if (!state) return
 
-    if (state.flushTimer !== null) {
-      clearTimeout(state.flushTimer)
-      state.flushTimer = null
+    if (state.flushInterval !== null) {
+      clearInterval(state.flushInterval)
+      state.flushInterval = null
     }
 
     await this.scanAndSendScreenshots(meta)
@@ -335,7 +352,7 @@ export class Observer {
 
   clearSession(sessionId: string): void {
     const state = this.sessions.get(sessionId)
-    if (state?.flushTimer !== null) clearTimeout(state!.flushTimer)
+    if (state?.flushInterval !== null) clearInterval(state!.flushInterval)
     if (state?.activityEditTimer !== null) clearTimeout(state!.activityEditTimer)
     this.sessions.delete(sessionId)
   }

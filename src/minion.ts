@@ -73,6 +73,7 @@ export function createMinion(config: MinionConfig, options?: MinionOptions): Min
       port: apiPort,
       uiDistPath,
       chatId: config.telegram.chatId,
+      botToken: config.telegram.botToken,
       broadcaster,
     })
   }
