@@ -4,6 +4,12 @@ import { pipeline } from "node:stream/promises"
 import { Readable } from "node:stream"
 import type { TelegramUpdate, TelegramForumTopic } from "./types.js"
 import { captureException } from "./sentry.js"
+import {
+  TelegramRateLimitError,
+  TelegramHttpError,
+  TelegramResponseError,
+  TelegramRetryExhaustedError,
+} from "./errors.js"
 
 const MAX_LENGTH = 4096
 const BASE = "https://api.telegram.org"
@@ -165,23 +171,23 @@ export class TelegramClient {
           await sleep(retryAfter * 1000)
           continue
         }
-        throw new Error(`Telegram ${method} HTTP 429: ${text}`)
+        throw new TelegramRateLimitError(method, text, retryAfter)
       }
 
       if (!res.ok) {
         const text = await res.text()
-        throw new Error(`Telegram ${method} HTTP ${res.status}: ${text}`)
+        throw new TelegramHttpError(method, res.status, text)
       }
 
       const data = (await res.json()) as { ok: boolean; result: T; description?: string }
 
       if (!data.ok) {
-        throw new Error(`Telegram ${method} error: ${data.description ?? "unknown"}`)
+        throw new TelegramResponseError(method, data.description)
       }
 
       return data.result
     }
-    throw new Error(`Telegram ${method}: exhausted retries`)
+    throw new TelegramRetryExhaustedError(method, MAX_RETRIES)
   }
 
   async getUpdates(offset: number, timeout: number): Promise<TelegramUpdate[]> {
@@ -430,20 +436,20 @@ export class TelegramClient {
           await sleep(retryAfter * 1000)
           continue
         }
-        throw new Error(`HTTP 429: ${text}`)
+        throw new TelegramRateLimitError("sendPhoto", text, retryAfter)
       }
 
       if (!res.ok) {
         const text = await res.text()
-        throw new Error(`HTTP ${res.status}: ${text}`)
+        throw new TelegramHttpError("sendPhoto", res.status, text)
       }
 
       const json = (await res.json()) as { ok: boolean; result: { message_id: number }; description?: string }
-      if (!json.ok) throw new Error(json.description ?? "unknown error")
+      if (!json.ok) throw new TelegramResponseError("sendPhoto", json.description)
 
       return json.result.message_id
     }
-    throw new Error("sendPhoto: exhausted retries")
+    throw new TelegramRetryExhaustedError("sendPhoto", MAX_RETRIES)
   }
 
   async downloadFile(fileId: string, destPath: string): Promise<boolean> {

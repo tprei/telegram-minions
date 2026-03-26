@@ -76,6 +76,7 @@ import { extractPRUrl, findPRByBranch, waitForCI, getFailedCheckLogs, buildCIFix
 import { buildConversationDigest } from "./conversation-digest.js"
 import { DEFAULT_CI_FIX_PROMPT, DEFAULT_RECOVERY_PROMPT } from "./prompts.js"
 import { StateBroadcaster, topicSessionToApi, dagToApi } from "./api-server.js"
+import { SessionNotFoundError, DefaultBranchError } from "./errors.js"
 
 const POLL_TIMEOUT = 30
 const TASK_PREFIX = "/task"
@@ -2916,7 +2917,7 @@ export class Dispatcher {
   async apiSendReply(threadId: number, message: string): Promise<void> {
     const topicSession = this.topicSessions.get(threadId)
     if (!topicSession) {
-      throw new Error(`Session not found: ${threadId}`)
+      throw new SessionNotFoundError(threadId)
     }
 
     // Queue the message for the session to pick up
@@ -2937,7 +2938,7 @@ export class Dispatcher {
   async apiCloseSession(threadId: number): Promise<void> {
     const topicSession = this.topicSessions.get(threadId)
     if (!topicSession) {
-      throw new Error(`Session not found: ${threadId}`)
+      throw new SessionNotFoundError(threadId)
     }
 
     // Stop any active session
@@ -2983,7 +2984,7 @@ export function resolveDefaultBranch(bareDir: string, gitOpts: object): string {
     } catch { /* doesn't exist */ }
   }
 
-  throw new Error("cannot determine default branch")
+  throw new DefaultBranchError()
 }
 
 export function parseTaskArgs(repos: Record<string, string>, args: string): { repoUrl?: string; task: string } {

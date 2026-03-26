@@ -1,3 +1,5 @@
+import { DagCycleError, DagSelfDependencyError, UnknownNodeError } from "./errors.js"
+
 export type DagNodeStatus = "pending" | "ready" | "running" | "done" | "failed" | "skipped"
 
 export interface DagNode {
@@ -46,11 +48,11 @@ export function buildDag(
   for (const item of items) {
     for (const dep of item.dependsOn) {
       if (!ids.has(dep)) {
-        throw new Error(`Node "${item.id}" depends on unknown node "${dep}"`)
+        throw new UnknownNodeError(item.id, dep)
       }
     }
     if (item.dependsOn.includes(item.id)) {
-      throw new Error(`Node "${item.id}" depends on itself`)
+      throw new DagSelfDependencyError(item.id)
     }
   }
 
@@ -74,7 +76,7 @@ export function buildDag(
   // Validate acyclicity
   const sorted = topologicalSort(graph)
   if (sorted.length !== nodes.length) {
-    throw new Error("DAG contains a cycle")
+    throw new DagCycleError()
   }
 
   // Set initial ready status for nodes with no dependencies

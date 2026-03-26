@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest"
 import { configFromEnv } from "../src/config-env.js"
+import { ConfigError, ConfigFormatError } from "../src/errors.js"
 
 describe("configFromEnv", () => {
   const originalEnv: Record<string, string | undefined> = {}
@@ -13,6 +14,7 @@ describe("configFromEnv", () => {
       "MY_API_KEY",
       "DATABASE_URL",
       "CUSTOM_SECRET",
+      "MAX_CONCURRENT_SESSIONS",
     ]) {
       originalEnv[key] = process.env[key]
     }
@@ -30,6 +32,32 @@ describe("configFromEnv", () => {
         process.env[key] = value
       }
     }
+  })
+
+  describe("error handling", () => {
+    it("throws ConfigError for missing required env var", () => {
+      delete process.env["TELEGRAM_BOT_TOKEN"]
+      expect(() => configFromEnv()).toThrow(ConfigError)
+      try {
+        configFromEnv()
+      } catch (err) {
+        expect(err).toBeInstanceOf(ConfigError)
+        expect((err as ConfigError).varName).toBe("TELEGRAM_BOT_TOKEN")
+        expect((err as ConfigError).message).toContain("Missing required env var")
+      }
+    })
+
+    it("throws ConfigFormatError for invalid number format", () => {
+      process.env["MAX_CONCURRENT_SESSIONS"] = "not-a-number"
+      expect(() => configFromEnv()).toThrow(ConfigFormatError)
+      try {
+        configFromEnv()
+      } catch (err) {
+        expect(err).toBeInstanceOf(ConfigFormatError)
+        expect((err as ConfigFormatError).varName).toBe("MAX_CONCURRENT_SESSIONS")
+        expect((err as ConfigFormatError).actualValue).toBe("not-a-number")
+      }
+    })
   })
 
   describe("sessionEnvPassthrough", () => {

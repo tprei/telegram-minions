@@ -1,8 +1,9 @@
 import type { MinionConfig } from "./config-types.js"
+import { ConfigError, ConfigFormatError } from "./errors.js"
 
 function required(name: string): string {
   const val = process.env[name]
-  if (!val) throw new Error(`Missing required env var: ${name}`)
+  if (!val) throw new ConfigError(`Missing required env var: ${name}`, name)
   return val
 }
 
@@ -14,7 +15,7 @@ function optionalNumber(name: string, fallback: number): number {
   const val = process.env[name]
   if (!val) return fallback
   const n = Number(val)
-  if (isNaN(n)) throw new Error(`Env var ${name} must be a number, got: ${val}`)
+  if (isNaN(n)) throw new ConfigFormatError(name, "a number", val)
   return n
 }
 
