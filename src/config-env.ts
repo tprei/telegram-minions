@@ -1,5 +1,6 @@
 import type { MinionConfig } from "./config-types.js"
 import { ConfigError, ConfigFormatError } from "./errors.js"
+import { validateMinionConfig, ConfigValidationError } from "./config-validator.js"
 
 function required(name: string): string {
   const val = process.env[name]
@@ -28,7 +29,8 @@ export function configFromEnv(overrides?: Partial<MinionConfig>): MinionConfig {
         .split(",")
         .map((s) => s.trim())
         .filter((s) => s.length > 0)
-        .map(Number),
+        .map(Number)
+        .filter((n) => !isNaN(n) && n > 0),
     },
     goose: {
       provider: optional("GOOSE_PROVIDER", "claude-acp"),
@@ -78,6 +80,12 @@ export function configFromEnv(overrides?: Partial<MinionConfig>): MinionConfig {
       ? process.env["SESSION_ENV_PASSTHROUGH"].split(",").map((s) => s.trim()).filter((s) => s.length > 0)
       : undefined,
     ...overrides,
+  }
+
+  const validation = validateMinionConfig(base)
+  if (!validation.valid) {
+    const messages = validation.errors.map((e) => e.message).join("\n  ")
+    throw new ConfigValidationError(`Invalid config:\n  ${messages}`, "configFromEnv")
   }
 
   return base
