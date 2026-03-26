@@ -9,8 +9,8 @@ import path from "node:path"
 import fs from "node:fs"
 import os from "node:os"
 import crypto from "node:crypto"
-import type { SessionHandle, SessionConfig } from "./session.js"
-import type { SessionMeta, TopicSession, SessionMode } from "./types.js"
+import type { SessionHandle } from "./session.js"
+import type { SessionMeta, TopicSession } from "./types.js"
 import { extractRepoName } from "./command-parser.js"
 
 const execFileAsync = promisify(execFile)

@@ -87,7 +87,6 @@ import {
   buildContextPrompt, buildExecutionPrompt,
   prepareWorkspace, removeWorkspace, cleanBuildArtifacts, dirSizeBytes,
   downloadPhotos, prepareFanInBranch, mergeUpstreamBranches,
-  updateLocalHead, resolveDefaultBranch,
 } from "./session-manager.js"
 
 const POLL_TIMEOUT = 30
