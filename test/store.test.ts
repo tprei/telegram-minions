@@ -72,9 +72,24 @@ describe("SessionStore", () => {
     expect(active.size).toBe(0)
   })
 
-  it("returns empty result on corrupted file", async () => {
+  it("returns empty result on corrupted file without Sentry report", async () => {
     const store = new SessionStore(tmpDir)
     fs.writeFileSync(path.join(tmpDir, ".sessions.json"), "not json", "utf-8")
+    const chunks: string[] = []
+    const origWrite = process.stderr.write
+    process.stderr.write = ((chunk: string) => { chunks.push(chunk); return true }) as typeof process.stderr.write
+    try {
+      const { active } = await store.load()
+      expect(active.size).toBe(0)
+      expect(chunks.join("")).toContain("corrupt file, starting fresh")
+    } finally {
+      process.stderr.write = origWrite
+    }
+  })
+
+  it("returns empty result on empty file (truncated write)", async () => {
+    const store = new SessionStore(tmpDir)
+    fs.writeFileSync(path.join(tmpDir, ".sessions.json"), "", "utf-8")
     const { active } = await store.load()
     expect(active.size).toBe(0)
   })
