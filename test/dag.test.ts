@@ -9,6 +9,8 @@ import {
   resetFailedNode,
   isDagComplete,
   getUpstreamBranches,
+  getDownstreamNodes,
+  needsRestack,
   criticalPathLength,
   dagProgress,
   transitiveReduction,
@@ -364,6 +366,191 @@ describe("getUpstreamBranches", () => {
     ], 1, "repo")
 
     expect(getUpstreamBranches(graph, "a")).toEqual([])
+  })
+})
+
+describe("getDownstreamNodes", () => {
+  it("returns direct dependents", () => {
+    const graph = buildDag("test", [
+      { id: "a", title: "A", description: "A", dependsOn: [] },
+      { id: "b", title: "B", description: "B", dependsOn: ["a"] },
+      { id: "c", title: "C", description: "C", dependsOn: [] },
+    ], 1, "repo")
+
+    const downstream = getDownstreamNodes(graph, "a")
+    expect(downstream.map((n) => n.id)).toEqual(["b"])
+  })
+
+  it("returns transitive dependents", () => {
+    const graph = buildDag("test", [
+      { id: "a", title: "A", description: "A", dependsOn: [] },
+      { id: "b", title: "B", description: "B", dependsOn: ["a"] },
+      { id: "c", title: "C", description: "C", dependsOn: ["b"] },
+    ], 1, "repo")
+
+    const downstream = getDownstreamNodes(graph, "a")
+    expect(downstream.map((n) => n.id)).toEqual(["b", "c"])
+  })
+
+  it("returns empty for leaf nodes", () => {
+    const graph = buildDag("test", [
+      { id: "a", title: "A", description: "A", dependsOn: [] },
+      { id: "b", title: "B", description: "B", dependsOn: ["a"] },
+    ], 1, "repo")
+
+    expect(getDownstreamNodes(graph, "b")).toEqual([])
+  })
+
+  it("handles diamond DAG without duplicates", () => {
+    const graph = buildDag("test", [
+      { id: "a", title: "A", description: "A", dependsOn: [] },
+      { id: "b", title: "B", description: "B", dependsOn: ["a"] },
+      { id: "c", title: "C", description: "C", dependsOn: ["a"] },
+      { id: "d", title: "D", description: "D", dependsOn: ["b", "c"] },
+    ], 1, "repo")
+
+    const downstream = getDownstreamNodes(graph, "a")
+    expect(downstream.map((n) => n.id).sort()).toEqual(["b", "c", "d"])
+  })
+
+  it("returns empty for unknown node", () => {
+    const graph = buildDag("test", [
+      { id: "a", title: "A", description: "A", dependsOn: [] },
+    ], 1, "repo")
+
+    expect(getDownstreamNodes(graph, "nonexistent")).toEqual([])
+  })
+})
+
+describe("needsRestack", () => {
+  it("returns downstream nodes with branches and merge bases", () => {
+    const graph = buildDag("test", [
+      { id: "a", title: "A", description: "A", dependsOn: [] },
+      { id: "b", title: "B", description: "B", dependsOn: ["a"] },
+      { id: "c", title: "C", description: "C", dependsOn: ["b"] },
+    ], 1, "repo")
+
+    graph.nodes[0].status = "done"
+    graph.nodes[0].branch = "minion/a"
+    graph.nodes[1].status = "ready"
+    graph.nodes[1].branch = "minion/b"
+    graph.nodes[1].mergeBase = "abc123"
+    graph.nodes[2].status = "pending"
+    graph.nodes[2].branch = "minion/c"
+    graph.nodes[2].mergeBase = "def456"
+
+    const result = needsRestack(graph, "a")
+    expect(result.map((n) => n.id)).toEqual(["b", "c"])
+  })
+
+  it("excludes nodes without branches", () => {
+    const graph = buildDag("test", [
+      { id: "a", title: "A", description: "A", dependsOn: [] },
+      { id: "b", title: "B", description: "B", dependsOn: ["a"] },
+    ], 1, "repo")
+
+    graph.nodes[0].status = "done"
+    graph.nodes[1].status = "pending"
+    // b has no branch or mergeBase
+
+    expect(needsRestack(graph, "a")).toEqual([])
+  })
+
+  it("excludes nodes without merge bases", () => {
+    const graph = buildDag("test", [
+      { id: "a", title: "A", description: "A", dependsOn: [] },
+      { id: "b", title: "B", description: "B", dependsOn: ["a"] },
+    ], 1, "repo")
+
+    graph.nodes[0].status = "done"
+    graph.nodes[1].status = "ready"
+    graph.nodes[1].branch = "minion/b"
+    // b has branch but no mergeBase
+
+    expect(needsRestack(graph, "a")).toEqual([])
+  })
+
+  it("excludes terminal-state nodes (done, failed, skipped)", () => {
+    const graph = buildDag("test", [
+      { id: "a", title: "A", description: "A", dependsOn: [] },
+      { id: "b", title: "B", description: "B", dependsOn: ["a"] },
+      { id: "c", title: "C", description: "C", dependsOn: ["a"] },
+      { id: "d", title: "D", description: "D", dependsOn: ["a"] },
+    ], 1, "repo")
+
+    graph.nodes[1].status = "done"
+    graph.nodes[1].branch = "minion/b"
+    graph.nodes[1].mergeBase = "abc"
+
+    graph.nodes[2].status = "failed"
+    graph.nodes[2].branch = "minion/c"
+    graph.nodes[2].mergeBase = "def"
+
+    graph.nodes[3].status = "skipped"
+    graph.nodes[3].branch = "minion/d"
+    graph.nodes[3].mergeBase = "ghi"
+
+    expect(needsRestack(graph, "a")).toEqual([])
+  })
+
+  it("returns nodes in topological order", () => {
+    const graph = buildDag("test", [
+      { id: "a", title: "A", description: "A", dependsOn: [] },
+      { id: "b", title: "B", description: "B", dependsOn: ["a"] },
+      { id: "c", title: "C", description: "C", dependsOn: ["b"] },
+      { id: "d", title: "D", description: "D", dependsOn: ["c"] },
+    ], 1, "repo")
+
+    for (const node of graph.nodes) {
+      node.branch = `minion/${node.id}`
+      node.mergeBase = `sha-${node.id}`
+      if (node.id !== "a") node.status = "ready"
+    }
+    graph.nodes[0].status = "done"
+
+    const result = needsRestack(graph, "a")
+    expect(result.map((n) => n.id)).toEqual(["b", "c", "d"])
+  })
+
+  it("only includes nodes downstream of the changed node", () => {
+    const graph = buildDag("test", [
+      { id: "a", title: "A", description: "A", dependsOn: [] },
+      { id: "b", title: "B", description: "B", dependsOn: ["a"] },
+      { id: "c", title: "C", description: "C", dependsOn: [] },
+      { id: "d", title: "D", description: "D", dependsOn: ["c"] },
+    ], 1, "repo")
+
+    for (const node of graph.nodes) {
+      node.branch = `minion/${node.id}`
+      node.mergeBase = `sha-${node.id}`
+      node.status = "ready"
+    }
+
+    const result = needsRestack(graph, "a")
+    expect(result.map((n) => n.id)).toEqual(["b"])
+  })
+})
+
+describe("mergeBase field", () => {
+  it("is undefined by default when building a DAG", () => {
+    const graph = buildDag("test", [
+      { id: "a", title: "A", description: "A", dependsOn: [] },
+    ], 1, "repo")
+
+    expect(graph.nodes[0].mergeBase).toBeUndefined()
+  })
+
+  it("can be set and read on nodes", () => {
+    const graph = buildDag("test", [
+      { id: "a", title: "A", description: "A", dependsOn: [] },
+      { id: "b", title: "B", description: "B", dependsOn: ["a"] },
+    ], 1, "repo")
+
+    graph.nodes[0].mergeBase = "abc123"
+    graph.nodes[1].mergeBase = "def456"
+
+    expect(graph.nodes[0].mergeBase).toBe("abc123")
+    expect(graph.nodes[1].mergeBase).toBe("def456")
   })
 })
 
