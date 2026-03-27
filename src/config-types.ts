@@ -48,6 +48,12 @@ export interface McpConfig {
 
 export interface ObserverConfig {
   activityThrottleMs: number
+  textFlushDebounceMs: number
+  activityEditDebounceMs: number
+}
+
+export interface TelegramQueueConfig {
+  minSendIntervalMs: number
 }
 
 export interface SentryConfig {
@@ -62,6 +68,7 @@ export interface AgentDefinitions {
 
 export interface MinionConfig {
   telegram: TelegramConfig
+  telegramQueue: TelegramQueueConfig
   goose: GooseConfig
   claude: ClaudeConfig
   workspace: WorkspaceConfig
