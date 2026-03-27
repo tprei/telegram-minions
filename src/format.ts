@@ -806,7 +806,7 @@ export function formatPinnedSplitStatus(
 export function formatPinnedDagStatus(
   parentSlug: string,
   repo: string,
-  nodes: { id: string; title: string; prUrl?: string; status: "pending" | "ready" | "running" | "done" | "failed" }[],
+  nodes: { id: string; title: string; prUrl?: string; status: "pending" | "ready" | "running" | "done" | "failed" | "skipped" }[],
   isStack: boolean,
 ): string {
   const icon = isStack ? "📚" : "🔗"
@@ -826,9 +826,15 @@ export function formatPinnedDagStatus(
   lines.push(``)
 
   for (const node of nodes) {
-    const nodeIcon = node.status === "done" ? "✅" : node.status === "failed" ? "❌" : node.status === "running" ? "⚡" : "⏳"
+    const nodeIcon = node.status === "done" ? "✅" : node.status === "failed" ? "❌" : node.status === "running" ? "⚡" : node.status === "skipped" ? "⏭️" : "⏳"
     const prPart = node.prUrl ? ` — <a href="${esc(node.prUrl)}">PR</a>` : ""
-    lines.push(`${nodeIcon} <code>${esc(node.id)}</code>: ${esc(node.title)}${prPart}`)
+    const title = esc(node.title)
+    const styledTitle = node.status === "done" || node.status === "skipped"
+      ? `<s>${title}</s>`
+      : node.status === "running" || node.status === "failed"
+        ? `<b>${title}</b>`
+        : title
+    lines.push(`${nodeIcon} <code>${esc(node.id)}</code>: ${styledTitle}${prPart}`)
   }
 
   return lines.join("\n")

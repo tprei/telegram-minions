@@ -655,6 +655,52 @@ describe("renderDagStatus", () => {
     expect(status).toContain("PR")
     expect(status).toContain("1/2 complete")
   })
+
+  it("applies strikethrough to done and skipped nodes", () => {
+    const graph = buildDag("test", [
+      { id: "a", title: "Done Task", description: "A", dependsOn: [] },
+      { id: "b", title: "Skipped Task", description: "B", dependsOn: ["a"] },
+    ], 1, "repo")
+
+    graph.nodes[0].status = "done"
+    graph.nodes[1].status = "skipped"
+
+    const status = renderDagStatus(graph)
+    expect(status).toContain("<s>Done Task</s>")
+    expect(status).toContain("<s>Skipped Task</s>")
+  })
+
+  it("applies bold to running and failed nodes", () => {
+    const graph = buildDag("test", [
+      { id: "a", title: "Running Task", description: "A", dependsOn: [] },
+      { id: "b", title: "Failed Task", description: "B", dependsOn: [] },
+    ], 1, "repo")
+
+    graph.nodes[0].status = "running"
+    graph.nodes[1].status = "failed"
+
+    const status = renderDagStatus(graph)
+    expect(status).toContain("<b>Running Task</b>")
+    expect(status).toContain("<b>Failed Task</b>")
+  })
+
+  it("leaves pending and ready nodes as plain text", () => {
+    const graph = buildDag("test", [
+      { id: "a", title: "Pending Task", description: "A", dependsOn: [] },
+      { id: "b", title: "Ready Task", description: "B", dependsOn: [] },
+    ], 1, "repo")
+
+    graph.nodes[0].status = "pending"
+    graph.nodes[1].status = "ready"
+
+    const status = renderDagStatus(graph)
+    expect(status).not.toContain("<b>Pending Task</b>")
+    expect(status).not.toContain("<s>Pending Task</s>")
+    expect(status).not.toContain("<b>Ready Task</b>")
+    expect(status).not.toContain("<s>Ready Task</s>")
+    expect(status).toContain("Pending Task")
+    expect(status).toContain("Ready Task")
+  })
 })
 
 describe("renderDagForGitHub", () => {
