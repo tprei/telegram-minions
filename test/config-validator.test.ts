@@ -4,6 +4,7 @@ import {
   validateTelegramConfig,
   validateGooseConfig,
   validateClaudeConfig,
+  validateCodexConfig,
   validateWorkspaceConfig,
   validateCiConfig,
   validateMcpConfig,
@@ -34,6 +35,11 @@ function createValidMinionConfig(): MinionConfig {
       planModel: "sonnet",
       thinkModel: "opus",
       reviewModel: "opus",
+    },
+    codex: {
+      defaultModel: "o4-mini",
+      execPath: "codex",
+      approvalMode: "full-auto",
     },
     workspace: {
       root: "/workspace",
@@ -177,6 +183,66 @@ describe("validateClaudeConfig", () => {
       reviewModel: "opus",
     })
     expect(result.valid).toBe(true)
+  })
+})
+
+describe("validateCodexConfig", () => {
+  it("validates a valid config", () => {
+    const result = validateCodexConfig({
+      defaultModel: "o4-mini",
+      execPath: "codex",
+      approvalMode: "full-auto",
+    })
+    expect(result.valid).toBe(true)
+  })
+
+  it("accepts all valid approval modes", () => {
+    for (const mode of ["suggest", "auto-edit", "full-auto"]) {
+      const result = validateCodexConfig({
+        defaultModel: "o4-mini",
+        execPath: "codex",
+        approvalMode: mode,
+      })
+      expect(result.valid).toBe(true)
+    }
+  })
+
+  it("rejects missing defaultModel", () => {
+    const result = validateCodexConfig({ execPath: "codex", approvalMode: "full-auto" })
+    expect(result.valid).toBe(false)
+    expect(result.errors.some((e) => e.path.includes("defaultModel"))).toBe(true)
+  })
+
+  it("rejects empty defaultModel", () => {
+    const result = validateCodexConfig({ defaultModel: "", execPath: "codex", approvalMode: "full-auto" })
+    expect(result.valid).toBe(false)
+  })
+
+  it("rejects missing execPath", () => {
+    const result = validateCodexConfig({ defaultModel: "o4-mini", approvalMode: "full-auto" })
+    expect(result.valid).toBe(false)
+    expect(result.errors.some((e) => e.path.includes("execPath"))).toBe(true)
+  })
+
+  it("rejects missing approvalMode", () => {
+    const result = validateCodexConfig({ defaultModel: "o4-mini", execPath: "codex" })
+    expect(result.valid).toBe(false)
+    expect(result.errors.some((e) => e.path.includes("approvalMode"))).toBe(true)
+  })
+
+  it("rejects invalid approval mode", () => {
+    const result = validateCodexConfig({
+      defaultModel: "o4-mini",
+      execPath: "codex",
+      approvalMode: "yolo",
+    })
+    expect(result.valid).toBe(false)
+    expect(result.errors.some((e) => e.path.includes("approvalMode"))).toBe(true)
+  })
+
+  it("rejects non-object config", () => {
+    const result = validateCodexConfig(null)
+    expect(result.valid).toBe(false)
   })
 })
 

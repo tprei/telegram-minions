@@ -3,6 +3,7 @@ import type {
   TelegramConfig,
   GooseConfig,
   ClaudeConfig,
+  CodexConfig,
   WorkspaceConfig,
   CiConfig,
   McpConfig,
@@ -194,6 +195,35 @@ export function validateClaudeConfig(config: unknown, path = "claude"): Validati
     } else {
       errors.push(error(`${path}.${field}`, "required"))
     }
+  }
+
+  return { valid: errors.length === 0, errors }
+}
+
+export function validateCodexConfig(config: unknown, path = "codex"): ValidationResult {
+  const errors: ConfigValidationError[] = []
+  if (!config || typeof config !== "object") {
+    errors.push(error(path, "expected object"))
+    return { valid: false, errors }
+  }
+  const c = config as Partial<CodexConfig>
+
+  const validApprovalModes = ["suggest", "auto-edit", "full-auto"]
+
+  const modelErr = validateNonEmptyString(c.defaultModel, `${path}.defaultModel`)
+  if (modelErr) errors.push(modelErr)
+
+  const execPathErr = validateNonEmptyString(c.execPath, `${path}.execPath`)
+  if (execPathErr) errors.push(execPathErr)
+
+  const approvalErr = validateNonEmptyString(c.approvalMode, `${path}.approvalMode`)
+  if (approvalErr) {
+    errors.push(approvalErr)
+  } else if (c.approvalMode && !validApprovalModes.includes(c.approvalMode)) {
+    errors.push(new ConfigValidationError(
+      `Invalid approval mode "${c.approvalMode}". Valid modes: ${validApprovalModes.join(", ")}`,
+      `${path}.approvalMode`,
+    ))
   }
 
   return { valid: errors.length === 0, errors }
@@ -416,6 +446,9 @@ export function validateMinionConfig(config: unknown): ValidationResult {
 
   const claudeResult = validateClaudeConfig(c.claude)
   errors.push(...claudeResult.errors)
+
+  const codexResult = validateCodexConfig(c.codex)
+  errors.push(...codexResult.errors)
 
   const workspaceResult = validateWorkspaceConfig(c.workspace)
   errors.push(...workspaceResult.errors)

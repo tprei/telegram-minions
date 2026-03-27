@@ -41,6 +41,11 @@ export function configFromEnv(overrides?: Partial<MinionConfig>): MinionConfig {
       thinkModel: optional("THINK_MODEL", "opus"),
       reviewModel: optional("REVIEW_MODEL", "opus"),
     },
+    codex: {
+      defaultModel: optional("CODEX_DEFAULT_MODEL", "o4-mini"),
+      execPath: optional("CODEX_EXEC_PATH", "codex"),
+      approvalMode: optional("CODEX_APPROVAL_MODE", "full-auto"),
+    },
     workspace: {
       root: optional("WORKSPACE_ROOT", "/workspace"),
       maxConcurrentSessions: optionalNumber("MAX_CONCURRENT_SESSIONS", 5),

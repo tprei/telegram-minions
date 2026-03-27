@@ -123,4 +123,34 @@ describe("configFromEnv", () => {
       delete process.env["REVIEW_MODEL"]
     })
   })
+
+  describe("codex config", () => {
+    it("defaults to o4-mini, codex, full-auto", () => {
+      const config = configFromEnv()
+      expect(config.codex.defaultModel).toBe("o4-mini")
+      expect(config.codex.execPath).toBe("codex")
+      expect(config.codex.approvalMode).toBe("full-auto")
+    })
+
+    it("reads CODEX_DEFAULT_MODEL env var", () => {
+      process.env["CODEX_DEFAULT_MODEL"] = "o3"
+      const config = configFromEnv()
+      expect(config.codex.defaultModel).toBe("o3")
+      delete process.env["CODEX_DEFAULT_MODEL"]
+    })
+
+    it("reads CODEX_EXEC_PATH env var", () => {
+      process.env["CODEX_EXEC_PATH"] = "/usr/local/bin/codex"
+      const config = configFromEnv()
+      expect(config.codex.execPath).toBe("/usr/local/bin/codex")
+      delete process.env["CODEX_EXEC_PATH"]
+    })
+
+    it("reads CODEX_APPROVAL_MODE env var", () => {
+      process.env["CODEX_APPROVAL_MODE"] = "suggest"
+      const config = configFromEnv()
+      expect(config.codex.approvalMode).toBe("suggest")
+      delete process.env["CODEX_APPROVAL_MODE"]
+    })
+  })
 })
