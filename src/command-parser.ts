@@ -24,6 +24,7 @@ export const SPLIT_CMD = "/split"
 export const STACK_CMD = "/stack"
 export const DAG_CMD = "/dag"
 export const LAND_CMD = "/land"
+export const RUN_CMD = "/run"
 export const RETRY_CMD = "/retry"
 
 /**
