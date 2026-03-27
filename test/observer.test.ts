@@ -45,7 +45,7 @@ describe("Observer", () => {
   describe("onSessionStart", () => {
     it("sends a session start message for task mode", async () => {
       const telegram = makeTelegram()
-      const observer = new Observer(telegram as any, 3000)
+      const observer = new Observer(telegram as any, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
       const meta = makeMeta({ mode: "task" })
 
       await observer.onSessionStart(meta, "fix the bug")
@@ -58,7 +58,7 @@ describe("Observer", () => {
 
     it("sends a plan start message for plan mode", async () => {
       const telegram = makeTelegram()
-      const observer = new Observer(telegram as any, 3000)
+      const observer = new Observer(telegram as any, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
       const meta = makeMeta({ mode: "plan" })
 
       await observer.onSessionStart(meta, "plan the feature")
@@ -72,7 +72,7 @@ describe("Observer", () => {
   describe("onEvent — text buffering", () => {
     it("buffers text and flushes after debounce timeout", async () => {
       const telegram = makeTelegram()
-      const observer = new Observer(telegram as any, 3000)
+      const observer = new Observer(telegram as any, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
       const meta = makeMeta()
 
       await observer.onSessionStart(meta, "task")
@@ -101,7 +101,7 @@ describe("Observer", () => {
 
     it("does not flush text shorter than MIN_TEXT_LENGTH", async () => {
       const telegram = makeTelegram()
-      const observer = new Observer(telegram as any, 3000)
+      const observer = new Observer(telegram as any, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
       const meta = makeMeta()
 
       await observer.onSessionStart(meta, "task")
@@ -123,7 +123,7 @@ describe("Observer", () => {
 
     it("calls onTextCapture callback when flushing", async () => {
       const telegram = makeTelegram()
-      const observer = new Observer(telegram as any, 3000)
+      const observer = new Observer(telegram as any, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
       const meta = makeMeta()
       const captured: string[] = []
 
@@ -149,7 +149,7 @@ describe("Observer", () => {
 
     it("accumulates multiple text chunks before flushing", async () => {
       const telegram = makeTelegram()
-      const observer = new Observer(telegram as any, 3000)
+      const observer = new Observer(telegram as any, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
       const meta = makeMeta()
 
       await observer.onSessionStart(meta, "task")
@@ -173,7 +173,7 @@ describe("Observer", () => {
 
     it("uses single interval instead of per-chunk timers", async () => {
       const telegram = makeTelegram()
-      const observer = new Observer(telegram as any, 3000)
+      const observer = new Observer(telegram as any, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
       const meta = makeMeta()
 
       await observer.onSessionStart(meta, "task")
@@ -205,7 +205,7 @@ describe("Observer", () => {
 
     it("resets debounce when new text arrives during wait period", async () => {
       const telegram = makeTelegram()
-      const observer = new Observer(telegram as any, 3000)
+      const observer = new Observer(telegram as any, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
       const meta = makeMeta()
 
       await observer.onSessionStart(meta, "task")
@@ -250,7 +250,7 @@ describe("Observer", () => {
   describe("onEvent — tool requests", () => {
     it("sends a tool activity message", async () => {
       const telegram = makeTelegram()
-      const observer = new Observer(telegram as any, 3000)
+      const observer = new Observer(telegram as any, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
       const meta = makeMeta()
 
       await observer.onSessionStart(meta, "task")
@@ -276,7 +276,7 @@ describe("Observer", () => {
 
     it("debounces edits to existing activity message within throttle window", async () => {
       const telegram = makeTelegram()
-      const observer = new Observer(telegram as any, 3000)
+      const observer = new Observer(telegram as any, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
       const meta = makeMeta()
 
       await observer.onSessionStart(meta, "task")
@@ -318,7 +318,7 @@ describe("Observer", () => {
 
     it("sends new activity message after throttle window expires", async () => {
       const telegram = makeTelegram()
-      const observer = new Observer(telegram as any, 1000)
+      const observer = new Observer(telegram as any, 1000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
       const meta = makeMeta()
 
       await observer.onSessionStart(meta, "task")
@@ -357,7 +357,7 @@ describe("Observer", () => {
 
     it("flushes text buffer before tool request", async () => {
       const telegram = makeTelegram()
-      const observer = new Observer(telegram as any, 3000)
+      const observer = new Observer(telegram as any, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
       const meta = makeMeta()
 
       await observer.onSessionStart(meta, "task")
@@ -392,7 +392,7 @@ describe("Observer", () => {
 
     it("skips tool requests with errors", async () => {
       const telegram = makeTelegram()
-      const observer = new Observer(telegram as any, 3000)
+      const observer = new Observer(telegram as any, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
       const meta = makeMeta()
 
       await observer.onSessionStart(meta, "task")
@@ -418,7 +418,7 @@ describe("Observer", () => {
   describe("onEvent — errors", () => {
     it("sends error message on error event", async () => {
       const telegram = makeTelegram()
-      const observer = new Observer(telegram as any, 3000)
+      const observer = new Observer(telegram as any, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
       const meta = makeMeta()
 
       await observer.onSessionStart(meta, "task")
@@ -436,7 +436,7 @@ describe("Observer", () => {
   describe("onEvent — ignores non-assistant messages", () => {
     it("ignores user role messages", async () => {
       const telegram = makeTelegram()
-      const observer = new Observer(telegram as any, 3000)
+      const observer = new Observer(telegram as any, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
       const meta = makeMeta()
 
       await observer.onSessionStart(meta, "task")
@@ -459,7 +459,7 @@ describe("Observer", () => {
   describe("onSessionComplete", () => {
     it("sends completion message for completed sessions", async () => {
       const telegram = makeTelegram()
-      const observer = new Observer(telegram as any, 3000)
+      const observer = new Observer(telegram as any, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
       const meta = makeMeta()
 
       await observer.onSessionStart(meta, "task")
@@ -474,7 +474,7 @@ describe("Observer", () => {
 
     it("sends error message for errored sessions", async () => {
       const telegram = makeTelegram()
-      const observer = new Observer(telegram as any, 3000)
+      const observer = new Observer(telegram as any, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
       const meta = makeMeta()
 
       await observer.onSessionStart(meta, "task")
@@ -489,7 +489,7 @@ describe("Observer", () => {
 
     it("flushes remaining text buffer before completing", async () => {
       const telegram = makeTelegram()
-      const observer = new Observer(telegram as any, 3000)
+      const observer = new Observer(telegram as any, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
       const meta = makeMeta()
 
       await observer.onSessionStart(meta, "task")
@@ -515,7 +515,7 @@ describe("Observer", () => {
   describe("flushAndComplete", () => {
     it("flushes text and cleans up session without sending completion message", async () => {
       const telegram = makeTelegram()
-      const observer = new Observer(telegram as any, 3000)
+      const observer = new Observer(telegram as any, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
       const meta = makeMeta()
 
       await observer.onSessionStart(meta, "task")
@@ -553,7 +553,7 @@ describe("Observer", () => {
 
     it("sends screenshot photo after detecting browser_take_screenshot tool", async () => {
       const telegram = makeTelegram()
-      const observer = new Observer(telegram as any, 3000)
+      const observer = new Observer(telegram as any, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
       const meta = makeMeta({ cwd: tmpDir })
 
       await observer.onSessionStart(meta, "task")
@@ -593,7 +593,7 @@ describe("Observer", () => {
 
     it("does not send the same screenshot twice", async () => {
       const telegram = makeTelegram()
-      const observer = new Observer(telegram as any, 3000)
+      const observer = new Observer(telegram as any, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
       const meta = makeMeta({ cwd: tmpDir })
 
       await observer.onSessionStart(meta, "task")
@@ -650,7 +650,7 @@ describe("Observer", () => {
 
     it("sends pending screenshots on session complete", async () => {
       const telegram = makeTelegram()
-      const observer = new Observer(telegram as any, 3000)
+      const observer = new Observer(telegram as any, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
       const meta = makeMeta({ cwd: tmpDir })
 
       await observer.onSessionStart(meta, "task")
@@ -685,7 +685,7 @@ describe("Observer", () => {
   describe("clearSession", () => {
     it("removes session state and cancels flush timer", async () => {
       const telegram = makeTelegram()
-      const observer = new Observer(telegram as any, 3000)
+      const observer = new Observer(telegram as any, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
       const meta = makeMeta()
 
       await observer.onSessionStart(meta, "task")

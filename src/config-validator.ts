@@ -12,6 +12,7 @@ import type {
   AgentDefinitions,
   ApiServerConfig,
   ProviderProfile,
+  TelegramQueueConfig,
 } from "./config-types.js"
 
 export class ConfigValidationError extends Error {
@@ -315,6 +316,20 @@ export function validateMcpConfig(config: unknown, path = "mcp"): ValidationResu
   return { valid: errors.length === 0, errors }
 }
 
+export function validateTelegramQueueConfig(config: unknown, path = "telegramQueue"): ValidationResult {
+  const errors: ConfigValidationError[] = []
+  if (!config || typeof config !== "object") {
+    errors.push(error(path, "expected object"))
+    return { valid: false, errors }
+  }
+  const c = config as Partial<TelegramQueueConfig>
+
+  const intervalErr = validateNumber(c.minSendIntervalMs, `${path}.minSendIntervalMs`, { min: 0 })
+  if (intervalErr) errors.push(intervalErr)
+
+  return { valid: errors.length === 0, errors }
+}
+
 export function validateObserverConfig(config: unknown, path = "observer"): ValidationResult {
   const errors: ConfigValidationError[] = []
   if (!config || typeof config !== "object") {
@@ -325,6 +340,12 @@ export function validateObserverConfig(config: unknown, path = "observer"): Vali
 
   const throttleErr = validateNumber(c.activityThrottleMs, `${path}.activityThrottleMs`, { min: 100 })
   if (throttleErr) errors.push(throttleErr)
+
+  const textFlushErr = validateNumber(c.textFlushDebounceMs, `${path}.textFlushDebounceMs`, { min: 200 })
+  if (textFlushErr) errors.push(textFlushErr)
+
+  const activityEditErr = validateNumber(c.activityEditDebounceMs, `${path}.activityEditDebounceMs`, { min: 200 })
+  if (activityEditErr) errors.push(activityEditErr)
 
   return { valid: errors.length === 0, errors }
 }
@@ -440,6 +461,9 @@ export function validateMinionConfig(config: unknown): ValidationResult {
   // Required nested configs
   const telegramResult = validateTelegramConfig(c.telegram)
   errors.push(...telegramResult.errors)
+
+  const telegramQueueResult = validateTelegramQueueConfig(c.telegramQueue)
+  errors.push(...telegramQueueResult.errors)
 
   const gooseResult = validateGooseConfig(c.goose)
   errors.push(...gooseResult.errors)

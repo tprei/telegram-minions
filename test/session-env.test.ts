@@ -1,4 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest"
+import fs from "node:fs"
+import path from "node:path"
+import os from "node:os"
 import { SessionHandle, type SessionConfig } from "../src/session.js"
 import type { SessionMeta } from "../src/types.js"
 
@@ -158,6 +161,137 @@ describe("SessionHandle.buildIsolatedEnv", () => {
       const env = getIsolatedEnv(handle)
 
       expect(env["SENTRY_ACCESS_TOKEN"]).toBe("sentry_token")
+    })
+
+    it("includes OPENAI_API_KEY when set", () => {
+      process.env["OPENAI_API_KEY"] = "sk-test-key"
+      const handle = makeHandle()
+      const env = getIsolatedEnv(handle)
+
+      expect(env["OPENAI_API_KEY"]).toBe("sk-test-key")
+    })
+  })
+
+  describe("isolated .codex/ directory", () => {
+    let tmpDir: string
+
+    beforeEach(() => {
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-test-"))
+    })
+
+    afterEach(() => {
+      fs.rmSync(tmpDir, { recursive: true, force: true })
+    })
+
+    it("creates .codex/ directory inside session home", () => {
+      const meta = { ...baseMeta, cwd: tmpDir }
+      const handle = new SessionHandle(
+        meta,
+        () => {},
+        () => {},
+        60_000,
+        300_000,
+        baseConfig,
+      )
+      getIsolatedEnv(handle)
+
+      const codexDir = path.join(tmpDir, ".home", ".codex")
+      expect(fs.existsSync(codexDir)).toBe(true)
+      expect(fs.statSync(codexDir).isDirectory()).toBe(true)
+    })
+
+    it("copies parent config.toml into session .codex/ if present", () => {
+      const parentHome = process.env["HOME"] ?? "/root"
+      const parentCodexDir = path.join(parentHome, ".codex")
+      const createdParentDir = !fs.existsSync(parentCodexDir)
+      if (createdParentDir) fs.mkdirSync(parentCodexDir, { recursive: true })
+
+      const configSrc = path.join(parentCodexDir, "config.toml")
+      const hadExistingConfig = fs.existsSync(configSrc)
+      if (!hadExistingConfig) {
+        fs.writeFileSync(configSrc, 'model = "o4-mini"\n')
+      }
+
+      try {
+        const meta = { ...baseMeta, cwd: tmpDir }
+        const handle = new SessionHandle(
+          meta,
+          () => {},
+          () => {},
+          60_000,
+          300_000,
+          baseConfig,
+        )
+        getIsolatedEnv(handle)
+
+        const configDst = path.join(tmpDir, ".home", ".codex", "config.toml")
+        expect(fs.existsSync(configDst)).toBe(true)
+        expect(fs.readFileSync(configDst, "utf-8")).toContain("o4-mini")
+      } finally {
+        if (!hadExistingConfig) fs.rmSync(configSrc, { force: true })
+        if (createdParentDir) fs.rmSync(parentCodexDir, { recursive: true, force: true })
+      }
+    })
+
+    it("does not overwrite existing session config.toml", () => {
+      const parentHome = process.env["HOME"] ?? "/root"
+      const parentCodexDir = path.join(parentHome, ".codex")
+      const createdParentDir = !fs.existsSync(parentCodexDir)
+      if (createdParentDir) fs.mkdirSync(parentCodexDir, { recursive: true })
+
+      const configSrc = path.join(parentCodexDir, "config.toml")
+      const hadExistingConfig = fs.existsSync(configSrc)
+      if (!hadExistingConfig) {
+        fs.writeFileSync(configSrc, 'model = "parent-model"\n')
+      }
+
+      // Pre-create session config.toml with different content
+      const sessionCodexDir = path.join(tmpDir, ".home", ".codex")
+      fs.mkdirSync(sessionCodexDir, { recursive: true })
+      fs.writeFileSync(path.join(sessionCodexDir, "config.toml"), 'model = "session-model"\n')
+
+      try {
+        const meta = { ...baseMeta, cwd: tmpDir }
+        const handle = new SessionHandle(
+          meta,
+          () => {},
+          () => {},
+          60_000,
+          300_000,
+          baseConfig,
+        )
+        getIsolatedEnv(handle)
+
+        const configDst = path.join(tmpDir, ".home", ".codex", "config.toml")
+        expect(fs.readFileSync(configDst, "utf-8")).toContain("session-model")
+      } finally {
+        if (!hadExistingConfig) fs.rmSync(configSrc, { force: true })
+        if (createdParentDir) fs.rmSync(parentCodexDir, { recursive: true, force: true })
+      }
+    })
+
+    it("creates .codex/ even when parent has no .codex/ directory", () => {
+      const parentHome = process.env["HOME"] ?? "/root"
+      const parentCodexDir = path.join(parentHome, ".codex")
+      // If parent .codex/ exists, this test still passes — it just verifies the dir is created
+      const meta = { ...baseMeta, cwd: tmpDir }
+      const handle = new SessionHandle(
+        meta,
+        () => {},
+        () => {},
+        60_000,
+        300_000,
+        baseConfig,
+      )
+      getIsolatedEnv(handle)
+
+      const codexDir = path.join(tmpDir, ".home", ".codex")
+      expect(fs.existsSync(codexDir)).toBe(true)
+
+      // config.toml should NOT exist since parent had none
+      if (!fs.existsSync(path.join(parentCodexDir, "config.toml"))) {
+        expect(fs.existsSync(path.join(codexDir, "config.toml"))).toBe(false)
+      }
     })
   })
 })

@@ -68,8 +68,13 @@ function createValidMinionConfig(): MinionConfig {
       sentryProjectSlug: "",
       zaiEnabled: true,
     },
+    telegramQueue: {
+      minSendIntervalMs: 3500,
+    },
     observer: {
       activityThrottleMs: 3000,
+      textFlushDebounceMs: 5000,
+      activityEditDebounceMs: 5000,
     },
     repos: {},
   }
@@ -405,12 +410,12 @@ describe("validateMcpConfig", () => {
 
 describe("validateObserverConfig", () => {
   it("validates a valid config", () => {
-    const result = validateObserverConfig({ activityThrottleMs: 3000 })
+    const result = validateObserverConfig({ activityThrottleMs: 3000, textFlushDebounceMs: 5000, activityEditDebounceMs: 5000 })
     expect(result.valid).toBe(true)
   })
 
   it("rejects activityThrottleMs below 100", () => {
-    const result = validateObserverConfig({ activityThrottleMs: 50 })
+    const result = validateObserverConfig({ activityThrottleMs: 50, textFlushDebounceMs: 5000, activityEditDebounceMs: 5000 })
     expect(result.valid).toBe(false)
   })
 })

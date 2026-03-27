@@ -2,9 +2,10 @@ import { spawn, type ChildProcess } from "node:child_process"
 import { createInterface } from "node:readline"
 import fs from "node:fs"
 import path from "node:path"
-import type { GooseConfig, ClaudeConfig, McpConfig, ProviderProfile } from "./config-types.js"
+import type { GooseConfig, ClaudeConfig, CodexConfig, McpConfig, ProviderProfile } from "./config-types.js"
 import type { GooseStreamEvent, SessionMeta, SessionState } from "./types.js"
 import { translateClaudeEvents } from "./claude-stream.js"
+import { translateCodexEvents } from "./codex-stream.js"
 import { captureException, setContext, addBreadcrumb } from "./sentry.js"
 import { DEFAULT_TASK_PROMPT, DEFAULT_PLAN_PROMPT, DEFAULT_THINK_PROMPT, DEFAULT_REVIEW_PROMPT } from "./prompts.js"
 import { createSessionLogger } from "./logger.js"
@@ -17,6 +18,7 @@ export type SessionDoneCallback = (meta: SessionMeta, state: "completed" | "erro
 export interface SessionConfig {
   goose: GooseConfig
   claude: ClaudeConfig
+  codex?: CodexConfig
   mcp: McpConfig
   profile?: ProviderProfile
   /** List of environment variable names to pass through to minion sessions */
@@ -37,6 +39,7 @@ type McpHttpServerConfig = {
   type: "http"
   url: string
   headers: Record<string, string>
+  bearerTokenEnvVar?: string
 }
 
 type McpConfigEntry = McpServerConfig | McpHttpServerConfig
@@ -143,6 +146,7 @@ export class SessionHandle {
           headers: {
             Authorization: `Bearer ${zaiKey}`,
           },
+          bearerTokenEnvVar: "ZAI_API_KEY",
         }
       } else {
         this.log.warn("MCP: Z.AI MCP enabled but ZAI_API_KEY is not set — skipping")
@@ -197,9 +201,79 @@ export class SessionHandle {
     return ["--mcp-config", JSON.stringify({ mcpServers: mcpConfig })]
   }
 
+  private static escapeTomlString(value: string): string {
+    return value
+      .replace(/\\/g, "\\\\")
+      .replace(/"/g, '\\"')
+      .replace(/\n/g, "\\n")
+      .replace(/\t/g, "\\t")
+      .replace(/\r/g, "\\r")
+  }
+
+  private static formatTomlInlineTable(obj: Record<string, string>): string {
+    const entries = Object.entries(obj).map(
+      ([k, v]) => `${k} = "${SessionHandle.escapeTomlString(v)}"`,
+    )
+    return `{ ${entries.join(", ")} }`
+  }
+
+  private static formatTomlArray(arr: string[]): string {
+    const items = arr.map(v => `"${SessionHandle.escapeTomlString(v)}"`)
+    return `[${items.join(", ")}]`
+  }
+
+  private buildCodexMcpToml(): string {
+    const servers = this.buildMcpServers()
+    if (Object.keys(servers).length === 0) return ""
+
+    const lines: string[] = []
+
+    for (const [name, server] of Object.entries(servers)) {
+      lines.push(`[mcp_servers.${name}]`)
+
+      if ("type" in server && server.type === "http") {
+        lines.push(`url = "${SessionHandle.escapeTomlString(server.url)}"`)
+
+        if (server.bearerTokenEnvVar) {
+          lines.push(`bearer_token_env_var = "${SessionHandle.escapeTomlString(server.bearerTokenEnvVar)}"`)
+        }
+
+        const otherHeaders = Object.entries(server.headers)
+          .filter(([k]) => k !== "Authorization")
+        if (otherHeaders.length > 0) {
+          lines.push(`http_headers = ${SessionHandle.formatTomlInlineTable(Object.fromEntries(otherHeaders))}`)
+        }
+      } else {
+        const stdioServer = server as McpServerConfig
+        lines.push(`command = "${SessionHandle.escapeTomlString(stdioServer.command)}"`)
+        if (stdioServer.args.length > 0) {
+          lines.push(`args = ${SessionHandle.formatTomlArray(stdioServer.args)}`)
+        }
+        if (stdioServer.env && Object.keys(stdioServer.env).length > 0) {
+          lines.push(`env = ${SessionHandle.formatTomlInlineTable(stdioServer.env)}`)
+        }
+      }
+    }
+
+    return lines.join("\n") + "\n"
+  }
+
+  private buildCodexMcpConfigArgs(sessionHome: string): string[] {
+    const toml = this.buildCodexMcpToml()
+    if (!toml) return []
+
+    const codexDir = path.join(sessionHome, ".codex")
+    fs.mkdirSync(codexDir, { recursive: true })
+    const configPath = path.join(codexDir, "config.toml")
+    fs.writeFileSync(configPath, toml)
+
+    return ["--config", configPath]
+  }
+
   private buildIsolatedEnv(): Record<string, string> {
     const parentHome = process.env["HOME"] ?? "/root"
     const parentClaudeDir = path.join(parentHome, ".claude")
+    const parentCodexDir = path.join(parentHome, ".codex")
     const sessionHome = path.join(this.meta.cwd, ".home")
 
     const screenshotsDir = path.join(this.meta.cwd, SCREENSHOTS_DIR)
@@ -211,8 +285,11 @@ export class SessionHandle {
     const sessionDataDir = path.join(sessionHome, ".local", "share")
     const sessionStateDir = path.join(sessionHome, ".local", "state")
     const screenshotDir = path.join(sessionHome, "screenshots")
+    const sessionClaudeDir = path.join(sessionHome, ".claude")
+    const sessionCodexDir = path.join(sessionHome, ".codex")
 
-    fs.mkdirSync(path.join(sessionHome, ".claude"), { recursive: true })
+    fs.mkdirSync(sessionClaudeDir, { recursive: true })
+    fs.mkdirSync(sessionCodexDir, { recursive: true })
     fs.mkdirSync(sessionTmp, { recursive: true })
     fs.mkdirSync(sessionConfig, { recursive: true })
     fs.mkdirSync(sessionCache, { recursive: true })
@@ -223,9 +300,16 @@ export class SessionHandle {
     this.meta.screenshotDir = screenshotDir
 
     const settingsSrc = path.join(parentClaudeDir, "settings.json")
-    const settingsDst = path.join(sessionHome, ".claude", "settings.json")
+    const settingsDst = path.join(sessionClaudeDir, "settings.json")
     if (fs.existsSync(settingsSrc) && !fs.existsSync(settingsDst)) {
       fs.copyFileSync(settingsSrc, settingsDst)
+    }
+
+    // Copy parent Codex config into session if present
+    const codexConfigSrc = path.join(parentCodexDir, "config.toml")
+    const codexConfigDst = path.join(sessionCodexDir, "config.toml")
+    if (fs.existsSync(codexConfigSrc) && !fs.existsSync(codexConfigDst)) {
+      fs.copyFileSync(codexConfigSrc, codexConfigDst)
     }
 
     const baseEnv: Record<string, string> = {
@@ -246,6 +330,7 @@ export class SessionHandle {
       GITHUB_PERSONAL_ACCESS_TOKEN: process.env["GITHUB_TOKEN"] ?? "",
       SENTRY_ACCESS_TOKEN: process.env["SENTRY_ACCESS_TOKEN"] ?? "",
       ZAI_API_KEY: process.env["ZAI_API_KEY"] ?? "",
+      OPENAI_API_KEY: process.env["OPENAI_API_KEY"] ?? "",
     }
 
     const profile = this.sessionConfig.profile
@@ -403,6 +488,37 @@ export class SessionHandle {
     this.attachProcessHandlers(this.parseClaudeLine.bind(this))
   }
 
+  startCodex(task: string, systemPrompt?: string): void {
+    const cfg = this.sessionConfig.codex
+    if (!cfg) throw new Error("Codex config not provided in SessionConfig")
+
+    const env = this.buildIsolatedEnv()
+    const sessionHome = path.join(this.meta.cwd, ".home")
+
+    const prompt = systemPrompt ?? DEFAULT_TASK_PROMPT
+    const fullTask = `${prompt}\n\n${task}`
+
+    this.process = spawn(
+      cfg.execPath,
+      [
+        "exec",
+        "--model", cfg.defaultModel,
+        "--approval-mode", cfg.approvalMode,
+        "--quiet",
+        ...this.buildCodexMcpConfigArgs(sessionHome),
+        fullTask,
+      ],
+      {
+        cwd: this.meta.cwd,
+        env,
+        stdio: ["ignore", "pipe", "pipe"],
+        detached: true,
+      },
+    )
+
+    this.attachProcessHandlers(this.parseCodexLine.bind(this))
+  }
+
   private parseGooseLine(trimmed: string): void {
     try {
       const event = JSON.parse(trimmed) as GooseStreamEvent
@@ -427,6 +543,21 @@ export class SessionHandle {
       }
     } catch {
       this.log.warn({ line: trimmed.slice(0, 200) }, "invalid Claude JSON line")
+    }
+  }
+
+  private parseCodexLine(trimmed: string): void {
+    try {
+      const raw = JSON.parse(trimmed)
+      const events = translateCodexEvents(raw)
+      for (const event of events) {
+        if (event.type === "complete") {
+          this.meta.totalTokens = event.total_tokens ?? undefined
+        }
+        this.onEvent(event)
+      }
+    } catch {
+      this.log.warn({ line: trimmed.slice(0, 200) }, "invalid Codex JSON line")
     }
   }
 

@@ -97,9 +97,11 @@ export class TelegramClient {
   private readonly baseUrl: string
   private readonly queue: QueueEntry[] = []
   private processing = false
+  private readonly minSendIntervalMs: number
 
-  constructor(private readonly token: string, private readonly chatId: string) {
+  constructor(private readonly token: string, private readonly chatId: string, minSendIntervalMs = 3500) {
     this.baseUrl = `${BASE}/bot${token}`
+    this.minSendIntervalMs = minSendIntervalMs
   }
 
   private enqueue<T>(fn: () => Promise<T>, editKey?: string): Promise<T> {
@@ -137,6 +139,9 @@ export class TelegramClient {
         entry.resolve(result)
       } catch (err) {
         entry.reject(err)
+      }
+      if (this.queue.length > 0) {
+        await sleep(this.minSendIntervalMs)
       }
     }
     this.processing = false
