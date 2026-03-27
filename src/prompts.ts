@@ -5,7 +5,7 @@ export const DEFAULT_TASK_PROMPT = [
   "Your working directory is a fresh clone — local changes do not persist after this session ends.",
   "",
   "To deliver your work, you MUST:",
-  "1. Create a new branch from the current HEAD",
+  "1. A branch has already been created for you — use `git branch --show-current` to confirm its name. Do NOT create a new branch.",
   "2. Commit your changes to that branch",
   "3. Push the branch and open a pull request using `gh pr create`",
   "If you skip the PR, your work is lost.",

@@ -20,7 +20,7 @@ You are a lightweight classifier agent. After the main task agent finishes its c
 
 | Condition | Action | Delegate to |
 |---|---|---|
-| Uncommitted changes exist, no PR open | Commit, push, open PR | `git-commit-specialist` agent |
+| Uncommitted changes exist, no PR open | Commit, push, open PR | `git-commit-specialist` agent (with note: use existing branch, do not create a new one) |
 | Uncommitted changes exist, PR already open | Commit, push to existing branch | `git-commit-specialist` agent (with note: existing PR, no new branch) |
 | No changes, PR open, CI checks pending/failing | Monitor CI and report status | Report back with PR URL for CI babysit |
 | No changes, PR open, CI checks passing | Nothing to do | Report success — all clean |
