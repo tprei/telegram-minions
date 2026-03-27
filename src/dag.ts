@@ -478,7 +478,13 @@ export function renderDagStatus(graph: DagGraph, isStack?: boolean): string {
       ? ` ← ${node.dependsOn.join(", ")}`
       : ""
 
-    lines.push(`${indent}${icon} <b>${escapeHtml(node.title)}</b>${prSuffix}${depSuffix}`)
+    const title = escapeHtml(node.title)
+    const styledTitle = node.status === "done" || node.status === "skipped"
+      ? `<s>${title}</s>`
+      : node.status === "running" || node.status === "failed"
+        ? `<b>${title}</b>`
+        : title
+    lines.push(`${indent}${icon} ${styledTitle}${prSuffix}${depSuffix}`)
   }
 
   lines.push("")
