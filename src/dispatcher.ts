@@ -93,6 +93,14 @@ import {
   prepareWorkspace, removeWorkspace, cleanBuildArtifacts, dirSizeBytes,
   downloadPhotos, prepareFanInBranch, mergeUpstreamBranches,
 } from "./session-manager.js"
+import {
+  loadPinnedMessageId,
+  savePinnedMessageId,
+  scheduleUpdatePinnedSummary,
+  pinThreadMessage,
+  updatePinnedSplitStatus,
+  updatePinnedDagStatus,
+} from "./pinned-messages.js"
 
 const log = loggers.dispatcher
 
@@ -125,7 +133,7 @@ export class Dispatcher {
     this.store = new SessionStore(this.config.workspace.root)
     this.profileStore = new ProfileStore(this.config.workspace.root)
     this.stats = new StatsTracker(this.config.workspace.root)
-    this.loadPinnedMessageId()
+    this.pinnedSummaryMessageId = loadPinnedMessageId(this.config.workspace.root)
   }
 
   private pushToConversation(session: TopicSession, message: TopicMessage): void {
@@ -332,115 +340,22 @@ export class Dispatcher {
     await this.store.save(toSave, this.offset)
   }
 
-  private get pinnedSummaryPath(): string {
-    return path.join(this.config.workspace.root, ".pinned-summary.json")
-  }
-
-  private loadPinnedMessageId(): void {
-    try {
-      const raw = fs.readFileSync(this.pinnedSummaryPath, "utf-8")
-      const data = JSON.parse(raw) as { messageId?: number | null }
-      this.pinnedSummaryMessageId = data.messageId ?? null
-    } catch { /* file doesn't exist yet */ }
-  }
-
-  private savePinnedMessageId(id: number | null): void {
-    try {
-      fs.writeFileSync(this.pinnedSummaryPath, JSON.stringify({ messageId: id }))
-    } catch { /* ignore */ }
-  }
-
-  private formatPinnedSummary(): string {
-    const sessions = [...this.topicSessions.values()]
-    if (sessions.length === 0) return "No active minion sessions."
-    const lines = sessions.map((s) => {
-      const taskText = s.conversation[0]?.text ?? ""
-      const desc = taskText.length > 60 ? taskText.slice(0, 60).trimEnd() + "…" : taskText
-      const icon = s.activeSessionId ? "⚡" : "💬"
-      return `${icon} <b>${escapeHtml(s.slug)}</b>: ${escapeHtml(desc)} (${s.mode})`
-    })
-    return lines.join("\n")
-  }
-
   private updatePinnedSummary(): void {
-    const html = this.formatPinnedSummary()
-    ;(async () => {
-      if (this.pinnedSummaryMessageId !== null) {
-        const ok = await this.telegram.editMessage(this.pinnedSummaryMessageId, html)
-        if (ok) return
-        this.pinnedSummaryMessageId = null
-        this.savePinnedMessageId(null)
-      }
-      const { ok, messageId } = await this.telegram.sendMessage(html)
-      if (ok && messageId !== null) {
-        await this.telegram.pinChatMessage(messageId)
-        this.pinnedSummaryMessageId = messageId
-        this.savePinnedMessageId(messageId)
-      }
-    })().catch((err) => {
-      log.error({ err }, "updatePinnedSummary error")
+    scheduleUpdatePinnedSummary({
+      telegram: this.telegram,
+      workspaceRoot: this.config.workspace.root,
+      topicSessions: this.topicSessions,
+      pinnedSummaryMessageId: this.pinnedSummaryMessageId,
+      onMessageIdChange: (id) => { this.pinnedSummaryMessageId = id },
     })
   }
 
-  /** Pin a message in a thread, updating any previously pinned message. */
-  private async pinThreadMessage(session: TopicSession, html: string): Promise<void> {
-    const threadId = session.threadId
-    try {
-      // If we have an existing pinned message, update it
-      if (session.pinnedMessageId != null) {
-        const ok = await this.telegram.editMessage(session.pinnedMessageId, html, threadId)
-        if (ok) return
-        // Edit failed, create new message
-        session.pinnedMessageId = undefined
-      }
-      // Send new message and pin it
-      const { ok, messageId } = await this.telegram.sendMessage(html, threadId)
-      if (ok && messageId != null) {
-        await this.telegram.pinChatMessage(messageId)
-        session.pinnedMessageId = messageId
-      }
-    } catch (err) {
-      log.warn({ err, slug: session.slug }, "pinThreadMessage error")
-    }
-  }
-
-  /** Update the pinned split status in a parent thread showing all children with PR links. */
   private async updatePinnedSplitStatus(parent: TopicSession): Promise<void> {
-    if (!parent.childThreadIds || parent.childThreadIds.length === 0) return
-
-    const children: { slug: string; label: string; prUrl?: string; status: "running" | "done" | "failed" }[] = []
-
-    for (const id of parent.childThreadIds) {
-      const child = this.topicSessions.get(id)
-      if (!child) continue
-      children.push({
-        slug: child.slug,
-        label: child.splitLabel ?? child.slug,
-        prUrl: child.prUrl,
-        status: child.activeSessionId ? "running" : child.prUrl ? "done" : "failed",
-      })
-    }
-
-    if (children.length === 0) return
-
-    const html = formatPinnedSplitStatus(parent.slug, parent.repo, children)
-    await this.pinThreadMessage(parent, html)
+    await updatePinnedSplitStatus(this.telegram, parent, (id) => this.topicSessions.get(id))
   }
 
-  /** Update the pinned DAG status in a parent thread showing all nodes with PR links. */
   private async updatePinnedDagStatus(parent: TopicSession, graph: DagGraph): Promise<void> {
-    const isStack = !graph.nodes.some((n) => n.dependsOn.length > 1) &&
-      graph.nodes.every((n, i) => i === 0 || n.dependsOn.length === 1)
-
-    const nodes = graph.nodes.map((n) => ({
-      id: n.id,
-      title: n.title,
-      prUrl: n.prUrl,
-      status: n.status as "pending" | "ready" | "running" | "done" | "failed",
-    }))
-
-    const html = formatPinnedDagStatus(parent.slug, parent.repo, nodes, isStack)
-    await this.pinThreadMessage(parent, html)
+    await updatePinnedDagStatus(this.telegram, parent, graph.nodes)
   }
 
   private async poll(): Promise<void> {
@@ -1345,7 +1260,8 @@ export class Dispatcher {
                 topicSession.prUrl = prUrl
                 this.postSessionDigest(topicSession, prUrl)
                 // Pin the PR link in the thread
-                await this.pinThreadMessage(
+                await pinThreadMessage(
+                  this.telegram,
                   topicSession,
                   formatPinnedStatus(topicSession.slug, topicSession.repo, "completed", prUrl),
                 )
@@ -1368,7 +1284,8 @@ export class Dispatcher {
                 }
               } else {
                 // No PR - pin the completion status
-                await this.pinThreadMessage(
+                await pinThreadMessage(
+                  this.telegram,
                   topicSession,
                   formatPinnedStatus(topicSession.slug, topicSession.repo, "completed"),
                 )
