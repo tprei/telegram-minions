@@ -2,9 +2,10 @@ import { spawn, type ChildProcess } from "node:child_process"
 import { createInterface } from "node:readline"
 import fs from "node:fs"
 import path from "node:path"
-import type { GooseConfig, ClaudeConfig, McpConfig, ProviderProfile } from "./config-types.js"
+import type { GooseConfig, ClaudeConfig, CodexConfig, McpConfig, ProviderProfile } from "./config-types.js"
 import type { GooseStreamEvent, SessionMeta, SessionState } from "./types.js"
 import { translateClaudeEvents } from "./claude-stream.js"
+import { translateCodexEvents } from "./codex-stream.js"
 import { captureException, setContext, addBreadcrumb } from "./sentry.js"
 import { DEFAULT_TASK_PROMPT, DEFAULT_PLAN_PROMPT, DEFAULT_THINK_PROMPT, DEFAULT_REVIEW_PROMPT } from "./prompts.js"
 import { createSessionLogger } from "./logger.js"
@@ -17,6 +18,7 @@ export type SessionDoneCallback = (meta: SessionMeta, state: "completed" | "erro
 export interface SessionConfig {
   goose: GooseConfig
   claude: ClaudeConfig
+  codex?: CodexConfig
   mcp: McpConfig
   profile?: ProviderProfile
   /** List of environment variable names to pass through to minion sessions */
@@ -486,6 +488,37 @@ export class SessionHandle {
     this.attachProcessHandlers(this.parseClaudeLine.bind(this))
   }
 
+  startCodex(task: string, systemPrompt?: string): void {
+    const cfg = this.sessionConfig.codex
+    if (!cfg) throw new Error("Codex config not provided in SessionConfig")
+
+    const env = this.buildIsolatedEnv()
+    const sessionHome = path.join(this.meta.cwd, ".home")
+
+    const prompt = systemPrompt ?? DEFAULT_TASK_PROMPT
+    const fullTask = `${prompt}\n\n${task}`
+
+    this.process = spawn(
+      cfg.execPath,
+      [
+        "exec",
+        "--model", cfg.defaultModel,
+        "--approval-mode", cfg.approvalMode,
+        "--quiet",
+        ...this.buildCodexMcpConfigArgs(sessionHome),
+        fullTask,
+      ],
+      {
+        cwd: this.meta.cwd,
+        env,
+        stdio: ["ignore", "pipe", "pipe"],
+        detached: true,
+      },
+    )
+
+    this.attachProcessHandlers(this.parseCodexLine.bind(this))
+  }
+
   private parseGooseLine(trimmed: string): void {
     try {
       const event = JSON.parse(trimmed) as GooseStreamEvent
@@ -510,6 +543,21 @@ export class SessionHandle {
       }
     } catch {
       this.log.warn({ line: trimmed.slice(0, 200) }, "invalid Claude JSON line")
+    }
+  }
+
+  private parseCodexLine(trimmed: string): void {
+    try {
+      const raw = JSON.parse(trimmed)
+      const events = translateCodexEvents(raw)
+      for (const event of events) {
+        if (event.type === "complete") {
+          this.meta.totalTokens = event.total_tokens ?? undefined
+        }
+        this.onEvent(event)
+      }
+    } catch {
+      this.log.warn({ line: trimmed.slice(0, 200) }, "invalid Codex JSON line")
     }
   }
 
