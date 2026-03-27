@@ -437,7 +437,7 @@ export function transitiveReduction(graph: DagGraph): void {
 /**
  * Render the DAG as an ASCII status display for Telegram.
  */
-export function renderDagStatus(graph: DagGraph): string {
+export function renderDagStatus(graph: DagGraph, isStack?: boolean): string {
   const statusIcon: Record<DagNodeStatus, string> = {
     pending: "⏳",
     ready: "🔜",
@@ -450,7 +450,13 @@ export function renderDagStatus(graph: DagGraph): string {
   const progress = dagProgress(graph)
   const sorted = topologicalSort(graph)
 
-  const lines: string[] = [`📊 <b>DAG Status</b>\n`]
+  // Auto-detect stack if not specified (linear DAG where each node has at most one dep)
+  const isLinearStack = isStack ?? (
+    !graph.nodes.some((n) => n.dependsOn.length > 1) &&
+    graph.nodes.every((n, i) => i === 0 || n.dependsOn.length === 1)
+  )
+  const title = isLinearStack ? "📚 Stack Status" : "🔗 DAG Status"
+  const lines: string[] = [`📊 <b>${title}</b>\n`]
 
   // Group nodes by their depth level for visual hierarchy
   const depth = new Map<string, number>()
