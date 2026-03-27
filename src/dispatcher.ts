@@ -1232,6 +1232,7 @@ export class Dispatcher {
     const sessionConfig: SessionConfig = {
       goose: this.config.goose,
       claude: this.config.claude,
+      codex: this.config.codex,
       mcp: mcpOverrides ? { ...this.config.mcp, ...mcpOverrides } : this.config.mcp,
       profile,
       sessionEnvPassthrough: this.config.sessionEnvPassthrough,
