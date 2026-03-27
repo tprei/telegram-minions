@@ -1,4 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest"
+import fs from "node:fs"
+import os from "node:os"
+import path from "node:path"
 import { SessionHandle, type SessionConfig } from "../src/session.js"
 import type { SessionMeta } from "../src/types.js"
 
@@ -123,6 +126,7 @@ describe("SessionHandle MCP building", () => {
         headers: {
           Authorization: "Bearer profile-token-xyz",
         },
+        bearerTokenEnvVar: "ZAI_API_KEY",
       })
     })
 
@@ -145,6 +149,7 @@ describe("SessionHandle MCP building", () => {
         headers: {
           Authorization: "Bearer profile-token-xyz",
         },
+        bearerTokenEnvVar: "ZAI_API_KEY",
       })
     })
 
@@ -206,6 +211,146 @@ describe("SessionHandle MCP building", () => {
         env: undefined,
       })
       expect(config.mcpServers["web-search-prime"].type).toBe("http")
+    })
+  })
+
+  describe("Codex TOML config", () => {
+    function getCodexMcpToml(handle: SessionHandle): string {
+      const h = handle as unknown as { buildCodexMcpToml: () => string }
+      return h.buildCodexMcpToml()
+    }
+
+    function getCodexMcpConfigArgs(handle: SessionHandle, sessionHome: string): string[] {
+      const h = handle as unknown as { buildCodexMcpConfigArgs: (home: string) => string[] }
+      return h.buildCodexMcpConfigArgs(sessionHome)
+    }
+
+    it("returns empty string when no MCPs enabled", () => {
+      const handle = makeHandle()
+      const toml = getCodexMcpToml(handle)
+      expect(toml).toBe("")
+    })
+
+    it("returns empty args when no MCPs enabled", () => {
+      const handle = makeHandle()
+      const args = getCodexMcpConfigArgs(handle, "/tmp/test-home")
+      expect(args).toEqual([])
+    })
+
+    it("generates stdio MCP in TOML format", () => {
+      process.env["GITHUB_TOKEN"] = "ghp_test123"
+      const handle = makeHandle({
+        mcp: {
+          ...baseConfig.mcp,
+          githubEnabled: true,
+        },
+      })
+      const toml = getCodexMcpToml(handle)
+
+      expect(toml).toContain('[mcp_servers.github]')
+      expect(toml).toContain('command = "github-mcp-server"')
+      expect(toml).toContain('args = ["stdio"]')
+      expect(toml).toContain('GITHUB_PERSONAL_ACCESS_TOKEN = "ghp_test123"')
+      expect(toml).toContain("env =")
+    })
+
+    it("generates HTTP MCP with bearer_token_env_var", () => {
+      process.env["ZAI_API_KEY"] = "test-key"
+      const handle = makeHandle({
+        goose: { provider: "z-ai", model: "test" },
+        mcp: { ...baseConfig.mcp, zaiEnabled: true },
+      })
+      const toml = getCodexMcpToml(handle)
+
+      expect(toml).toContain("[mcp_servers.web-search-prime]")
+      expect(toml).toContain('url = "https://api.z.ai/api/mcp/web_search_prime/mcp"')
+      expect(toml).toContain('bearer_token_env_var = "ZAI_API_KEY"')
+      // Authorization header should NOT appear as http_header
+      expect(toml).not.toContain("http_headers")
+    })
+
+    it("generates multiple MCPs in TOML", () => {
+      process.env["GITHUB_TOKEN"] = "ghp_test"
+      process.env["ZAI_API_KEY"] = "zai-test"
+      const handle = makeHandle({
+        goose: { provider: "z-ai", model: "test" },
+        mcp: {
+          ...baseConfig.mcp,
+          githubEnabled: true,
+          context7Enabled: true,
+          zaiEnabled: true,
+        },
+      })
+      const toml = getCodexMcpToml(handle)
+
+      expect(toml).toContain("[mcp_servers.github]")
+      expect(toml).toContain("[mcp_servers.context7]")
+      expect(toml).toContain("[mcp_servers.web-search-prime]")
+    })
+
+    it("writes TOML file and returns --config args", () => {
+      process.env["GITHUB_TOKEN"] = "ghp_test"
+      const handle = makeHandle({
+        mcp: {
+          ...baseConfig.mcp,
+          githubEnabled: true,
+        },
+      })
+
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-test-"))
+      try {
+        const args = getCodexMcpConfigArgs(handle, tmpDir)
+
+        expect(args).toHaveLength(2)
+        expect(args[0]).toBe("--config")
+
+        const configPath = path.join(tmpDir, ".codex", "config.toml")
+        expect(args[1]).toBe(configPath)
+        expect(fs.existsSync(configPath)).toBe(true)
+
+        const contents = fs.readFileSync(configPath, "utf-8")
+        expect(contents).toContain("[mcp_servers.github]")
+        expect(contents).toContain('command = "github-mcp-server"')
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true })
+      }
+    })
+
+    it("escapes special characters in TOML strings", () => {
+      process.env["GITHUB_TOKEN"] = 'token-with-"quotes"-and\\backslash'
+      const handle = makeHandle({
+        mcp: {
+          ...baseConfig.mcp,
+          githubEnabled: true,
+        },
+      })
+      const toml = getCodexMcpToml(handle)
+
+      expect(toml).toContain('GITHUB_PERSONAL_ACCESS_TOKEN = "token-with-\\"quotes\\"-and\\\\backslash"')
+    })
+
+    it("handles Sentry MCP with org and project slugs", () => {
+      process.env["SENTRY_ACCESS_TOKEN"] = "sentry-token"
+      const handle = makeHandle({
+        mcp: {
+          ...baseConfig.mcp,
+          sentryEnabled: true,
+          sentryOrgSlug: "my-org",
+          sentryProjectSlug: "my-project",
+        },
+      })
+      const toml = getCodexMcpToml(handle)
+
+      expect(toml).toContain("[mcp_servers.sentry]")
+      expect(toml).toContain('command = "npx"')
+      expect(toml).toContain('"-y"')
+      expect(toml).toContain('"@sentry/mcp-server@latest"')
+      expect(toml).toContain('"--access-token"')
+      expect(toml).toContain('"sentry-token"')
+      expect(toml).toContain('"--organization-slug"')
+      expect(toml).toContain('"my-org"')
+      expect(toml).toContain('"--project-slug"')
+      expect(toml).toContain('"my-project"')
     })
   })
 

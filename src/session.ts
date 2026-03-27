@@ -37,6 +37,7 @@ type McpHttpServerConfig = {
   type: "http"
   url: string
   headers: Record<string, string>
+  bearerTokenEnvVar?: string
 }
 
 type McpConfigEntry = McpServerConfig | McpHttpServerConfig
@@ -143,6 +144,7 @@ export class SessionHandle {
           headers: {
             Authorization: `Bearer ${zaiKey}`,
           },
+          bearerTokenEnvVar: "ZAI_API_KEY",
         }
       } else {
         this.log.warn("MCP: Z.AI MCP enabled but ZAI_API_KEY is not set — skipping")
@@ -195,6 +197,75 @@ export class SessionHandle {
     }
 
     return ["--mcp-config", JSON.stringify({ mcpServers: mcpConfig })]
+  }
+
+  private static escapeTomlString(value: string): string {
+    return value
+      .replace(/\\/g, "\\\\")
+      .replace(/"/g, '\\"')
+      .replace(/\n/g, "\\n")
+      .replace(/\t/g, "\\t")
+      .replace(/\r/g, "\\r")
+  }
+
+  private static formatTomlInlineTable(obj: Record<string, string>): string {
+    const entries = Object.entries(obj).map(
+      ([k, v]) => `${k} = "${SessionHandle.escapeTomlString(v)}"`,
+    )
+    return `{ ${entries.join(", ")} }`
+  }
+
+  private static formatTomlArray(arr: string[]): string {
+    const items = arr.map(v => `"${SessionHandle.escapeTomlString(v)}"`)
+    return `[${items.join(", ")}]`
+  }
+
+  private buildCodexMcpToml(): string {
+    const servers = this.buildMcpServers()
+    if (Object.keys(servers).length === 0) return ""
+
+    const lines: string[] = []
+
+    for (const [name, server] of Object.entries(servers)) {
+      lines.push(`[mcp_servers.${name}]`)
+
+      if ("type" in server && server.type === "http") {
+        lines.push(`url = "${SessionHandle.escapeTomlString(server.url)}"`)
+
+        if (server.bearerTokenEnvVar) {
+          lines.push(`bearer_token_env_var = "${SessionHandle.escapeTomlString(server.bearerTokenEnvVar)}"`)
+        }
+
+        const otherHeaders = Object.entries(server.headers)
+          .filter(([k]) => k !== "Authorization")
+        if (otherHeaders.length > 0) {
+          lines.push(`http_headers = ${SessionHandle.formatTomlInlineTable(Object.fromEntries(otherHeaders))}`)
+        }
+      } else {
+        const stdioServer = server as McpServerConfig
+        lines.push(`command = "${SessionHandle.escapeTomlString(stdioServer.command)}"`)
+        if (stdioServer.args.length > 0) {
+          lines.push(`args = ${SessionHandle.formatTomlArray(stdioServer.args)}`)
+        }
+        if (stdioServer.env && Object.keys(stdioServer.env).length > 0) {
+          lines.push(`env = ${SessionHandle.formatTomlInlineTable(stdioServer.env)}`)
+        }
+      }
+    }
+
+    return lines.join("\n") + "\n"
+  }
+
+  private buildCodexMcpConfigArgs(sessionHome: string): string[] {
+    const toml = this.buildCodexMcpToml()
+    if (!toml) return []
+
+    const codexDir = path.join(sessionHome, ".codex")
+    fs.mkdirSync(codexDir, { recursive: true })
+    const configPath = path.join(codexDir, "config.toml")
+    fs.writeFileSync(configPath, toml)
+
+    return ["--config", configPath]
   }
 
   private buildIsolatedEnv(): Record<string, string> {
