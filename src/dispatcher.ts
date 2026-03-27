@@ -2710,7 +2710,9 @@ export class Dispatcher {
 
     // Also collect orphaned children that still point to this parent
     for (const [candidateId, candidate] of this.topicSessions) {
-      if (candidate.parentThreadId === parent.threadId && !childrenToClose.has(candidateId)) {
+      if (candidate.parentThreadId !== undefined &&
+          candidate.parentThreadId === parent.threadId &&
+          !childrenToClose.has(candidateId)) {
         childrenToClose.set(candidateId, candidate)
       }
     }
