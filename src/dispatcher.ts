@@ -2642,6 +2642,15 @@ export class Dispatcher {
       }
     }
 
+    // Defensive logging: warn if we're about to close an unusually high number of children
+    // This helps catch bugs in child tracking logic early
+    if (childrenToClose.size > 10) {
+      log.warn(
+        { count: childrenToClose.size, parentThreadId: parent.threadId, parentSlug: parent.slug },
+        "Unusually high number of children to close - possible bug?",
+      )
+    }
+
     await Promise.all([...childrenToClose.values()].map((child) => this.closeSingleChild(child)))
 
     parent.childThreadIds = []
