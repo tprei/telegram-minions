@@ -994,3 +994,122 @@ describe("resetFailedNode", () => {
     expect(reset).toEqual(["d"])
   })
 })
+
+describe("ci-pending and ci-failed statuses", () => {
+  it("isDagComplete includes ci-failed as terminal", () => {
+    const graph = buildDag("test", [
+      { id: "a", title: "A", description: "", dependsOn: [] },
+      { id: "b", title: "B", description: "", dependsOn: ["a"] },
+    ], 1, "repo")
+
+    graph.nodes[0].status = "ci-failed"
+    graph.nodes[1].status = "skipped"
+
+    expect(isDagComplete(graph)).toBe(true)
+  })
+
+  it("isDagComplete returns false when ci-pending", () => {
+    const graph = buildDag("test", [
+      { id: "a", title: "A", description: "", dependsOn: [] },
+      { id: "b", title: "B", description: "", dependsOn: ["a"] },
+    ], 1, "repo")
+
+    graph.nodes[0].status = "ci-pending"
+    graph.nodes[1].status = "pending"
+
+    expect(isDagComplete(graph)).toBe(false)
+  })
+
+  it("advanceDag does not advance dependents of ci-failed nodes", () => {
+    const graph = buildDag("test", [
+      { id: "a", title: "A", description: "", dependsOn: [] },
+      { id: "b", title: "B", description: "", dependsOn: ["a"] },
+    ], 1, "repo")
+
+    graph.nodes[0].status = "ci-failed"
+
+    const newlyReady = advanceDag(graph)
+    expect(newlyReady).toHaveLength(0)
+    expect(graph.nodes[1].status).toBe("pending")
+  })
+
+  it("advanceDag does not advance dependents of ci-pending nodes", () => {
+    const graph = buildDag("test", [
+      { id: "a", title: "A", description: "", dependsOn: [] },
+      { id: "b", title: "B", description: "", dependsOn: ["a"] },
+    ], 1, "repo")
+
+    graph.nodes[0].status = "ci-pending"
+
+    const newlyReady = advanceDag(graph)
+    expect(newlyReady).toHaveLength(0)
+    expect(graph.nodes[1].status).toBe("pending")
+  })
+
+  it("dagProgress counts ci-pending and ci-failed separately", () => {
+    const graph = buildDag("test", [
+      { id: "a", title: "A", description: "", dependsOn: [] },
+      { id: "b", title: "B", description: "", dependsOn: [] },
+      { id: "c", title: "C", description: "", dependsOn: [] },
+    ], 1, "repo")
+
+    graph.nodes[0].status = "ci-pending"
+    graph.nodes[1].status = "ci-failed"
+    graph.nodes[2].status = "done"
+
+    const progress = dagProgress(graph)
+    expect(progress.ciPending).toBe(1)
+    expect(progress.ciFailed).toBe(1)
+    expect(progress.done).toBe(1)
+    expect(progress.total).toBe(3)
+  })
+
+  it("resetFailedNode resets ci-failed nodes", () => {
+    const graph = buildDag("test", [
+      { id: "a", title: "A", description: "", dependsOn: [] },
+      { id: "b", title: "B", description: "", dependsOn: ["a"] },
+    ], 1, "repo")
+
+    graph.nodes[0].status = "ci-failed"
+    graph.nodes[0].error = "CI checks failed"
+    graph.nodes[1].status = "skipped"
+
+    const reset = resetFailedNode(graph, "a")
+    expect(graph.nodes[0].status).toBe("ready")
+    expect(graph.nodes[0].error).toBeUndefined()
+    expect(graph.nodes[1].status).toBe("pending")
+    expect(reset).toEqual(["b"])
+  })
+
+  it("renderDagStatus shows ci-pending and ci-failed icons", () => {
+    const graph = buildDag("test", [
+      { id: "a", title: "A", description: "", dependsOn: [] },
+      { id: "b", title: "B", description: "", dependsOn: [] },
+    ], 1, "repo")
+
+    graph.nodes[0].status = "ci-pending"
+    graph.nodes[1].status = "ci-failed"
+
+    const output = renderDagStatus(graph)
+    expect(output).toContain("🔄")
+    expect(output).toContain("⚠️")
+    expect(output).toContain("awaiting CI")
+    expect(output).toContain("CI failed")
+  })
+
+  it("needsRestack includes ci-failed nodes (still alive)", () => {
+    const graph = buildDag("test", [
+      { id: "a", title: "A", description: "", dependsOn: [] },
+      { id: "b", title: "B", description: "", dependsOn: ["a"] },
+    ], 1, "repo")
+
+    graph.nodes[0].status = "done"
+    graph.nodes[1].status = "ci-failed"
+    graph.nodes[1].branch = "minion/test"
+    graph.nodes[1].mergeBase = "abc123"
+
+    const toRestack = needsRestack(graph, "a")
+    expect(toRestack).toHaveLength(1)
+    expect(toRestack[0].id).toBe("b")
+  })
+})

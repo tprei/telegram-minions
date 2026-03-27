@@ -55,6 +55,10 @@ import {
   formatLandProgress,
   formatLandComplete,
   formatLandError,
+  formatLandRestacking,
+  formatDagCIWaiting,
+  formatDagCIFailed,
+  formatDagForceAdvance,
   formatPinnedStatus,
   formatPinnedSplitStatus,
   formatPinnedDagStatus,
@@ -64,7 +68,7 @@ import { extractStackItems, extractDagItems, buildDagChildPrompt } from "./dag-e
 import {
   buildDag, advanceDag, failNode, resetFailedNode, isDagComplete,
   readyNodes, dagProgress, getUpstreamBranches, topologicalSort,
-  renderDagForGitHub, renderDagStatus, upsertDagSection,
+  renderDagForGitHub, renderDagStatus, upsertDagSection, needsRestack,
   type DagGraph, type DagNode, type DagInput,
 } from "./dag.js"
 import { runQualityGates, type QualityReport } from "./quality-gates.js"
@@ -82,7 +86,7 @@ import {
   TASK_PREFIX, TASK_SHORT, PLAN_PREFIX, THINK_PREFIX, REVIEW_PREFIX,
   EXECUTE_CMD, STATUS_CMD, STATS_CMD, REPLY_PREFIX, REPLY_SHORT,
   CLOSE_CMD, STOP_CMD, HELP_CMD, CLEAN_CMD, USAGE_CMD, CONFIG_CMD,
-  SPLIT_CMD, STACK_CMD, DAG_CMD, LAND_CMD, RETRY_CMD,
+  SPLIT_CMD, STACK_CMD, DAG_CMD, LAND_CMD, RETRY_CMD, FORCE_CMD,
   parseTaskArgs, parseReviewArgs, buildReviewAllTask,
   buildRepoKeyboard, buildProfileKeyboard,
   escapeHtml, extractRepoName, appendImageContext,
@@ -554,6 +558,9 @@ export class Dispatcher {
         } else if (text === RETRY_CMD || text?.startsWith(RETRY_CMD + " ")) {
           const nodeId = text!.slice(RETRY_CMD.length).trim() || undefined
           await this.handleRetryCommand(topicSession, nodeId)
+        } else if (text?.startsWith(FORCE_CMD + " ") || text === FORCE_CMD) {
+          const nodeId = text!.slice(FORCE_CMD.length).trim() || undefined
+          await this.handleForceCommand(topicSession, nodeId)
         } else if (text?.startsWith(REPLY_PREFIX + " ") || text?.startsWith(REPLY_SHORT + " ") || text === REPLY_PREFIX || text === REPLY_SHORT) {
           const stripped = text.startsWith(REPLY_PREFIX)
             ? text.slice(REPLY_PREFIX.length).trim()
@@ -1350,15 +1357,13 @@ export class Dispatcher {
                   formatPinnedStatus(topicSession.slug, topicSession.repo, "completed", prUrl),
                 )
                 if (this.config.ci.babysitEnabled) {
-                  if (topicSession.dagId || topicSession.parentThreadId) {
-                    const parentId = topicSession.dagId
-                      ? this.dags.get(topicSession.dagId)?.parentThreadId ?? topicSession.parentThreadId
-                      : topicSession.parentThreadId
-                    if (parentId != null) {
-                      const queue = this.pendingBabysitPRs.get(parentId) ?? []
-                      queue.push({ childSession: topicSession, prUrl, qualityReport })
-                      this.pendingBabysitPRs.set(parentId, queue)
-                    }
+                  if (topicSession.dagId) {
+                    // DAG children: CI is handled inline in onDagChildComplete
+                  } else if (topicSession.parentThreadId) {
+                    // Split children: still deferred (they're independent)
+                    const queue = this.pendingBabysitPRs.get(topicSession.parentThreadId) ?? []
+                    queue.push({ childSession: topicSession, prUrl, qualityReport })
+                    this.pendingBabysitPRs.set(topicSession.parentThreadId, queue)
                   } else {
                     this.babysitPR(topicSession, prUrl, qualityReport).catch((err) => {
                       log.error({ err, prUrl }, "babysitPR error")
@@ -1633,6 +1638,73 @@ export class Dispatcher {
       topicSession.threadId,
     )
     topicSession.mode = "task"
+  }
+
+  /**
+   * Run inline CI check for a DAG child. Returns true if CI passed (or was fixed).
+   */
+  private async babysitDagChildCI(childSession: TopicSession, prUrl: string): Promise<boolean> {
+    const result = await waitForCI(prUrl, childSession.cwd, this.config.ci)
+
+    if (result.passed) {
+      await this.telegram.sendMessage(
+        formatCIPassed(childSession.slug, prUrl),
+        childSession.threadId,
+      )
+      return true
+    }
+
+    if (result.timedOut && result.checks.length === 0) {
+      await this.telegram.sendMessage(
+        formatCINoChecks(childSession.slug, prUrl),
+        childSession.threadId,
+      )
+      return true // No checks = treat as passed
+    }
+
+    const failedChecks = result.checks.filter((c) => c.bucket === "fail")
+    if (failedChecks.length === 0) return true
+
+    // Attempt CI fix
+    const maxRetries = this.config.ci.maxRetries
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      await this.telegram.sendMessage(
+        formatCIFailed(childSession.slug, failedChecks.map((c) => c.name), attempt, maxRetries),
+        childSession.threadId,
+      )
+
+      const failureDetails = getFailedCheckLogs(prUrl, childSession.cwd)
+      const fixPrompt = buildCIFixPrompt(prUrl, failedChecks, failureDetails, attempt, maxRetries)
+
+      await this.telegram.sendMessage(
+        formatCIFixing(childSession.slug, attempt, maxRetries),
+        childSession.threadId,
+      )
+
+      childSession.mode = "ci-fix"
+      this.pushToConversation(childSession, { role: "user", text: fixPrompt })
+
+      await new Promise<void>((resolve) => {
+        this.spawnCIFixAgent(childSession, fixPrompt, () => resolve())
+      })
+
+      const recheck = await waitForCI(prUrl, childSession.cwd, this.config.ci)
+      if (recheck.passed) {
+        await this.telegram.sendMessage(
+          formatCIPassed(childSession.slug, prUrl),
+          childSession.threadId,
+        )
+        childSession.mode = "task"
+        return true
+      }
+    }
+
+    await this.telegram.sendMessage(
+      formatCIGaveUp(childSession.slug, maxRetries),
+      childSession.threadId,
+    )
+    childSession.mode = "task"
+    return false
   }
 
   private async spawnCIFixAgent(
@@ -2278,6 +2350,13 @@ export class Dispatcher {
     const branch = `minion/${slug}`
     node.branch = branch
 
+    // Record the merge base for restacking during landing
+    try {
+      node.mergeBase = execSync("git rev-parse HEAD", { cwd, encoding: "utf-8", timeout: 10_000 }).trim()
+    } catch {
+      log.warn({ dagId: graph.id, nodeId: node.id }, "failed to record mergeBase")
+    }
+
     const task = buildDagChildPrompt(
       parent.conversation,
       { id: node.id, title: node.title, description: node.description, dependsOn: node.dependsOn },
@@ -2411,24 +2490,71 @@ export class Dispatcher {
           )
         }
       } else {
-        node.status = "done"
         node.prUrl = resolvedPrUrl
 
-        const progress = dagProgress(graph)
-        await this.telegram.sendMessage(
-          formatDagNodeComplete(childSession.slug, state, node.title, resolvedPrUrl, {
-            done: progress.done,
-            total: progress.total,
-            running: progress.running,
-          }),
-          parent.threadId,
-        )
+        // Inline CI gate: check CI before advancing dependents
+        const ciPolicy = this.config.ci.dagCiPolicy
+        if (ciPolicy !== "skip" && this.config.ci.babysitEnabled && resolvedPrUrl) {
+          node.status = "ci-pending"
 
-        const newlyReady = advanceDag(graph)
-        if (newlyReady.length > 0) {
-          const isStack = !graph.nodes.some((n) => n.dependsOn.length > 1) &&
-            graph.nodes.every((n, i) => i === 0 || n.dependsOn.length === 1)
-          await this.scheduleDagNodes(parent, graph, isStack)
+          const progress = dagProgress(graph)
+          await this.telegram.sendMessage(
+            formatDagNodeComplete(childSession.slug, state, node.title, resolvedPrUrl, {
+              done: progress.done,
+              total: progress.total,
+              running: progress.running,
+            }),
+            parent.threadId,
+          )
+
+          await this.telegram.sendMessage(
+            formatDagCIWaiting(childSession.slug, node.title, resolvedPrUrl),
+            parent.threadId,
+          )
+
+          // Run CI check + babysitting inline
+          const ciBabysitResult = await this.babysitDagChildCI(childSession, resolvedPrUrl)
+
+          if (ciBabysitResult) {
+            node.status = "done"
+          } else if (ciPolicy === "warn") {
+            // CI failed but policy is warn — advance anyway
+            node.status = "done"
+            await this.telegram.sendMessage(
+              formatDagCIFailed(childSession.slug, node.title, resolvedPrUrl, ciPolicy),
+              parent.threadId,
+            )
+          } else {
+            // CI failed and policy is block — mark ci-failed, don't advance
+            node.status = "ci-failed"
+            node.error = "CI checks failed"
+            await this.telegram.sendMessage(
+              formatDagCIFailed(childSession.slug, node.title, resolvedPrUrl, ciPolicy),
+              parent.threadId,
+            )
+          }
+        } else {
+          node.status = "done"
+
+          const progress = dagProgress(graph)
+          await this.telegram.sendMessage(
+            formatDagNodeComplete(childSession.slug, state, node.title, resolvedPrUrl, {
+              done: progress.done,
+              total: progress.total,
+              running: progress.running,
+            }),
+            parent.threadId,
+          )
+        }
+
+        // Only advance dependents if the node is done
+        if (node.status === "done") {
+          const newlyReady = advanceDag(graph)
+          if (newlyReady.length > 0) {
+            const isStack = !graph.nodes.some((n) => n.dependsOn.length > 1) &&
+              graph.nodes.every((n, i) => i === 0 || n.dependsOn.length === 1)
+            await this.scheduleDagNodes(parent, graph, isStack)
+          }
         }
       }
     }
@@ -2444,17 +2570,19 @@ export class Dispatcher {
     // Check if DAG is complete
     if (isDagComplete(graph)) {
       const progress = dagProgress(graph)
+      const totalFailed = progress.failed + progress.ciFailed
       await this.telegram.sendMessage(
-        formatDagAllDone(progress.done, progress.total, progress.failed),
+        formatDagAllDone(progress.done, progress.total, totalFailed),
         parent.threadId,
       )
 
+      // Run deferred babysit for any remaining non-DAG children (splits)
       await this.runDeferredBabysit(parent.threadId)
 
-      if (progress.failed > 0) {
+      if (totalFailed > 0) {
         await this.updateTopicTitle(parent, "⚠️")
         await this.telegram.sendMessage(
-          `Send <code>/retry</code> to retry all failed nodes, or <code>/retry node-id</code> for a specific one. <code>/close</code> to finish.`,
+          `Send <code>/retry</code> to retry failed nodes, <code>/force node-id</code> to advance past CI failures, or <code>/close</code> to finish.`,
           parent.threadId,
         )
       } else {
@@ -2505,8 +2633,8 @@ export class Dispatcher {
     if (!graph) return
 
     const failedNodes = nodeId
-      ? graph.nodes.filter((n) => n.id === nodeId && n.status === "failed")
-      : graph.nodes.filter((n) => n.status === "failed")
+      ? graph.nodes.filter((n) => n.id === nodeId && (n.status === "failed" || n.status === "ci-failed"))
+      : graph.nodes.filter((n) => n.status === "failed" || n.status === "ci-failed")
 
     if (failedNodes.length === 0) {
       await this.telegram.sendMessage("No failed nodes to retry.", topicSession.threadId)
@@ -2544,6 +2672,51 @@ export class Dispatcher {
       }
     }
 
+    await this.updateDagPRDescriptions(graph, topicSession.cwd)
+    await this.persistTopicSessions()
+  }
+
+  /**
+   * Handle /force command — advance a ci-failed node past CI failure.
+   * Marks the node as "done" and schedules dependents.
+   */
+  private async handleForceCommand(topicSession: TopicSession, nodeId?: string): Promise<void> {
+    if (!topicSession.dagId) {
+      await this.telegram.sendMessage("⚠️ /force only works in DAG parent threads.", topicSession.threadId)
+      return
+    }
+
+    const graph = this.dags.get(topicSession.dagId)
+    if (!graph) return
+
+    const ciFailedNodes = nodeId
+      ? graph.nodes.filter((n) => n.id === nodeId && n.status === "ci-failed")
+      : graph.nodes.filter((n) => n.status === "ci-failed")
+
+    if (ciFailedNodes.length === 0) {
+      await this.telegram.sendMessage("No CI-failed nodes to force-advance.", topicSession.threadId)
+      return
+    }
+
+    for (const node of ciFailedNodes) {
+      node.status = "done"
+      node.error = undefined
+
+      await this.telegram.sendMessage(
+        formatDagForceAdvance(node.title, node.id),
+        topicSession.threadId,
+      )
+
+      const newlyReady = advanceDag(graph)
+      if (newlyReady.length > 0) {
+        const isStack = !graph.nodes.some((n) => n.dependsOn.length > 1) &&
+          graph.nodes.every((n, i) => i === 0 || n.dependsOn.length === 1)
+        await this.scheduleDagNodes(topicSession, graph, isStack)
+      }
+    }
+
+    this.broadcastDag(graph, "dag_updated")
+    await this.updatePinnedDagStatus(topicSession, graph)
     await this.updateDagPRDescriptions(graph, topicSession.cwd)
     await this.persistTopicSessions()
   }
@@ -2589,20 +2762,34 @@ export class Dispatcher {
       return
     }
 
+    // Find a working directory from a child session that has a repo checkout
+    const anyCwd = this.findChildCwd(topicSession, graph) ?? topicSession.cwd
+    const gitOpts = { stdio: ["pipe" as const, "pipe" as const, "pipe" as const], timeout: 120_000 }
+
     await this.telegram.sendMessage(
       formatLandStart(topicSession.slug, prNodes.length),
       topicSession.threadId,
     )
 
+    // Determine the base branch (usually main/master)
+    let baseBranch: string
+    try {
+      baseBranch = execSync(
+        `gh repo view --json defaultBranchRef --jq .defaultBranchRef.name`,
+        { ...gitOpts, cwd: anyCwd, encoding: "utf-8", env: { ...process.env } },
+      ).trim()
+    } catch {
+      baseBranch = "main"
+    }
+
     let succeeded = 0
-    const gitOpts = { stdio: ["pipe" as const, "pipe" as const, "pipe" as const], timeout: 60_000 }
 
     for (const node of prNodes) {
       try {
-        // Merge the PR with squash
+        // Merge the PR with squash and delete the branch
         execSync(
-          `gh pr merge ${JSON.stringify(node.prUrl!)} --squash`,
-          { ...gitOpts, cwd: topicSession.cwd, env: { ...process.env } },
+          `gh pr merge ${JSON.stringify(node.prUrl!)} --squash --delete-branch`,
+          { ...gitOpts, cwd: anyCwd, env: { ...process.env } },
         )
         succeeded++
 
@@ -2611,7 +2798,62 @@ export class Dispatcher {
           topicSession.threadId,
         )
 
-        // Brief pause for GitHub to process the merge and retarget downstream PRs
+        // Restack downstream branches that need rebasing
+        const toRestack = needsRestack(graph, node.id)
+        if (toRestack.length > 0) {
+          // Fetch latest state after the merge
+          try {
+            execSync(`git fetch origin`, { ...gitOpts, cwd: anyCwd, env: { ...process.env } })
+          } catch (err) {
+            log.warn({ err, nodeId: node.id }, "git fetch failed during restack")
+          }
+
+          for (const downstream of toRestack) {
+            if (!downstream.branch || !downstream.prUrl) continue
+
+            await this.telegram.sendMessage(
+              formatLandRestacking(downstream.title, downstream.branch),
+              topicSession.threadId,
+            )
+
+            try {
+              // Rebase the downstream branch onto the new base
+              // After a squash merge, the upstream branch is gone and its commits
+              // are collapsed into a single commit on baseBranch
+              const newBase = `origin/${baseBranch}`
+
+              execSync(`git checkout ${JSON.stringify(downstream.branch)}`, { ...gitOpts, cwd: anyCwd, env: { ...process.env } })
+              execSync(
+                `git rebase --onto ${newBase} ${downstream.mergeBase} ${JSON.stringify(downstream.branch)}`,
+                { ...gitOpts, cwd: anyCwd, env: { ...process.env } },
+              )
+              execSync(
+                `git push --force-with-lease origin ${JSON.stringify(downstream.branch)}`,
+                { ...gitOpts, cwd: anyCwd, env: { ...process.env } },
+              )
+
+              // Update mergeBase for the next restack iteration
+              downstream.mergeBase = execSync("git rev-parse HEAD", { cwd: anyCwd, encoding: "utf-8", timeout: 10_000 }).trim()
+
+              // Explicitly update PR base branch (don't rely on GitHub auto-retarget)
+              execSync(
+                `gh pr edit ${JSON.stringify(downstream.prUrl)} --base ${baseBranch}`,
+                { ...gitOpts, cwd: anyCwd, env: { ...process.env } },
+              )
+            } catch (err) {
+              const errMsg = err instanceof Error ? err.message : String(err)
+              log.error({ err, nodeId: downstream.id, branch: downstream.branch }, "restack failed")
+              await this.telegram.sendMessage(
+                `⚠️ Restack failed for <b>${esc(downstream.title)}</b>: <code>${esc(errMsg)}</code>`,
+                topicSession.threadId,
+              )
+              // Abort any in-progress rebase
+              try { execSync(`git rebase --abort`, { cwd: anyCwd, stdio: "pipe" }) } catch { /* ignore */ }
+            }
+          }
+        }
+
+        // Brief pause for GitHub to process
         await new Promise((resolve) => setTimeout(resolve, 3000))
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err)
@@ -2627,6 +2869,25 @@ export class Dispatcher {
       formatLandComplete(succeeded, prNodes.length),
       topicSession.threadId,
     )
+  }
+
+  /**
+   * Find a child session's cwd that has a git repo for landing operations.
+   */
+  private findChildCwd(parent: TopicSession, graph: DagGraph): string | undefined {
+    for (const node of graph.nodes) {
+      if (node.threadId) {
+        const child = this.topicSessions.get(node.threadId)
+        if (child?.cwd) return child.cwd
+      }
+    }
+    if (parent.childThreadIds) {
+      for (const id of parent.childThreadIds) {
+        const child = this.topicSessions.get(id)
+        if (child?.cwd) return child.cwd
+      }
+    }
+    return undefined
   }
 
   /**

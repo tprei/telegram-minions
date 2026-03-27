@@ -59,6 +59,7 @@ export function configFromEnv(overrides?: Partial<MinionConfig>): MinionConfig {
       maxRetries: optionalNumber("CI_BABYSIT_MAX_RETRIES", 2),
       pollIntervalMs: optionalNumber("CI_POLL_INTERVAL_MS", 30_000),
       pollTimeoutMs: optionalNumber("CI_POLL_TIMEOUT_MS", 600_000),
+      dagCiPolicy: (optional("DAG_CI_POLICY", "warn") as "block" | "warn" | "skip"),
     },
     mcp: {
       browserEnabled: optional("ENABLE_BROWSER_MCP", "true") === "true",

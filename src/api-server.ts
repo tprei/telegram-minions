@@ -58,7 +58,7 @@ export interface ApiSession {
 export interface ApiDagNode {
   id: string
   slug: string
-  status: "pending" | "running" | "completed" | "failed" | "skipped"
+  status: "pending" | "running" | "completed" | "failed" | "skipped" | "ci-pending" | "ci-failed"
   dependencies: string[]
   dependents: string[]
   session?: ApiSession
@@ -277,7 +277,7 @@ export function dagToApi(
         ? "completed"
         : node.status === "ready"
           ? "pending"
-          : node.status,
+          : node.status as ApiDagNode["status"],
       dependencies: node.dependsOn,
       dependents: dependents.get(node.id) ?? [],
       session: apiSession,

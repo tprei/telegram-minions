@@ -14,6 +14,7 @@ export type {
   ApiServerConfig,
   SentryConfig,
   CiConfig,
+  DagCiPolicy,
   ProviderProfile,
 } from "./config-types.js"
 export {

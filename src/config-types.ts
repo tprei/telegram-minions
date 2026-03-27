@@ -29,11 +29,14 @@ export interface WorkspaceConfig {
   maxConversationLength: number
 }
 
+export type DagCiPolicy = "block" | "warn" | "skip"
+
 export interface CiConfig {
   babysitEnabled: boolean
   maxRetries: number
   pollIntervalMs: number
   pollTimeoutMs: number
+  dagCiPolicy: DagCiPolicy
 }
 
 export interface McpConfig {

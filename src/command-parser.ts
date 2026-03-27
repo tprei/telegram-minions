@@ -25,6 +25,7 @@ export const STACK_CMD = "/stack"
 export const DAG_CMD = "/dag"
 export const LAND_CMD = "/land"
 export const RETRY_CMD = "/retry"
+export const FORCE_CMD = "/force"
 
 /**
  * Parse task arguments to extract repo URL and task description.

@@ -312,6 +312,31 @@ describe("validateCiConfig", () => {
     })
     expect(result.valid).toBe(false)
   })
+
+  it("accepts valid dagCiPolicy values", () => {
+    for (const policy of ["block", "warn", "skip"]) {
+      const result = validateCiConfig({
+        babysitEnabled: true,
+        maxRetries: 2,
+        pollIntervalMs: 30_000,
+        pollTimeoutMs: 600_000,
+        dagCiPolicy: policy,
+      })
+      expect(result.valid).toBe(true)
+    }
+  })
+
+  it("rejects invalid dagCiPolicy value", () => {
+    const result = validateCiConfig({
+      babysitEnabled: true,
+      maxRetries: 2,
+      pollIntervalMs: 30_000,
+      pollTimeoutMs: 600_000,
+      dagCiPolicy: "invalid",
+    })
+    expect(result.valid).toBe(false)
+    expect(result.errors[0].message).toContain("dagCiPolicy")
+  })
 })
 
 describe("validateMcpConfig", () => {

@@ -736,6 +736,25 @@ export function formatLandError(title: string, error: string): string {
   return `❌ <b>Landing failed</b> at: ${esc(title)}\n<code>${esc(error)}</code>`
 }
 
+export function formatLandRestacking(title: string, branch: string): string {
+  return `🔄 Restacking <b>${esc(title)}</b> (<code>${esc(branch)}</code>)…`
+}
+
+export function formatDagCIWaiting(slug: string, nodeTitle: string, prUrl: string): string {
+  return `🔄 <b>${esc(slug)}</b> waiting for CI: ${esc(nodeTitle)} — <a href="${esc(prUrl)}">PR</a>`
+}
+
+export function formatDagCIFailed(slug: string, nodeTitle: string, prUrl: string, policy: string): string {
+  const action = policy === "block"
+    ? `\nDependents blocked. Send <code>/force ${esc(slug)}</code> to advance anyway, or <code>/retry</code> after fixing.`
+    : `\nProceeding with dependents (policy: ${esc(policy)}).`
+  return `⚠️ <b>${esc(slug)}</b> CI failed: ${esc(nodeTitle)} — <a href="${esc(prUrl)}">PR</a>${action}`
+}
+
+export function formatDagForceAdvance(nodeTitle: string, nodeId: string): string {
+  return `⚡ Force-advancing <b>${esc(nodeTitle)}</b> (<code>${esc(nodeId)}</code>) past CI failure`
+}
+
 export function formatConfigHelp(): string {
   return [
     `⚙️ <b>Config commands</b>`,
