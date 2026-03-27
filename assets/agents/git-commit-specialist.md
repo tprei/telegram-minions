@@ -17,7 +17,7 @@ You are running in a sandboxed environment. Local changes do not persist after t
 ## Workflow
 
 1. Examine all changes with `git status`, `git diff`, `git diff --cached`
-2. Create a descriptive branch name from the current HEAD: `git checkout -b <branch>`
+2. Check the current branch with `git branch --show-current` — a branch is already created for you. Do NOT create a new branch.
 3. Group related changes into logical commits
 4. Write clear commit messages using conventional commits format
 5. Push the branch: `git push -u origin <branch>`
