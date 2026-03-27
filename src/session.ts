@@ -271,6 +271,7 @@ export class SessionHandle {
   private buildIsolatedEnv(): Record<string, string> {
     const parentHome = process.env["HOME"] ?? "/root"
     const parentClaudeDir = path.join(parentHome, ".claude")
+    const parentCodexDir = path.join(parentHome, ".codex")
     const sessionHome = path.join(this.meta.cwd, ".home")
 
     const screenshotsDir = path.join(this.meta.cwd, SCREENSHOTS_DIR)
@@ -282,8 +283,11 @@ export class SessionHandle {
     const sessionDataDir = path.join(sessionHome, ".local", "share")
     const sessionStateDir = path.join(sessionHome, ".local", "state")
     const screenshotDir = path.join(sessionHome, "screenshots")
+    const sessionClaudeDir = path.join(sessionHome, ".claude")
+    const sessionCodexDir = path.join(sessionHome, ".codex")
 
-    fs.mkdirSync(path.join(sessionHome, ".claude"), { recursive: true })
+    fs.mkdirSync(sessionClaudeDir, { recursive: true })
+    fs.mkdirSync(sessionCodexDir, { recursive: true })
     fs.mkdirSync(sessionTmp, { recursive: true })
     fs.mkdirSync(sessionConfig, { recursive: true })
     fs.mkdirSync(sessionCache, { recursive: true })
@@ -294,9 +298,16 @@ export class SessionHandle {
     this.meta.screenshotDir = screenshotDir
 
     const settingsSrc = path.join(parentClaudeDir, "settings.json")
-    const settingsDst = path.join(sessionHome, ".claude", "settings.json")
+    const settingsDst = path.join(sessionClaudeDir, "settings.json")
     if (fs.existsSync(settingsSrc) && !fs.existsSync(settingsDst)) {
       fs.copyFileSync(settingsSrc, settingsDst)
+    }
+
+    // Copy parent Codex config into session if present
+    const codexConfigSrc = path.join(parentCodexDir, "config.toml")
+    const codexConfigDst = path.join(sessionCodexDir, "config.toml")
+    if (fs.existsSync(codexConfigSrc) && !fs.existsSync(codexConfigDst)) {
+      fs.copyFileSync(codexConfigSrc, codexConfigDst)
     }
 
     const baseEnv: Record<string, string> = {
@@ -317,6 +328,7 @@ export class SessionHandle {
       GITHUB_PERSONAL_ACCESS_TOKEN: process.env["GITHUB_TOKEN"] ?? "",
       SENTRY_ACCESS_TOKEN: process.env["SENTRY_ACCESS_TOKEN"] ?? "",
       ZAI_API_KEY: process.env["ZAI_API_KEY"] ?? "",
+      OPENAI_API_KEY: process.env["OPENAI_API_KEY"] ?? "",
     }
 
     const profile = this.sessionConfig.profile
