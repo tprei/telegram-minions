@@ -18,8 +18,6 @@ import {
 
 const log = loggers.observer
 
-// Text flush delay: if no new text chunk arrives within this window, send what's buffered.
-const TEXT_FLUSH_DEBOUNCE_MS = 1500
 // How often to check if buffered text should be flushed (interval-based instead of per-chunk timer).
 const FLUSH_CHECK_INTERVAL_MS = 200
 
@@ -29,7 +27,6 @@ const MAX_ACTIVITY_LINES = 6
 const SCREENSHOTS_DIR = ".screenshots"
 const MIN_TEXT_LENGTH = 20
 const PRE_TOOL_NARRATION_LIMIT = 60
-const ACTIVITY_EDIT_DEBOUNCE_MS = 2000
 // Delay between sending multi-chunk messages to avoid Telegram rate limits.
 const CHUNK_SEND_DELAY_MS = 100
 
@@ -61,11 +58,17 @@ interface SessionState {
 
 export class Observer {
   private readonly sessions = new Map<string, SessionState>()
+  private readonly textFlushDebounceMs: number
+  private readonly activityEditDebounceMs: number
 
   constructor(
     private readonly telegram: TelegramClient,
     private readonly throttleMs: number,
-  ) {}
+    opts?: { textFlushDebounceMs?: number; activityEditDebounceMs?: number },
+  ) {
+    this.textFlushDebounceMs = opts?.textFlushDebounceMs ?? 5000
+    this.activityEditDebounceMs = opts?.activityEditDebounceMs ?? 5000
+  }
 
   async onSessionStart(
     meta: SessionMeta,
@@ -210,7 +213,7 @@ export class Observer {
         }
 
         const now = Date.now()
-        if (now - currentState.lastTextAt >= TEXT_FLUSH_DEBOUNCE_MS && currentState.textBuffer.length > 0) {
+        if (now - currentState.lastTextAt >= this.textFlushDebounceMs && currentState.textBuffer.length > 0) {
           this.flushTextBuffer(meta).catch((err) => {
             log.error({ err, sessionId: meta.sessionId }, "flush error")
             captureException(err, { operation: "observer.flush", sessionId: meta.sessionId })
@@ -264,12 +267,6 @@ export class Observer {
       clearTimeout(state.activityEditTimer)
       state.activityEditTimer = null
     }
-    // Delete the orphaned activity message now that tools are folded into the Reply
-    if (state.activityMessageId !== null) {
-      this.telegram.deleteMessage(state.activityMessageId).catch((err) => {
-        log.warn({ err, sessionId: meta.sessionId }, "delete activity msg error")
-      })
-    }
     state.activityMessageId = null
     state.activityLog = []
     state.toolCount = 0
@@ -312,7 +309,7 @@ export class Observer {
         this.telegram.editMessage(messageId, latestHtml, meta.threadId).catch((err) => {
           log.warn({ err, sessionId: meta.sessionId }, "edit error")
         })
-      }, ACTIVITY_EDIT_DEBOUNCE_MS)
+      }, this.activityEditDebounceMs)
       return
     }
 

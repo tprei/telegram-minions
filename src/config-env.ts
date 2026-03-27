@@ -69,8 +69,13 @@ export function configFromEnv(overrides?: Partial<MinionConfig>): MinionConfig {
       sentryProjectSlug: process.env["SENTRY_PROJECT_SLUG"] ?? "",
       zaiEnabled: optional("ENABLE_ZAI_MCP", "true") === "true",
     },
+    telegramQueue: {
+      minSendIntervalMs: optionalNumber("MIN_SEND_INTERVAL_MS", 3500),
+    },
     observer: {
       activityThrottleMs: optionalNumber("ACTIVITY_THROTTLE_MS", 3000),
+      textFlushDebounceMs: optionalNumber("TEXT_FLUSH_DEBOUNCE_MS", 5000),
+      activityEditDebounceMs: optionalNumber("ACTIVITY_EDIT_DEBOUNCE_MS", 5000),
     },
     sentry: {
       dsn: process.env["SENTRY_DSN"] ?? undefined,
