@@ -61,7 +61,7 @@ import { extractStackItems, extractDagItems, buildDagChildPrompt } from "./dag-e
 import {
   buildDag, advanceDag, failNode, resetFailedNode, isDagComplete,
   readyNodes, dagProgress, getUpstreamBranches, topologicalSort,
-  renderDagForGitHub, upsertDagSection,
+  renderDagForGitHub, renderDagStatus, upsertDagSection,
   type DagGraph, type DagNode, type DagInput,
 } from "./dag.js"
 import { runQualityGates, type QualityReport } from "./quality-gates.js"
@@ -2068,6 +2068,10 @@ export class Dispatcher {
       formatDagStart(topicSession.slug, childSummaries, isStack),
       topicSession.threadId,
     )
+    await this.telegram.sendMessage(
+      renderDagStatus(graph, isStack),
+      topicSession.threadId,
+    )
     await this.updateTopicTitle(topicSession, isStack ? "📚" : "🔗")
 
     // Start scheduling ready nodes
@@ -2352,6 +2356,12 @@ export class Dispatcher {
     }
 
     this.broadcastDag(graph, "dag_updated")
+
+    // Send updated DAG/stack status view
+    await this.telegram.sendMessage(
+      renderDagStatus(graph),
+      parent.threadId,
+    )
 
     // Update DAG section in all PR descriptions
     await this.updateDagPRDescriptions(graph, childSession.cwd)
