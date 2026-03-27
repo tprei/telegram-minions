@@ -28,6 +28,7 @@ import {
   STACK_CMD,
   DAG_CMD,
   LAND_CMD,
+  RUN_CMD,
   RETRY_CMD,
 } from "../src/command-parser.js"
 
@@ -53,6 +54,7 @@ describe("command-parser constants", () => {
     expect(STACK_CMD).toBe("/stack")
     expect(DAG_CMD).toBe("/dag")
     expect(LAND_CMD).toBe("/land")
+    expect(RUN_CMD).toBe("/run")
     expect(RETRY_CMD).toBe("/retry")
   })
 })
