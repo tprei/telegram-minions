@@ -750,3 +750,86 @@ export function formatConfigHelp(): string {
     `<b>Fields</b>: name, baseUrl, authToken, opusModel, sonnetModel, haikuModel`,
   ].join("\n")
 }
+
+export function formatPinnedStatus(
+  slug: string,
+  repo: string,
+  status: "working" | "completed" | "errored",
+  prUrl?: string,
+  extra?: { label?: string; state?: string },
+): string {
+  const statusIcon = status === "completed" ? "✅" : status === "errored" ? "❌" : "⚡"
+  const statusText = status === "completed" ? "Complete" : status === "errored" ? "Error" : "Working"
+
+  const lines: string[] = [
+    `${statusIcon} <b>${esc(statusText)}</b>  ·  🏷 <code>${esc(slug)}</code>  ·  📦 ${esc(repo)}`,
+  ]
+
+  if (prUrl) {
+    const prNum = prUrl.match(/\/pull\/(\d+)/)?.[1] ?? prUrl
+    lines.push(``)
+    lines.push(`<b>PR:</b> <a href="${esc(prUrl)}">#${esc(prNum)}</a>`)
+  } else if (extra?.label && extra?.state) {
+    lines.push(``)
+    lines.push(`${esc(extra.state)}: ${esc(extra.label)}`)
+  }
+
+  return lines.join("\n")
+}
+
+export function formatPinnedSplitStatus(
+  parentSlug: string,
+  repo: string,
+  children: { slug: string; label: string; prUrl?: string; status: "running" | "done" | "failed" }[],
+): string {
+  const lines: string[] = [
+    `🔀 <b>Split</b>  ·  🏷 <code>${esc(parentSlug)}</code>  ·  📦 ${esc(repo)}`,
+    ``,
+  ]
+
+  const done = children.filter((c) => c.status === "done").length
+  const failed = children.filter((c) => c.status === "failed").length
+  const running = children.filter((c) => c.status === "running").length
+
+  lines.push(`<b>Progress:</b> ${done}/${children.length} done${failed > 0 ? ` · ${failed} failed` : ""}${running > 0 ? ` · ${running} running` : ""}`)
+  lines.push(``)
+
+  for (const child of children) {
+    const icon = child.status === "done" ? "✅" : child.status === "failed" ? "❌" : "⚡"
+    const prPart = child.prUrl ? ` — <a href="${esc(child.prUrl)}">PR</a>` : ""
+    lines.push(`${icon} <code>${esc(child.slug)}</code>${prPart}`)
+  }
+
+  return lines.join("\n")
+}
+
+export function formatPinnedDagStatus(
+  parentSlug: string,
+  repo: string,
+  nodes: { id: string; title: string; prUrl?: string; status: "pending" | "ready" | "running" | "done" | "failed" }[],
+  isStack: boolean,
+): string {
+  const icon = isStack ? "📚" : "🔗"
+  const label = isStack ? "Stack" : "DAG"
+
+  const lines: string[] = [
+    `${icon} <b>${label}</b>  ·  🏷 <code>${esc(parentSlug)}</code>  ·  📦 ${esc(repo)}`,
+    ``,
+  ]
+
+  const done = nodes.filter((n) => n.status === "done").length
+  const failed = nodes.filter((n) => n.status === "failed").length
+  const running = nodes.filter((n) => n.status === "running").length
+  const pending = nodes.filter((n) => n.status === "pending" || n.status === "ready").length
+
+  lines.push(`<b>Progress:</b> ${done}/${nodes.length} done${failed > 0 ? ` · ${failed} failed` : ""}${running > 0 ? ` · ${running} running` : ""}${pending > 0 ? ` · ${pending} pending` : ""}`)
+  lines.push(``)
+
+  for (const node of nodes) {
+    const nodeIcon = node.status === "done" ? "✅" : node.status === "failed" ? "❌" : node.status === "running" ? "⚡" : "⏳"
+    const prPart = node.prUrl ? ` — <a href="${esc(node.prUrl)}">PR</a>` : ""
+    lines.push(`${nodeIcon} <code>${esc(node.id)}</code>: ${esc(node.title)}${prPart}`)
+  }
+
+  return lines.join("\n")
+}

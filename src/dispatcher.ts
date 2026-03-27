@@ -55,6 +55,9 @@ import {
   formatLandProgress,
   formatLandComplete,
   formatLandError,
+  formatPinnedStatus,
+  formatPinnedSplitStatus,
+  formatPinnedDagStatus,
 } from "./format.js"
 import { extractSplitItems, buildSplitChildPrompt } from "./split.js"
 import { extractStackItems, extractDagItems, buildDagChildPrompt } from "./dag-extract.js"
@@ -377,6 +380,67 @@ export class Dispatcher {
     })().catch((err) => {
       log.error({ err }, "updatePinnedSummary error")
     })
+  }
+
+  /** Pin a message in a thread, updating any previously pinned message. */
+  private async pinThreadMessage(session: TopicSession, html: string): Promise<void> {
+    const threadId = session.threadId
+    try {
+      // If we have an existing pinned message, update it
+      if (session.pinnedMessageId != null) {
+        const ok = await this.telegram.editMessage(session.pinnedMessageId, html, threadId)
+        if (ok) return
+        // Edit failed, create new message
+        session.pinnedMessageId = undefined
+      }
+      // Send new message and pin it
+      const { ok, messageId } = await this.telegram.sendMessage(html, threadId)
+      if (ok && messageId != null) {
+        await this.telegram.pinChatMessage(messageId)
+        session.pinnedMessageId = messageId
+      }
+    } catch (err) {
+      log.warn({ err, slug: session.slug }, "pinThreadMessage error")
+    }
+  }
+
+  /** Update the pinned split status in a parent thread showing all children with PR links. */
+  private async updatePinnedSplitStatus(parent: TopicSession): Promise<void> {
+    if (!parent.childThreadIds || parent.childThreadIds.length === 0) return
+
+    const children: { slug: string; label: string; prUrl?: string; status: "running" | "done" | "failed" }[] = []
+
+    for (const id of parent.childThreadIds) {
+      const child = this.topicSessions.get(id)
+      if (!child) continue
+      children.push({
+        slug: child.slug,
+        label: child.splitLabel ?? child.slug,
+        prUrl: child.prUrl,
+        status: child.activeSessionId ? "running" : child.prUrl ? "done" : "failed",
+      })
+    }
+
+    if (children.length === 0) return
+
+    const html = formatPinnedSplitStatus(parent.slug, parent.repo, children)
+    await this.pinThreadMessage(parent, html)
+  }
+
+  /** Update the pinned DAG status in a parent thread showing all nodes with PR links. */
+  private async updatePinnedDagStatus(parent: TopicSession, graph: DagGraph): Promise<void> {
+    const isStack = !graph.nodes.some((n) => n.dependsOn.length > 1) &&
+      graph.nodes.every((n, i) => i === 0 || n.dependsOn.length === 1)
+
+    const nodes = graph.nodes.map((n) => ({
+      id: n.id,
+      title: n.title,
+      prUrl: n.prUrl,
+      status: n.status as "pending" | "ready" | "running" | "done" | "failed",
+    }))
+
+    const html = formatPinnedDagStatus(parent.slug, parent.repo, nodes, isStack)
+    await this.pinThreadMessage(parent, html)
   }
 
   private async poll(): Promise<void> {
@@ -1280,6 +1344,11 @@ export class Dispatcher {
               if (prUrl) {
                 topicSession.prUrl = prUrl
                 this.postSessionDigest(topicSession, prUrl)
+                // Pin the PR link in the thread
+                await this.pinThreadMessage(
+                  topicSession,
+                  formatPinnedStatus(topicSession.slug, topicSession.repo, "completed", prUrl),
+                )
                 if (this.config.ci.babysitEnabled) {
                   if (topicSession.dagId || topicSession.parentThreadId) {
                     const parentId = topicSession.dagId
@@ -1297,6 +1366,12 @@ export class Dispatcher {
                     })
                   }
                 }
+              } else {
+                // No PR - pin the completion status
+                await this.pinThreadMessage(
+                  topicSession,
+                  formatPinnedStatus(topicSession.slug, topicSession.repo, "completed"),
+                )
               }
             }
           }).catch((err) => {
@@ -1732,6 +1807,9 @@ export class Dispatcher {
       formatSplitChildComplete(childSession.slug, state, label, prUrl),
       parent.threadId,
     )
+
+    // Update pinned split status in parent thread
+    await this.updatePinnedSplitStatus(parent)
 
     // Spawn next queued split item if any
     if (parent.pendingSplitItems && parent.pendingSplitItems.length > 0) {
@@ -2357,11 +2435,8 @@ export class Dispatcher {
 
     this.broadcastDag(graph, "dag_updated")
 
-    // Send updated DAG/stack status view
-    await this.telegram.sendMessage(
-      renderDagStatus(graph),
-      parent.threadId,
-    )
+    // Update pinned DAG status in parent thread
+    await this.updatePinnedDagStatus(parent, graph)
 
     // Update DAG section in all PR descriptions
     await this.updateDagPRDescriptions(graph, childSession.cwd)

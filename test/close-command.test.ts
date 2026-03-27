@@ -1,10 +1,15 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
+import fs from "node:fs/promises"
+import path from "node:path"
 import { Dispatcher } from "../src/dispatcher.js"
 import type { TelegramClient } from "../src/telegram.js"
 import { Observer } from "../src/observer.js"
 import type { MinionConfig } from "../src/config-types.js"
 import type { TopicSession } from "../src/types.js"
 import { loggers } from "../src/logger.js"
+
+const WORKSPACE_ROOT = "/tmp/test-workspace-close-command"
+const SESSIONS_FILE = path.join(WORKSPACE_ROOT, ".sessions.json")
 
 function makeMockTelegram(): TelegramClient {
   return {
@@ -20,11 +25,19 @@ function makeMockTelegram(): TelegramClient {
   } as unknown as TelegramClient
 }
 
+async function clearSessionsFile() {
+  try {
+    await fs.unlink(SESSIONS_FILE)
+  } catch {
+    // File doesn't exist, that's fine
+  }
+}
+
 function makeConfig(): MinionConfig {
   return {
     telegram: { token: "test", chatId: 1, allowedUserIds: [1] },
     workspace: {
-      root: "/tmp/test-workspace",
+      root: WORKSPACE_ROOT,
       maxConcurrentSessions: 2,
       sessionTimeoutMs: 60_000,
       staleTtlMs: 86_400_000,
@@ -51,6 +64,12 @@ function makeConfig(): MinionConfig {
   } as MinionConfig
 }
 
+// Ensure workspace directory exists and sessions file is cleared before each test
+beforeEach(async () => {
+  await fs.mkdir(WORKSPACE_ROOT, { recursive: true })
+  await clearSessionsFile()
+})
+
 describe("handleCloseCommand ordering", () => {
   it("deletes topic before starting workspace cleanup", async () => {
     const telegram = makeMockTelegram()
@@ -59,14 +78,12 @@ describe("handleCloseCommand ordering", () => {
     const dispatcher = new Dispatcher(telegram, observer, config)
 
     const callOrder: string[] = []
-
     // Track call order
     const origDelete = telegram.deleteForumTopic as ReturnType<typeof vi.fn>
     origDelete.mockImplementation(async () => {
       callOrder.push("deleteForumTopic")
       return true
     })
-
     // Inject a topic session
     const topicSession: TopicSession = {
       threadId: 100,
@@ -78,38 +95,30 @@ describe("handleCloseCommand ordering", () => {
       mode: "task",
       lastActivityAt: Date.now(),
     }
-
     const topicSessions = (dispatcher as unknown as { topicSessions: Map<number, TopicSession> }).topicSessions
     topicSessions.set(100, topicSession)
-
     // Call handleCloseCommand with threadId (public API)
     await dispatcher.handleCloseCommand(100)
-
     expect(callOrder).toContain("deleteForumTopic")
     expect(origDelete).toHaveBeenCalledWith(100)
     // Topic session should be removed from the map
     expect(topicSessions.has(100)).toBe(false)
   })
-
   it("deletes topic before killing active session process", async () => {
     const telegram = makeMockTelegram()
     const config = makeConfig()
     const observer = new Observer(telegram, 1)
     const dispatcher = new Dispatcher(telegram, observer, config)
-
     const callOrder: string[] = []
-
     ;(telegram.deleteForumTopic as ReturnType<typeof vi.fn>).mockImplementation(async () => {
       callOrder.push("deleteForumTopic")
       return true
     })
-
     const mockKill = vi.fn().mockImplementation(async () => {
       callOrder.push("kill")
       // Simulate slow kill
       await new Promise((r) => setTimeout(r, 50))
     })
-
     const topicSession: TopicSession = {
       threadId: 200,
       repo: "test-repo",
@@ -121,18 +130,14 @@ describe("handleCloseCommand ordering", () => {
       lastActivityAt: Date.now(),
       activeSessionId: "active-session-id",
     }
-
     const topicSessions = (dispatcher as unknown as { topicSessions: Map<number, TopicSession> }).topicSessions
     topicSessions.set(200, topicSession)
-
     const sessions = (dispatcher as unknown as { sessions: Map<number, { handle: { kill: typeof mockKill } }> }).sessions
     sessions.set(200, {
       handle: { kill: mockKill },
     } as unknown as { handle: { kill: typeof mockKill } })
-
     // Call handleCloseCommand with threadId (public API)
     await dispatcher.handleCloseCommand(200)
-
     // deleteForumTopic must have been called BEFORE kill
     expect(callOrder[0]).toBe("deleteForumTopic")
     // kill happens in background, give it time to complete
@@ -140,26 +145,20 @@ describe("handleCloseCommand ordering", () => {
     expect(callOrder).toContain("kill")
   })
 })
-
 describe("closeChildSessions warning for high child count", () => {
   let warnSpy: ReturnType<typeof vi.spyOn>
-
   beforeEach(() => {
     warnSpy = vi.spyOn(loggers.dispatcher, "warn").mockImplementation(() => loggers.dispatcher)
   })
-
   afterEach(() => {
     warnSpy.mockRestore()
   })
-
   it("logs warning when closing more than 10 children", async () => {
     const telegram = makeMockTelegram()
     const config = makeConfig()
     const observer = new Observer(telegram, 1)
     const dispatcher = new Dispatcher(telegram, observer, config)
-
     const topicSessions = (dispatcher as unknown as { topicSessions: Map<number, TopicSession> }).topicSessions
-
     // Create parent session
     const parentSession: TopicSession = {
       threadId: 1000,
@@ -173,7 +172,6 @@ describe("closeChildSessions warning for high child count", () => {
       childThreadIds: [],
     }
     topicSessions.set(1000, parentSession)
-
     // Create 15 child sessions (exceeds threshold of 10)
     for (let i = 0; i < 15; i++) {
       const childSession: TopicSession = {
@@ -190,9 +188,7 @@ describe("closeChildSessions warning for high child count", () => {
       topicSessions.set(2000 + i, childSession)
       parentSession.childThreadIds!.push(2000 + i)
     }
-
     await dispatcher.handleCloseCommand(1000)
-
     // Verify warning was logged
     expect(warnSpy).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -200,18 +196,15 @@ describe("closeChildSessions warning for high child count", () => {
         parentThreadId: 1000,
         parentSlug: "parent-slug",
       }),
-      "Unusually high number of children to close - possible bug?",
+      "Unusually high number of children to close - possible bug?"
     )
   })
-
   it("does not log warning when closing 10 or fewer children", async () => {
     const telegram = makeMockTelegram()
     const config = makeConfig()
     const observer = new Observer(telegram, 1)
     const dispatcher = new Dispatcher(telegram, observer, config)
-
     const topicSessions = (dispatcher as unknown as { topicSessions: Map<number, TopicSession> }).topicSessions
-
     // Create parent session
     const parentSession: TopicSession = {
       threadId: 3000,
@@ -225,7 +218,6 @@ describe("closeChildSessions warning for high child count", () => {
       childThreadIds: [],
     }
     topicSessions.set(3000, parentSession)
-
     // Create exactly 10 child sessions (at threshold, should NOT warn)
     for (let i = 0; i < 10; i++) {
       const childSession: TopicSession = {
@@ -242,10 +234,155 @@ describe("closeChildSessions warning for high child count", () => {
       topicSessions.set(4000 + i, childSession)
       parentSession.childThreadIds!.push(4000 + i)
     }
-
     await dispatcher.handleCloseCommand(3000)
-
     // Verify warning was NOT logged
     expect(warnSpy).not.toHaveBeenCalled()
+  })
+})
+describe("closeChildSessions orphan detection", () => {
+  it("only closes actual children, not unrelated sessions", async () => {
+    const telegram = makeMockTelegram()
+    const config = makeConfig()
+    const observer = new Observer(telegram, 1)
+    const dispatcher = new Dispatcher(telegram, observer, config)
+    const topicSessions = (dispatcher as unknown as { topicSessions: Map<number, TopicSession> }).topicSessions
+    // Create parent session
+    const parentSession: TopicSession = {
+      threadId: 5000,
+      repo: "test-repo",
+      cwd: "/tmp/workspace-parent",
+      slug: "parent-slug-orphan-test",
+      conversation: [],
+      pendingFeedback: [],
+      mode: "task",
+      lastActivityAt: Date.now(),
+      childThreadIds: [],
+    }
+    topicSessions.set(5000, parentSession)
+    // Create multiple UNRELATED sessions (no parentThreadId set)
+    for (let i = 0; i < 5; i++) {
+      const unrelated: TopicSession = {
+        threadId: 6000 + i,
+        repo: "other-repo",
+        cwd: `/tmp/workspace-unrelated-${i}`,
+        slug: `unrelated-slug-${i}`,
+        conversation: [],
+        pendingFeedback: [],
+        mode: "task",
+        lastActivityAt: Date.now(),
+        // Note: parentThreadId is undefined (not set)
+      }
+      topicSessions.set(6000 + i, unrelated)
+    }
+    // Create more unrelated sessions with a DIFFERENT parentThreadId
+    const otherParentId = 9999
+    for (let i = 0; i < 3; i++) {
+      const otherChild: TopicSession = {
+        threadId: 7000 + i,
+        repo: "other-repo-2",
+        cwd: `/tmp/workspace-other-child-${i}`,
+        slug: `other-child-slug-${i}`,
+        conversation: [],
+        pendingFeedback: [],
+        mode: "task",
+        lastActivityAt: Date.now(),
+        parentThreadId: otherParentId, // Different parent
+      }
+      topicSessions.set(7000 + i, otherChild)
+    }
+    // Create ONE actual child of the parent
+    const actualChild: TopicSession = {
+      threadId: 8000,
+      repo: "test-repo",
+      cwd: "/tmp/workspace-actual-child",
+      slug: "actual-child-slug",
+      conversation: [],
+      pendingFeedback: [],
+      mode: "task",
+      lastActivityAt: Date.now(),
+      parentThreadId: 5000, // Points to our parent
+    }
+    topicSessions.set(8000, actualChild)
+    parentSession.childThreadIds!.push(8000)
+    // Verify setup: should have 10 sessions total (parent + 5 unrelated + 3 other children + 1 actual child)
+    const expectedCount = 1 + 5 + 3 + 1
+    expect(topicSessions.size).toBe(expectedCount)
+    // Close the parent
+    await dispatcher.handleCloseCommand(5000)
+    // CRITICAL: Only the actual child (threadId 8000) should be deleted, NOT all sessions
+    // The parent (5000) should also be deleted
+    expect(topicSessions.has(5000)).toBe(false) // Parent deleted
+    expect(topicSessions.has(8000)).toBe(false) // Actual child deleted
+    // All unrelated sessions should STILL EXIST
+    for (let i = 0; i < 5; i++) {
+      expect(topicSessions.has(6000 + i)).toBe(true)
+    }
+    for (let i = 0; i < 3; i++) {
+      expect(topicSessions.has(7000 + i)).toBe(true)
+    }
+    // Should have 8 sessions remaining (5 + 3 unrelated)
+    expect(topicSessions.size).toBe(8)
+    // Verify deleteForumTopic was called only for parent and actual child
+    const deleteCalls = (telegram.deleteForumTopic as ReturnType<typeof vi.fn>).mock.calls
+    const deletedThreadIds = deleteCalls.map((call) => call[0])
+    expect(deletedThreadIds).toContain(5000) // Parent
+    expect(deletedThreadIds).toContain(8000) // Actual child
+    expect(deletedThreadIds).not.toContain(6000) // Unrelated
+    expect(deletedThreadIds).not.toContain(6001) // Unrelated
+    expect(deletedThreadIds).not.toContain(7000) // Other parent's child
+  })
+  it("handles orphaned children not in childThreadIds array", async () => {
+    const telegram = makeMockTelegram()
+    const config = makeConfig()
+    const observer = new Observer(telegram, 1)
+    const dispatcher = new Dispatcher(telegram, observer, config)
+    const topicSessions = (dispatcher as unknown as { topicSessions: Map<number, TopicSession> }).topicSessions
+    // Create parent session
+    const parentSession: TopicSession = {
+      threadId: 5100,
+      repo: "test-repo",
+      cwd: "/tmp/workspace-parent-orphan",
+      slug: "parent-orphan-test",
+      conversation: [],
+      pendingFeedback: [],
+      mode: "task",
+      lastActivityAt: Date.now(),
+      childThreadIds: [], // Empty - child is not tracked here
+    }
+    topicSessions.set(5100, parentSession)
+    // Create an orphaned child (parentThreadId points to parent, but not in childThreadIds)
+    const orphanedChild: TopicSession = {
+      threadId: 8100,
+      repo: "test-repo",
+      cwd: "/tmp/workspace-orphan-child",
+      slug: "orphan-child-slug",
+      conversation: [],
+      pendingFeedback: [],
+      mode: "task",
+      lastActivityAt: Date.now(),
+      parentThreadId: 5100, // Points to parent, but parent.childThreadIds is empty
+    }
+    topicSessions.set(8100, orphanedChild)
+    // Create an unrelated session
+    const unrelated: TopicSession = {
+      threadId: 9100,
+      repo: "other-repo",
+      cwd: "/tmp/workspace-unrelated-orphan",
+      slug: "unrelated-orphan-slug",
+      conversation: [],
+      pendingFeedback: [],
+      mode: "task",
+      lastActivityAt: Date.now(),
+    }
+    topicSessions.set(9100, unrelated)
+    expect(topicSessions.size).toBe(3)
+    // Close the parent
+    await dispatcher.handleCloseCommand(5100)
+    // Parent and orphaned child should be deleted
+    expect(topicSessions.has(5100)).toBe(false)
+    expect(topicSessions.has(8100)).toBe(false)
+    // Unrelated session should remain
+    expect(topicSessions.has(9100)).toBe(true)
+    expect(topicSessions.size).toBe(1)
   })
 })

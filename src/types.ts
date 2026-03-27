@@ -166,5 +166,6 @@ export interface TopicSession {
   dagNodeId?: string
   pendingSplitItems?: { title: string; description: string }[]
   allSplitItems?: { title: string; description: string }[]
+  pinnedMessageId?: number
   pendingDagItems?: PendingDagItem[]
 }
