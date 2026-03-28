@@ -2797,7 +2797,7 @@ export class Dispatcher {
 
         // Clean up the branch separately — swallow errors since the merge already succeeded
         if (node.branch) {
-          const worktreePath = this.findWorktreePathForBranch(node, graph)
+          const worktreePath = this.findWorktreePathForBranch(node)
           cleanupMergedBranch(node.branch, worktreePath, anyCwd)
         }
 
@@ -2882,7 +2882,7 @@ export class Dispatcher {
   /**
    * Find the worktree path for a DAG node's branch by looking up its child session cwd.
    */
-  private findWorktreePathForBranch(node: DagNode, _graph: DagGraph): string | undefined {
+  private findWorktreePathForBranch(node: DagNode): string | undefined {
     if (node.threadId) {
       const child = this.topicSessions.get(node.threadId)
       if (child?.cwd) return child.cwd
