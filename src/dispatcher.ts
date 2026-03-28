@@ -1401,7 +1401,12 @@ export class Dispatcher {
         this.persistTopicSessions().catch(() => {}) // best effort
         this.cleanBuildArtifacts(topicSession.cwd)
 
-        if (!parentNotified) {
+        // Only notify from the sync path for non-completed sessions.
+        // Completed task sessions are handled inside the .then() chain above —
+        // the microtask hasn't run yet, so checking parentNotified here would
+        // always see false and cause a duplicate notification.
+        if (!parentNotified && (state === "errored" || topicSession.mode !== "task")) {
+          parentNotified = true
           this.notifyParentOfChildComplete(topicSession, state).catch((err) => {
             log.warn({ err, slug: topicSession.slug }, "parent notify error")
           })
