@@ -15,10 +15,12 @@ interface StoreData {
 
 export class SessionStore {
   private readonly filePath: string
+  private readonly backupPath: string
   private readonly ttlMs: number
 
   constructor(workspaceRoot: string, ttlMs = DEFAULT_TTL_MS) {
     this.filePath = path.join(workspaceRoot, STORE_FILENAME)
+    this.backupPath = this.filePath + ".bak"
     this.ttlMs = ttlMs
   }
 
@@ -29,6 +31,12 @@ export class SessionStore {
     try {
       await fs.writeFile(tmp, JSON.stringify(data), "utf-8")
       await fs.rename(tmp, this.filePath)
+      // Keep a backup of the last good write for crash recovery
+      try {
+        await fs.copyFile(this.filePath, this.backupPath)
+      } catch {
+        // non-fatal
+      }
     } catch (err) {
       log.error({ err, operation: "store.save" }, "failed to save sessions")
       captureException(err, { operation: "store.save" })
@@ -39,40 +47,63 @@ export class SessionStore {
     const active = new Map<number, TopicSession>()
     const expired = new Map<number, TopicSession>()
     let offset = 0
-    try {
-      const raw = await fs.readFile(this.filePath, "utf-8")
-      const parsed = JSON.parse(raw)
 
-      // Handle both old format (array) and new format (object with sessions + offset)
-      let entries: [number, TopicSession][]
-      if (Array.isArray(parsed)) {
-        entries = parsed as [number, TopicSession][]
-      } else {
-        entries = (parsed as StoreData).sessions
+    const result = await this.loadFile(this.filePath)
+    if (!result) {
+      // Main file is missing or corrupt — try backup
+      const backup = await this.loadFile(this.backupPath)
+      if (backup) {
+        log.warn("main store file missing/corrupt, recovered from backup")
+        this.parseEntries(backup.parsed, backup.raw, active, expired)
+        offset = backup.offset
+      }
+      return { active, expired, offset }
+    }
+
+    this.parseEntries(result.parsed, result.raw, active, expired)
+    offset = result.offset
+    return { active, expired, offset }
+  }
+
+  private async loadFile(filePath: string): Promise<{ parsed: unknown; raw: string; offset: number } | null> {
+    try {
+      const raw = await fs.readFile(filePath, "utf-8")
+      const parsed = JSON.parse(raw)
+      let offset = 0
+      if (parsed && !Array.isArray(parsed)) {
         offset = (parsed as StoreData).offset || 0
       }
-
-      const now = Date.now()
-      for (const [threadId, session] of entries) {
-        session.activeSessionId = undefined
-        // Consider both lastActivityAt and interruptedAt for staleness
-        // Interrupted sessions expire based on when they were interrupted
-        const staleTime = session.interruptedAt ?? session.lastActivityAt
-        if (now - staleTime < this.ttlMs) {
-          active.set(threadId, session)
-        } else {
-          // Clear interrupted flag on expired sessions since they're no longer recoverable
-          session.interruptedAt = undefined
-          expired.set(threadId, session)
-        }
-      }
+      return { parsed, raw, offset }
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
         const isBadJson = err instanceof SyntaxError
-        log.error({ err, isBadJson, operation: "store.load" }, isBadJson ? "corrupt file, starting fresh" : "failed to load sessions")
+        log.error({ err, isBadJson, path: filePath, operation: "store.load" }, isBadJson ? "corrupt file" : "failed to load sessions")
         if (!isBadJson) captureException(err, { operation: "store.load" })
       }
+      return null
     }
-    return { active, expired, offset }
+  }
+
+  private parseEntries(parsed: unknown, _raw: string, active: Map<number, TopicSession>, expired: Map<number, TopicSession>): void {
+    let entries: [number, TopicSession][]
+    if (Array.isArray(parsed)) {
+      entries = parsed as [number, TopicSession][]
+    } else if (parsed && typeof parsed === "object") {
+      entries = (parsed as StoreData).sessions ?? []
+    } else {
+      entries = []
+    }
+
+    const now = Date.now()
+    for (const [threadId, session] of entries) {
+      session.activeSessionId = undefined
+      const staleTime = session.interruptedAt ?? session.lastActivityAt
+      if (now - staleTime < this.ttlMs) {
+        active.set(threadId, session)
+      } else {
+        session.interruptedAt = undefined
+        expired.set(threadId, session)
+      }
+    }
   }
 }

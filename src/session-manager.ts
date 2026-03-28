@@ -174,6 +174,23 @@ export function prepareWorkspace(
 
       const branch = `minion/${slug}`
       const startRef = startBranch ?? resolveDefaultBranch(bareDir, gitOpts, repoUrl)
+
+      // Clean up any leftover worktree and branch from a previous session
+      // with the same slug (hash collisions are likely with ~4.5k combinations)
+      if (fs.existsSync(workDir)) {
+        try {
+          execSync(`git worktree remove --force ${JSON.stringify(workDir)}`, { ...gitOpts, cwd: bareDir })
+        } catch {
+          fs.rmSync(workDir, { recursive: true, force: true })
+        }
+      }
+      try {
+        execSync(`git worktree prune`, { ...gitOpts, cwd: bareDir })
+        execSync(`git branch -D ${JSON.stringify(branch)}`, { ...gitOpts, cwd: bareDir })
+      } catch {
+        // branch/worktree doesn't exist, that's fine
+      }
+
       log.debug({ workDir, branch, startRef }, "adding worktree")
       execSync(
         `git worktree add ${JSON.stringify(workDir)} -b ${JSON.stringify(branch)} ${startRef}`,
@@ -217,6 +234,17 @@ export async function removeWorkspace(
           { cwd: bareDir, timeout: 30_000 },
         )
         log.debug({ cwd: topicSession.cwd }, "removed worktree")
+        // Clean up the branch so slug collisions don't block future sessions
+        if (topicSession.branch) {
+          try {
+            await execFileAsync("git", ["branch", "-D", topicSession.branch], {
+              cwd: bareDir, timeout: 10_000,
+            })
+            log.debug({ branch: topicSession.branch }, "removed branch")
+          } catch {
+            // branch may not exist
+          }
+        }
         return
       }
     }
