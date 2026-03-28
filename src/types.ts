@@ -116,6 +116,8 @@ export type SessionState = "spawning" | "working" | "idle" | "completed" | "erro
 
 export type SessionMode = "task" | "plan" | "think" | "review" | "ci-fix" | "dag-review"
 
+export type ShipPhase = "plan" | "architect" | "dag"
+
 export interface SessionMeta {
   sessionId: string
   threadId: number
@@ -169,4 +171,5 @@ export interface TopicSession {
   allSplitItems?: { title: string; description: string }[]
   pinnedMessageId?: number
   pendingDagItems?: PendingDagItem[]
+  shipPhase?: ShipPhase
 }

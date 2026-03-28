@@ -46,6 +46,7 @@ export type {
   TopicSession,
   SessionMode,
   SessionState,
+  ShipPhase,
   GooseStreamEvent,
   GooseMessage,
 } from "./types.js"
