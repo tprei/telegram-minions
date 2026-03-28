@@ -1,4 +1,4 @@
-import { execSync } from "node:child_process"
+import { execFile as execFileCb } from "node:child_process"
 import type { CiConfig } from "./config-types.js"
 import type { QualityReport } from "./quality-gates.js"
 import { loggers } from "./logger.js"
@@ -24,17 +24,63 @@ export interface CIFailureDetail {
 
 const LOG_TAIL_CHARS = 3000
 
+const TERMINAL_ERROR_PATTERNS = [
+  "could not resolve to a repository",
+  "could not resolve to a pullrequest",
+  "http 404",
+  "http 403",
+  "resource not accessible",
+  "must have push access",
+]
+
+class TerminalGhError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "TerminalGhError"
+  }
+}
+
+function isTerminalError(stderr: string): boolean {
+  const lower = stderr.toLowerCase()
+  return TERMINAL_ERROR_PATTERNS.some((p) => lower.includes(p))
+}
+
+function execGh(
+  args: string[],
+  opts: { cwd: string; timeoutMs?: number },
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFileCb("gh", args, {
+      cwd: opts.cwd,
+      timeout: opts.timeoutMs ?? 30_000,
+      encoding: "utf8",
+      env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+      maxBuffer: 10 * 1024 * 1024,
+    }, (err, stdout, stderr) => {
+      if (err) {
+        if (isTerminalError(String(stderr))) {
+          reject(new TerminalGhError(String(stderr).trim()))
+        } else {
+          reject(err)
+        }
+        return
+      }
+      resolve(String(stdout).trim())
+    })
+  })
+}
+
 export function extractPRUrl(conversationText: string): string | null {
   const match = conversationText.match(/https:\/\/github\.com\/[^\s)*\]>]+\/pull\/\d+/)
   return match ? match[0] : null
 }
 
-export function findPRByBranch(branch: string, cwd: string): string | null {
+export async function findPRByBranch(branch: string, cwd: string): Promise<string | null> {
   try {
-    const output = execSync(
-      `gh pr list --head ${JSON.stringify(branch)} --json url --jq '.[0].url'`,
-      { cwd, timeout: 30_000, stdio: ["pipe", "pipe", "pipe"], env: { ...process.env } },
-    ).toString().trim()
+    const output = await execGh(
+      ["pr", "list", "--head", branch, "--json", "url", "--jq", ".[0].url"],
+      { cwd },
+    )
     return output || null
   } catch {
     return null
@@ -47,84 +93,81 @@ export async function waitForCI(prUrl: string, cwd: string, ciConfig: CiConfig):
   const startedAt = Date.now()
 
   while (Date.now() - startedAt < timeoutMs) {
-    const checks = getCheckStatus(prUrl, cwd)
-    // On error (null), continue polling - don't give up on transient failures
-    if (checks !== null) {
-      const pending = checks.filter((c) => c.bucket === "pending")
-      if (pending.length === 0 && checks.length > 0) {
-        const failed = checks.filter((c) => c.bucket === "fail")
-        return { passed: failed.length === 0, checks, timedOut: false }
+    const result = await getCheckStatus(prUrl, cwd)
+
+    if (result?.terminal) {
+      log.warn({ prUrl }, "terminal error from gh, aborting CI poll")
+      return { passed: false, checks: [], timedOut: false }
+    }
+
+    if (result !== null) {
+      const pending = result.checks.filter((c) => c.bucket === "pending")
+      if (pending.length === 0 && result.checks.length > 0) {
+        const failed = result.checks.filter((c) => c.bucket === "fail")
+        return { passed: failed.length === 0, checks: result.checks, timedOut: false }
       }
     }
 
     await sleep(intervalMs)
   }
 
-  const finalChecks = getCheckStatus(prUrl, cwd) ?? []
-  return { passed: false, checks: finalChecks, timedOut: true }
+  const finalResult = await getCheckStatus(prUrl, cwd)
+  return { passed: false, checks: finalResult?.checks ?? [], timedOut: true }
 }
 
-function getCheckStatus(prUrl: string, cwd: string): CICheckResult[] | null {
+interface CheckStatusResult {
+  checks: CICheckResult[]
+  terminal: boolean
+}
+
+async function getCheckStatus(prUrl: string, cwd: string): Promise<CheckStatusResult | null> {
   try {
-    const output = execSync(
-      `gh pr checks ${JSON.stringify(prUrl)} --json name,state,bucket`,
-      {
-        cwd,
-        timeout: 30_000,
-        stdio: ["ignore", "pipe", "pipe"],
-        env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
-      },
-    ).toString().trim()
+    const output = await execGh(
+      ["pr", "checks", prUrl, "--json", "name,state,bucket"],
+      { cwd },
+    )
 
     if (!output || output === "[]") {
       log.debug({ prUrl }, "gh pr checks returned empty")
-      return []
+      return { checks: [], terminal: false }
     }
     const checks = JSON.parse(output) as CICheckResult[]
     log.debug({ prUrl, checkCount: checks.length }, "gh pr checks returned")
-    return checks
+    return { checks, terminal: false }
   } catch (err) {
+    if (err instanceof TerminalGhError) {
+      log.error({ err, prUrl }, "gh pr checks failed with terminal error")
+      return { checks: [], terminal: true }
+    }
     log.error({ err, prUrl }, "gh pr checks failed")
     return null
   }
 }
 
-export function getFailedCheckLogs(prUrl: string, cwd: string): CIFailureDetail[] {
-  const runId = getLatestRunId(prUrl, cwd)
+export async function getFailedCheckLogs(prUrl: string, cwd: string): Promise<CIFailureDetail[]> {
+  const runId = await getLatestRunId(prUrl, cwd)
   if (!runId) return []
 
   try {
-    const output = execSync(
-      `gh run view ${runId} --log-failed`,
-      {
-        cwd,
-        timeout: 60_000,
-        stdio: ["ignore", "pipe", "pipe"],
-        env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
-      },
-    ).toString()
-
+    const output = await execGh(
+      ["run", "view", runId, "--log-failed"],
+      { cwd, timeoutMs: 60_000 },
+    )
     return parseFailedLogs(output)
   } catch {
     return []
   }
 }
 
-function getLatestRunId(prUrl: string, cwd: string): string | null {
-  const branchMatch = getBranchFromPR(prUrl, cwd)
-  if (!branchMatch) return null
+async function getLatestRunId(prUrl: string, cwd: string): Promise<string | null> {
+  const branch = await getBranchFromPR(prUrl, cwd)
+  if (!branch) return null
 
   try {
-    const output = execSync(
-      `gh run list --branch ${JSON.stringify(branchMatch)} -L 1 --json databaseId,status,conclusion`,
-      {
-        cwd,
-        timeout: 30_000,
-        stdio: ["ignore", "pipe", "pipe"],
-        env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
-      },
-    ).toString().trim()
-
+    const output = await execGh(
+      ["run", "list", "--branch", branch, "-L", "1", "--json", "databaseId,status,conclusion"],
+      { cwd },
+    )
     const runs = JSON.parse(output) as { databaseId: number }[]
     return runs[0]?.databaseId?.toString() ?? null
   } catch {
@@ -132,18 +175,12 @@ function getLatestRunId(prUrl: string, cwd: string): string | null {
   }
 }
 
-function getBranchFromPR(prUrl: string, cwd: string): string | null {
+async function getBranchFromPR(prUrl: string, cwd: string): Promise<string | null> {
   try {
-    const output = execSync(
-      `gh pr view ${JSON.stringify(prUrl)} --json headRefName --jq .headRefName`,
-      {
-        cwd,
-        timeout: 30_000,
-        stdio: ["ignore", "pipe", "pipe"],
-        env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
-      },
-    ).toString().trim()
-
+    const output = await execGh(
+      ["pr", "view", prUrl, "--json", "headRefName", "--jq", ".headRefName"],
+      { cwd },
+    )
     return output || null
   } catch {
     return null
@@ -282,18 +319,12 @@ export function buildMergeConflictPrompt(
 
 export type MergeableState = "MERGEABLE" | "CONFLICTING" | "UNKNOWN"
 
-export function checkPRMergeability(prUrl: string, cwd: string): MergeableState | null {
+export async function checkPRMergeability(prUrl: string, cwd: string): Promise<MergeableState | null> {
   try {
-    const output = execSync(
-      `gh pr view ${JSON.stringify(prUrl)} --json mergeable --jq .mergeable`,
-      {
-        cwd,
-        timeout: 30_000,
-        stdio: ["ignore", "pipe", "pipe"],
-        env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
-      },
-    ).toString().trim()
-
+    const output = await execGh(
+      ["pr", "view", prUrl, "--json", "mergeable", "--jq", ".mergeable"],
+      { cwd },
+    )
     if (output === "MERGEABLE" || output === "CONFLICTING" || output === "UNKNOWN") {
       return output
     }
