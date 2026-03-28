@@ -4,11 +4,30 @@ import type { CiConfig } from "../src/config-types.js"
 
 vi.mock("node:child_process", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:child_process")>()
-  return { ...actual, execSync: vi.fn(actual.execSync) }
+  return { ...actual, execFile: vi.fn() }
 })
 
-import { execSync } from "node:child_process"
-const mockExecSync = vi.mocked(execSync)
+import { execFile } from "node:child_process"
+const mockExecFile = vi.mocked(execFile)
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+function mockSuccess(output: string): void {
+  mockExecFile.mockImplementation((...allArgs: any[]) => {
+    const cb = allArgs[allArgs.length - 1] as (err: Error | null, stdout: string, stderr: string) => void
+    cb(null, output, "")
+    return undefined as any
+  })
+}
+
+function mockError(stderr = "gh failed"): void {
+  const err = Object.assign(new Error("Command failed"), { stderr })
+  mockExecFile.mockImplementation((...allArgs: any[]) => {
+    const cb = allArgs[allArgs.length - 1] as (err: Error | null, stdout: string, stderr: string) => void
+    cb(err, "", stderr)
+    return undefined as any
+  })
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */
 
 describe("extractPRUrl", () => {
   it("extracts a PR URL from conversation text", () => {
@@ -51,19 +70,19 @@ describe("findPRByBranch", () => {
     vi.restoreAllMocks()
   })
 
-  it("returns PR URL when gh pr list finds a match", () => {
-    mockExecSync.mockReturnValue(Buffer.from("https://github.com/org/repo/pull/42\n"))
-    expect(findPRByBranch("minion/test-slug", "/tmp")).toBe("https://github.com/org/repo/pull/42")
+  it("returns PR URL when gh pr list finds a match", async () => {
+    mockSuccess("https://github.com/org/repo/pull/42\n")
+    expect(await findPRByBranch("minion/test-slug", "/tmp")).toBe("https://github.com/org/repo/pull/42")
   })
 
-  it("returns null when gh pr list returns empty output", () => {
-    mockExecSync.mockReturnValue(Buffer.from("\n"))
-    expect(findPRByBranch("minion/test-slug", "/tmp")).toBeNull()
+  it("returns null when gh pr list returns empty output", async () => {
+    mockSuccess("\n")
+    expect(await findPRByBranch("minion/test-slug", "/tmp")).toBeNull()
   })
 
-  it("returns null when gh pr list throws", () => {
-    mockExecSync.mockImplementation(() => { throw new Error("gh not found") })
-    expect(findPRByBranch("minion/test-slug", "/tmp")).toBeNull()
+  it("returns null when gh pr list throws", async () => {
+    mockError("gh not found")
+    expect(await findPRByBranch("minion/test-slug", "/tmp")).toBeNull()
   })
 })
 
@@ -277,50 +296,48 @@ describe("buildMergeConflictPrompt", () => {
 })
 
 describe("checkPRMergeability", () => {
-  afterEach(() => { mockExecSync.mockReset() })
+  afterEach(() => { mockExecFile.mockReset() })
 
-  it("returns MERGEABLE when gh reports mergeable", () => {
-    mockExecSync.mockReturnValue(Buffer.from("MERGEABLE\n"))
-    expect(checkPRMergeability("https://github.com/org/repo/pull/1", "/tmp")).toBe("MERGEABLE")
+  it("returns MERGEABLE when gh reports mergeable", async () => {
+    mockSuccess("MERGEABLE\n")
+    expect(await checkPRMergeability("https://github.com/org/repo/pull/1", "/tmp")).toBe("MERGEABLE")
   })
 
-  it("returns CONFLICTING when gh reports conflicts", () => {
-    mockExecSync.mockReturnValue(Buffer.from("CONFLICTING\n"))
-    expect(checkPRMergeability("https://github.com/org/repo/pull/1", "/tmp")).toBe("CONFLICTING")
+  it("returns CONFLICTING when gh reports conflicts", async () => {
+    mockSuccess("CONFLICTING\n")
+    expect(await checkPRMergeability("https://github.com/org/repo/pull/1", "/tmp")).toBe("CONFLICTING")
   })
 
-  it("returns UNKNOWN when gh reports unknown", () => {
-    mockExecSync.mockReturnValue(Buffer.from("UNKNOWN\n"))
-    expect(checkPRMergeability("https://github.com/org/repo/pull/1", "/tmp")).toBe("UNKNOWN")
+  it("returns UNKNOWN when gh reports unknown", async () => {
+    mockSuccess("UNKNOWN\n")
+    expect(await checkPRMergeability("https://github.com/org/repo/pull/1", "/tmp")).toBe("UNKNOWN")
   })
 
-  it("returns null when gh command fails", () => {
-    mockExecSync.mockImplementation(() => { throw new Error("gh failed") })
-    expect(checkPRMergeability("https://github.com/org/repo/pull/1", "/tmp")).toBeNull()
+  it("returns null when gh command fails", async () => {
+    mockError("gh failed")
+    expect(await checkPRMergeability("https://github.com/org/repo/pull/1", "/tmp")).toBeNull()
   })
 
-  it("returns null for unexpected output", () => {
-    mockExecSync.mockReturnValue(Buffer.from("SOMETHING_ELSE\n"))
-    expect(checkPRMergeability("https://github.com/org/repo/pull/1", "/tmp")).toBeNull()
+  it("returns null for unexpected output", async () => {
+    mockSuccess("SOMETHING_ELSE\n")
+    expect(await checkPRMergeability("https://github.com/org/repo/pull/1", "/tmp")).toBeNull()
   })
 })
 
 describe("waitForCI", () => {
   const testConfig: CiConfig = {
-    pollIntervalMs: 10, // Fast polling for tests
-    pollTimeoutMs: 100, // Short timeout for tests
+    pollIntervalMs: 10,
+    pollTimeoutMs: 100,
     maxRetries: 2,
   }
 
-  beforeEach(() => { mockExecSync.mockReset() })
+  beforeEach(() => { mockExecFile.mockReset() })
 
   it("returns success when all checks pass immediately", async () => {
-    mockExecSync.mockReturnValue(Buffer.from(
-      JSON.stringify([
-        { name: "test", state: "success", bucket: "pass" },
-        { name: "lint", state: "success", bucket: "pass" },
-      ])
-    ))
+    mockSuccess(JSON.stringify([
+      { name: "test", state: "success", bucket: "pass" },
+      { name: "lint", state: "success", bucket: "pass" },
+    ]))
 
     const result = await waitForCI("https://github.com/org/repo/pull/1", "/tmp", testConfig)
 
@@ -330,12 +347,10 @@ describe("waitForCI", () => {
   })
 
   it("returns failure when some checks fail", async () => {
-    mockExecSync.mockReturnValue(Buffer.from(
-      JSON.stringify([
-        { name: "test", state: "success", bucket: "pass" },
-        { name: "lint", state: "failure", bucket: "fail" },
-      ])
-    ))
+    mockSuccess(JSON.stringify([
+      { name: "test", state: "success", bucket: "pass" },
+      { name: "lint", state: "failure", bucket: "fail" },
+    ]))
 
     const result = await waitForCI("https://github.com/org/repo/pull/1", "/tmp", testConfig)
 
@@ -346,16 +361,15 @@ describe("waitForCI", () => {
 
   it("continues polling when checks are pending", async () => {
     let callCount = 0
-    mockExecSync.mockImplementation(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockExecFile.mockImplementation((...allArgs: any[]) => {
       callCount++
-      if (callCount < 3) {
-        return Buffer.from(JSON.stringify([
-          { name: "test", state: "pending", bucket: "pending" },
-        ]))
-      }
-      return Buffer.from(JSON.stringify([
-        { name: "test", state: "success", bucket: "pass" },
-      ]))
+      const cb = allArgs[allArgs.length - 1] as (err: Error | null, stdout: string, stderr: string) => void
+      const output = callCount < 3
+        ? JSON.stringify([{ name: "test", state: "pending", bucket: "pending" }])
+        : JSON.stringify([{ name: "test", state: "success", bucket: "pass" }])
+      cb(null, output, "")
+      return undefined as any // eslint-disable-line @typescript-eslint/no-explicit-any
     })
 
     const result = await waitForCI("https://github.com/org/repo/pull/1", "/tmp", testConfig)
@@ -367,14 +381,17 @@ describe("waitForCI", () => {
 
   it("continues polling on transient errors (null returns)", async () => {
     let callCount = 0
-    mockExecSync.mockImplementation(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockExecFile.mockImplementation((...allArgs: any[]) => {
       callCount++
+      const cb = allArgs[allArgs.length - 1] as (err: Error | null, stdout: string, stderr: string) => void
       if (callCount < 3) {
-        throw new Error("Transient network error")
+        const err = Object.assign(new Error("Transient network error"), { stderr: "network timeout" })
+        cb(err, "", "network timeout")
+      } else {
+        cb(null, JSON.stringify([{ name: "test", state: "success", bucket: "pass" }]), "")
       }
-      return Buffer.from(JSON.stringify([
-        { name: "test", state: "success", bucket: "pass" },
-      ]))
+      return undefined as any // eslint-disable-line @typescript-eslint/no-explicit-any
     })
 
     const result = await waitForCI("https://github.com/org/repo/pull/1", "/tmp", testConfig)
@@ -385,9 +402,7 @@ describe("waitForCI", () => {
   })
 
   it("times out when checks never complete", async () => {
-    mockExecSync.mockReturnValue(Buffer.from(JSON.stringify([
-      { name: "test", state: "pending", bucket: "pending" },
-    ])))
+    mockSuccess(JSON.stringify([{ name: "test", state: "pending", bucket: "pending" }]))
 
     const result = await waitForCI("https://github.com/org/repo/pull/1", "/tmp", testConfig)
 
@@ -395,15 +410,32 @@ describe("waitForCI", () => {
     expect(result.passed).toBe(false)
   })
 
-  it("times out when all calls fail", async () => {
-    mockExecSync.mockImplementation(() => {
-      throw new Error("Permanent failure")
-    })
+  it("times out when all calls fail with transient errors", async () => {
+    mockError("Permanent network failure")
 
     const result = await waitForCI("https://github.com/org/repo/pull/1", "/tmp", testConfig)
 
     expect(result.timedOut).toBe(true)
     expect(result.passed).toBe(false)
     expect(result.checks).toEqual([])
+  })
+
+  it("aborts immediately on terminal error without retrying", async () => {
+    let callCount = 0
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockExecFile.mockImplementation((...allArgs: any[]) => {
+      callCount++
+      const cb = allArgs[allArgs.length - 1] as (err: Error | null, stdout: string, stderr: string) => void
+      const stderr = "GraphQL: Could not resolve to a Repository with the name 'cfbarber/telegram-minions'."
+      const err = Object.assign(new Error("Command failed"), { stderr })
+      cb(err, "", stderr)
+      return undefined as any // eslint-disable-line @typescript-eslint/no-explicit-any
+    })
+
+    const result = await waitForCI("https://github.com/org/repo/pull/1", "/tmp", testConfig)
+
+    expect(result.passed).toBe(false)
+    expect(result.timedOut).toBe(false)
+    expect(callCount).toBe(1) // must not retry
   })
 })

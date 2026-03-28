@@ -1476,11 +1476,11 @@ export class Dispatcher {
     log.info({ prUrl, maxRetries }, "watching CI for PR")
 
     // Check for merge conflicts before polling CI
-    let mergeState = checkPRMergeability(prUrl, topicSession.cwd)
+    let mergeState = await checkPRMergeability(prUrl, topicSession.cwd)
     if (mergeState === "UNKNOWN") {
       // GitHub may still be computing mergeability — retry once after a short delay
       await new Promise((resolve) => setTimeout(resolve, 5_000))
-      mergeState = checkPRMergeability(prUrl, topicSession.cwd)
+      mergeState = await checkPRMergeability(prUrl, topicSession.cwd)
     }
 
     // Auto-resolve merge conflicts if detected
@@ -1503,10 +1503,10 @@ export class Dispatcher {
       log.info({ prUrl, conflictAttempt, maxRetries }, "merge conflict resolution session completed")
 
       // Re-check mergeability after fix attempt
-      mergeState = checkPRMergeability(prUrl, topicSession.cwd)
+      mergeState = await checkPRMergeability(prUrl, topicSession.cwd)
       if (mergeState === "UNKNOWN") {
         await new Promise((resolve) => setTimeout(resolve, 5_000))
-        mergeState = checkPRMergeability(prUrl, topicSession.cwd)
+        mergeState = await checkPRMergeability(prUrl, topicSession.cwd)
       }
 
       if (mergeState === "CONFLICTING") {
@@ -1568,7 +1568,7 @@ export class Dispatcher {
 
       let fixPrompt: string
       if (hasRemoteFailures) {
-        const failureDetails = getFailedCheckLogs(prUrl, topicSession.cwd)
+        const failureDetails = await getFailedCheckLogs(prUrl, topicSession.cwd)
         fixPrompt = buildCIFixPrompt(prUrl, failedChecks, failureDetails, attempt, maxRetries)
         if (localReport != null) {
           fixPrompt += "\n\n" + buildQualityGateFixPrompt(prUrl, localReport, attempt, maxRetries)
@@ -1610,7 +1610,7 @@ export class Dispatcher {
       }
 
       // Re-check for merge conflicts before polling CI again
-      const retryMergeState = checkPRMergeability(prUrl, topicSession.cwd)
+      const retryMergeState = await checkPRMergeability(prUrl, topicSession.cwd)
       if (retryMergeState === "CONFLICTING") {
         await this.telegram.sendMessage(
           formatCIConflicts(topicSession.slug, prUrl),
@@ -1680,7 +1680,7 @@ export class Dispatcher {
         childSession.threadId,
       )
 
-      const failureDetails = getFailedCheckLogs(prUrl, childSession.cwd)
+      const failureDetails = await getFailedCheckLogs(prUrl, childSession.cwd)
       const fixPrompt = buildCIFixPrompt(prUrl, failedChecks, failureDetails, attempt, maxRetries)
 
       await this.telegram.sendMessage(
@@ -2456,7 +2456,7 @@ export class Dispatcher {
     } else {
       let resolvedPrUrl = prUrl
       if (!resolvedPrUrl && node.branch) {
-        resolvedPrUrl = findPRByBranch(node.branch, childSession.cwd) ?? undefined
+        resolvedPrUrl = (await findPRByBranch(node.branch, childSession.cwd)) ?? undefined
       }
 
       if (!resolvedPrUrl && !node.recoveryAttempted) {
