@@ -340,9 +340,9 @@ function bootstrapOnePackage(
   }
 
   try {
-    const installCmd = fs.existsSync(lockFile) ? "npm ci" : "npm install"
+    const installCmd = fs.existsSync(lockFile) ? "npm ci --prefer-offline" : "npm install --prefer-offline"
     log.debug({ installCmd, label }, "running package install")
-    execSync(installCmd, { cwd: pkgDir, stdio, timeout: 120_000 })
+    execSync(installCmd, { cwd: pkgDir, stdio, timeout: 300_000 })
 
     if (fs.existsSync(cacheDir)) {
       fs.rmSync(cacheDir, { recursive: true, force: true })
