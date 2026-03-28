@@ -33,6 +33,12 @@ import {
   formatCINoChecks,
   formatUsage,
   formatDagNodeComplete,
+  formatShipStarted,
+  formatShipPlanComplete,
+  formatShipHardeningStart,
+  formatShipHardeningPass,
+  formatShipHardeningComplete,
+  formatShipAllDone,
 } from "../src/format.js"
 import type { ClaudeUsageResponse } from "../src/claude-usage.js"
 import type { AggregateStats, SessionRecord, ModeBreakdown } from "../src/stats.js"
@@ -559,6 +565,12 @@ describe("formatHelp", () => {
     const msg = formatHelp()
     expect(msg).toContain("/usage")
   })
+
+  it("includes /ship command", () => {
+    const msg = formatHelp()
+    expect(msg).toContain("/ship")
+    expect(msg).toContain("end-to-end")
+  })
 })
 
 describe("formatSplitAnalyzing", () => {
@@ -793,5 +805,163 @@ describe("formatDagNodeComplete", () => {
     const result = formatDagNodeComplete("my-slug", "completed", "My Task", undefined, { done: 3, total: 5, running: 1 })
     expect(result).toContain("3/5 complete")
     expect(result).toContain("1 running")
+  })
+})
+
+describe("formatShipStarted", () => {
+  it("includes repo, slug, task, and phase info", () => {
+    const msg = formatShipStarted("my-repo", "bold-arc", "implement feature X")
+    expect(msg).toContain("🚀")
+    expect(msg).toContain("Ship started")
+    expect(msg).toContain("my-repo")
+    expect(msg).toContain("bold-arc")
+    expect(msg).toContain("implement feature X")
+    expect(msg).toContain("Phase 1/3")
+    expect(msg).toContain("Deep research and planning")
+  })
+
+  it("truncates long tasks", () => {
+    const longTask = "x".repeat(300)
+    const msg = formatShipStarted("repo", "slug", longTask)
+    expect(msg).toContain("…")
+  })
+
+  it("escapes HTML in task", () => {
+    const msg = formatShipStarted("repo", "slug", "task with <script>")
+    expect(msg).toContain("&lt;script&gt;")
+    expect(msg).not.toContain("<script>")
+  })
+})
+
+describe("formatShipPlanComplete", () => {
+  it("includes slug and item count", () => {
+    const msg = formatShipPlanComplete("bold-arc", 5)
+    expect(msg).toContain("✅")
+    expect(msg).toContain("Plan complete")
+    expect(msg).toContain("bold-arc")
+    expect(msg).toContain("5 items")
+    expect(msg).toContain("Phase 2/3")
+    expect(msg).toContain("Building DAG")
+  })
+
+  it("singularizes item for count of 1", () => {
+    const msg = formatShipPlanComplete("slug", 1)
+    expect(msg).toContain("1 item")
+    expect(msg).not.toContain("1 items")
+  })
+})
+
+describe("formatShipHardeningStart", () => {
+  it("includes slug and problem count", () => {
+    const msg = formatShipHardeningStart("bold-arc", 3)
+    expect(msg).toContain("🔧")
+    expect(msg).toContain("Post-DAG hardening")
+    expect(msg).toContain("bold-arc")
+    expect(msg).toContain("3 issues")
+    expect(msg).toContain("Starting repair")
+  })
+
+  it("singularizes issue for count of 1", () => {
+    const msg = formatShipHardeningStart("slug", 1)
+    expect(msg).toContain("1 issue")
+    expect(msg).not.toContain("1 issues")
+  })
+})
+
+describe("formatShipHardeningPass", () => {
+  it("includes pass number and fix count", () => {
+    const msg = formatShipHardeningPass("bold-arc", 1, 3, 2)
+    expect(msg).toContain("🔧")
+    expect(msg).toContain("Hardening pass 1/3")
+    expect(msg).toContain("bold-arc")
+    expect(msg).toContain("2 fix sessions")
+  })
+
+  it("singularizes session for count of 1", () => {
+    const msg = formatShipHardeningPass("slug", 2, 3, 1)
+    expect(msg).toContain("1 fix session")
+    expect(msg).not.toContain("1 fix sessions")
+  })
+})
+
+describe("formatShipHardeningComplete", () => {
+  it("shows all resolved when no remaining issues", () => {
+    const msg = formatShipHardeningComplete("bold-arc", 5, 0)
+    expect(msg).toContain("✅")
+    expect(msg).toContain("All issues resolved")
+    expect(msg).toContain("bold-arc")
+    expect(msg).toContain("Phase 3/3")
+    expect(msg).toContain("Final summary")
+  })
+
+  it("shows warning when issues remain", () => {
+    const msg = formatShipHardeningComplete("bold-arc", 3, 2)
+    expect(msg).toContain("⚠️")
+    expect(msg).toContain("Hardening complete")
+    expect(msg).toContain("Fixed 3 issues")
+    expect(msg).toContain("2 remain")
+  })
+
+  it("singularizes issue and remain for count of 1", () => {
+    const msg = formatShipHardeningComplete("slug", 1, 1)
+    expect(msg).toContain("1 issue")
+    expect(msg).toContain("1 remains")
+  })
+})
+
+describe("formatShipAllDone", () => {
+  it("includes full summary with all stats", () => {
+    const msg = formatShipAllDone("bold-arc", "my-repo", {
+      totalNodes: 5,
+      succeeded: 4,
+      failed: 1,
+      prsOpened: 4,
+      autoMerged: 2,
+    })
+    expect(msg).toContain("🎉")
+    expect(msg).toContain("Ship complete!")
+    expect(msg).toContain("bold-arc")
+    expect(msg).toContain("my-repo")
+    expect(msg).toContain("4/5 nodes succeeded")
+    expect(msg).toContain("1 node failed")
+    expect(msg).toContain("4 PRs opened")
+    expect(msg).toContain("2 PRs auto-merged")
+  })
+
+  it("omits failed line when no failures", () => {
+    const msg = formatShipAllDone("slug", "repo", {
+      totalNodes: 3,
+      succeeded: 3,
+      failed: 0,
+      prsOpened: 3,
+      autoMerged: 1,
+    })
+    expect(msg).toContain("3/3 nodes succeeded")
+    expect(msg).not.toContain("0 node")
+  })
+
+  it("omits auto-merged line when none merged", () => {
+    const msg = formatShipAllDone("slug", "repo", {
+      totalNodes: 2,
+      succeeded: 2,
+      failed: 0,
+      prsOpened: 2,
+      autoMerged: 0,
+    })
+    expect(msg).toContain("2 PRs opened")
+    expect(msg).not.toContain("0 PR")
+  })
+
+  it("singularizes counts of 1", () => {
+    const msg = formatShipAllDone("slug", "repo", {
+      totalNodes: 1,
+      succeeded: 1,
+      failed: 0,
+      prsOpened: 1,
+      autoMerged: 1,
+    })
+    expect(msg).toContain("1/1 nodes succeeded")
+    expect(msg).toContain("1 PR opened")
+    expect(msg).toContain("1 PR auto-merged")
   })
 })

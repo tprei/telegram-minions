@@ -389,6 +389,7 @@ export function formatHelp(): string {
     `<code>/plan [repo] description</code> — start a multi-turn planning session`,
     `<code>/think [repo] question</code> — start a deep research session`,
     `<code>/review [repo] PR#</code> — review a pull request (or all unreviewed PRs)`,
+    `<code>/ship [repo] description</code> — end-to-end: research, plan, build DAG, harden, done`,
     `<code>/status</code> — show active sessions`,
     `<code>/stats</code> — show aggregate usage statistics`,
     `<code>/usage</code> — show Claude ACP quota and recent activity`,
@@ -753,6 +754,100 @@ export function formatDagCIFailed(slug: string, nodeTitle: string, prUrl: string
 
 export function formatDagForceAdvance(nodeTitle: string, nodeId: string): string {
   return `⚡ Force-advancing <b>${esc(nodeTitle)}</b> (<code>${esc(nodeId)}</code>) past CI failure`
+}
+
+// Ship command format functions
+
+export function formatShipStarted(
+  repo: string,
+  slug: string,
+  task: string,
+): string {
+  const MAX_TASK = 200
+  return [
+    `🚀 <b>Ship started</b>  ·  📦 <b>${esc(repo)}</b>  ·  🏷 <code>${esc(slug)}</code>`,
+    ``,
+    `<blockquote>${esc(truncate(task, MAX_TASK))}</blockquote>`,
+    ``,
+    `Phase 1/3: Deep research and planning…`,
+  ].join("\n")
+}
+
+export function formatShipPlanComplete(slug: string, itemCount: number): string {
+  const itemWord = itemCount === 1 ? "item" : "items"
+  return [
+    `✅ <b>Plan complete</b>  ·  🏷 <code>${esc(slug)}</code>`,
+    ``,
+    `Extracted ${itemCount} ${itemWord}. Phase 2/3: Building DAG…`,
+  ].join("\n")
+}
+
+export function formatShipHardeningStart(
+  slug: string,
+  problemCount: number,
+): string {
+  return [
+    `🔧 <b>Post-DAG hardening</b>  ·  🏷 <code>${esc(slug)}</code>`,
+    ``,
+    `Found ${problemCount} issue${problemCount === 1 ? "" : "s"} (conflicts or CI failures). Starting repair…`,
+  ].join("\n")
+}
+
+export function formatShipHardeningPass(
+  slug: string,
+  passNumber: number,
+  maxPasses: number,
+  fixCount: number,
+): string {
+  return [
+    `🔧 <b>Hardening pass ${passNumber}/${maxPasses}</b>  ·  🏷 <code>${esc(slug)}</code>`,
+    ``,
+    `Spawning ${fixCount} fix session${fixCount === 1 ? "" : "s"}…`,
+  ].join("\n")
+}
+
+export function formatShipHardeningComplete(
+  slug: string,
+  fixedCount: number,
+  remainingCount: number,
+): string {
+  if (remainingCount === 0) {
+    return `✅ <b>All issues resolved</b>  ·  🏷 <code>${esc(slug)}</code>\n\nPhase 3/3: Final summary…`
+  }
+  return [
+    `⚠️ <b>Hardening complete</b>  ·  🏷 <code>${esc(slug)}</code>`,
+    ``,
+    `Fixed ${fixedCount} issue${fixedCount === 1 ? "" : "s"}, ${remainingCount} remain${remainingCount === 1 ? "s" : ""}.`,
+  ].join("\n")
+}
+
+export function formatShipAllDone(
+  slug: string,
+  repo: string,
+  stats: {
+    totalNodes: number
+    succeeded: number
+    failed: number
+    prsOpened: number
+    autoMerged: number
+  },
+): string {
+  const lines: string[] = [
+    `🎉 <b>Ship complete!</b>  ·  🏷 <code>${esc(slug)}</code>  ·  📦 ${esc(repo)}`,
+    ``,
+  ]
+
+  lines.push(`<b>Summary:</b>`)
+  lines.push(`• ${stats.succeeded}/${stats.totalNodes} nodes succeeded`)
+  if (stats.failed > 0) {
+    lines.push(`• ${stats.failed} node${stats.failed === 1 ? "" : "s"} failed`)
+  }
+  lines.push(`• ${stats.prsOpened} PR${stats.prsOpened === 1 ? "" : "s"} opened`)
+  if (stats.autoMerged > 0) {
+    lines.push(`• ${stats.autoMerged} PR${stats.autoMerged === 1 ? "" : "s"} auto-merged`)
+  }
+
+  return lines.join("\n")
 }
 
 export function formatConfigHelp(): string {
