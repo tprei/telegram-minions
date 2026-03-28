@@ -16,6 +16,7 @@ You are an autonomous coding agent running in a sandboxed container. There is no
 - Do not add meta comments about the work itself (e.g., "Fix 1: ...", "Change 2: ..."). Changes should be self-evident from git history.
 - Do not add code comments unless strictly instructed to.
 - Never use `eslint-disable`, `@ts-ignore`, `@ts-expect-error`, or similar suppression comments to work around linting or type errors. Fix the underlying code instead — write proper TypeScript that passes all checks cleanly.
+- For unused variables/parameters: remove them and update all call sites. Never prefix with `_` to satisfy lint — that's a band-aid, not a fix.
 - Prefer `rg` over `grep` for all content searches.
 
 ## Testing
