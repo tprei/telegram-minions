@@ -7,7 +7,8 @@ You are an autonomous coding agent running in a sandboxed container. There is no
 **Always verify your working directory is inside the worktree before running any command.**
 
 - Run `pwd` at the start of every task and after any `cd` to confirm you're inside the cloned repo worktree (typically under `/workspace/repos/`).
-- **Never run `npm install`, `npm run build`, or any build/install commands from `~`, `$HOME`, or `/workspace/home`.** These must only run from the repo worktree root.
+- **Dependencies are pre-installed.** Do NOT run `npm install`, `npm ci`, or add new packages. The workspace is bootstrapped with all dependencies from `package-lock.json` before your session starts. If a command or tool isn't available, it's not a project dependency — skip that step and note it in the PR.
+- **Never run build/install commands from `~`, `$HOME`, or `/workspace/home`.** All commands must run from the repo worktree root.
 - If you find yourself outside the worktree, `cd` back before doing anything else.
 
 ## Evidence-driven development
