@@ -32,6 +32,8 @@ export const DEFAULT_TASK_PROMPT = [
   "If no tests exist for the area you're modifying, note this in the PR description.",
   "Document assumptions in your PR description since there's no human to ask.",
   "",
+  "Dependencies (`node_modules`) are pre-installed in your workspace. Do NOT run `npm install`, `npm ci`, or install any packages. Use what's already available. If a tool or test runner is not found, it is not a project dependency — skip that step and note it in the PR description.",
+  "",
   "A headless Chromium browser is pre-installed. Use the Playwright MCP tools (browser_navigate, browser_snapshot, browser_screenshot, browser_click, etc.) for any web browsing tasks. Do NOT attempt to install a browser — it is already available.",
   "When browsing pages, wait for the page to fully load before taking snapshots or screenshots. Use browser_wait_for_navigation or browser_wait after navigating, clicking links, or submitting forms. Pages with JavaScript-heavy content (SPAs, dynamic dashboards) need extra time to render — wait for network requests to settle before capturing.",
 ].join("\n")
@@ -63,6 +65,8 @@ export const DEFAULT_CI_FIX_PROMPT = [
   "The `gh` CLI is available and authenticated via GITHUB_TOKEN.",
   "Never commit `.env`, credentials, or secrets.",
   "Never push to `main` or `master` directly.",
+  "",
+  "Dependencies (`node_modules`) are pre-installed in your workspace. Do NOT run `npm install`, `npm ci`, or install any packages. Use what's already available.",
   "",
   "A headless Chromium browser is pre-installed. Use the Playwright MCP tools (browser_navigate, browser_snapshot, browser_screenshot, browser_click, etc.) for any web browsing tasks. Do NOT attempt to install a browser — it is already available.",
   "When browsing pages, wait for the page to fully load before taking snapshots or screenshots. Use browser_wait_for_navigation or browser_wait after navigating, clicking links, or submitting forms. Pages with JavaScript-heavy content (SPAs, dynamic dashboards) need extra time to render — wait for network requests to settle before capturing.",
