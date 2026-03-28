@@ -272,6 +272,29 @@ describe("SessionStore", () => {
     expect(loaded.allSplitItems).toHaveLength(2)
   })
 
+  it("preserves lastState through save/load", async () => {
+    const store = new SessionStore(tmpDir)
+    const sessions = new Map<number, TopicSession>()
+    sessions.set(100, makeSession({ lastState: "completed" }))
+    sessions.set(200, makeSession({ threadId: 200, lastState: "errored" }))
+
+    await store.save(sessions)
+    const { active } = await store.load()
+    expect(active.get(100)?.lastState).toBe("completed")
+    expect(active.get(200)?.lastState).toBe("errored")
+  })
+
+  it("handles old data without lastState gracefully", async () => {
+    const store = new SessionStore(tmpDir)
+    const sessions = new Map<number, TopicSession>()
+    sessions.set(100, makeSession())
+    // Explicitly no lastState — simulates old persisted data
+
+    await store.save(sessions)
+    const { active } = await store.load()
+    expect(active.get(100)?.lastState).toBeUndefined()
+  })
+
   it("handles valid JSON with missing sessions field gracefully", async () => {
     fs.writeFileSync(
       path.join(tmpDir, ".sessions.json"),

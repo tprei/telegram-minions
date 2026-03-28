@@ -1311,12 +1311,14 @@ export class Dispatcher {
           ).catch(() => {})
           writeSessionLog(topicSession, m, state, durationMs)
         } else if (state === "errored") {
+          topicSession.lastState = "errored"
           this.updateTopicTitle(topicSession, "❌").catch(() => {})
           this.observer.onSessionComplete(m, state, durationMs).catch((err) => {
             loggers.observer.error({ err, sessionId }, "onSessionComplete error")
           })
           writeSessionLog(topicSession, m, state, durationMs)
         } else {
+          topicSession.lastState = "completed"
           this.updateTopicTitle(topicSession, "✅").catch(() => {})
           this.observer.flushAndComplete(m, state, durationMs).then(async () => {
             await this.telegram.sendMessage(

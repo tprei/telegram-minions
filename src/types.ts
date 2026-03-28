@@ -162,6 +162,7 @@ export interface TopicSession {
   interruptedAt?: number
   branch?: string
   prUrl?: string
+  lastState?: "completed" | "errored"
   dagId?: string
   dagNodeId?: string
   pendingSplitItems?: { title: string; description: string }[]
