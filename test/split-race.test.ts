@@ -99,6 +99,7 @@ function makeParentSession(children: TopicSession[] = []): TopicSession {
 type DispatcherInternals = {
   topicSessions: Map<number, TopicSession>
   notifyParentOfChildComplete(childSession: TopicSession, state: string): Promise<void>
+  updatePinnedSplitStatus(parent: TopicSession): Promise<void>
 }
 
 beforeEach(async () => {
@@ -318,5 +319,171 @@ describe("parent notification timing", () => {
     // The notify should happen after postProcessing
     expect(completionOrder).toEqual(["postProcessing", "notify"])
     expect(parentNotified).toBe(true)
+  })
+})
+
+describe("updatePinnedSplitStatus uses lastState", () => {
+  it("shows 'done' for completed child without prUrl", async () => {
+    const telegram = makeMockTelegram()
+    const config = makeConfig()
+    const observer = new Observer(telegram, 1)
+    const dispatcher = new Dispatcher(telegram, observer, config)
+    const internals = dispatcher as unknown as DispatcherInternals
+
+    const child = makeChildSession({
+      lastState: "completed",
+      prUrl: undefined,
+      activeSessionId: undefined,
+    })
+    const parent = makeParentSession([child])
+
+    internals.topicSessions.set(child.threadId, child)
+    internals.topicSessions.set(parent.threadId, parent)
+
+    await internals.updatePinnedSplitStatus(parent)
+
+    // pinThreadMessage calls sendMessage on first pin
+    const sendCalls = (telegram.sendMessage as ReturnType<typeof vi.fn>).mock.calls
+    const pinCall = sendCalls.find((c: [string]) => c[0].includes("child-slug"))
+    expect(pinCall).toBeDefined()
+    expect(pinCall![0]).toContain("✅")
+    expect(pinCall![0]).not.toContain("❌")
+  })
+
+  it("shows 'failed' for errored child even with prUrl", async () => {
+    const telegram = makeMockTelegram()
+    const config = makeConfig()
+    const observer = new Observer(telegram, 1)
+    const dispatcher = new Dispatcher(telegram, observer, config)
+    const internals = dispatcher as unknown as DispatcherInternals
+
+    const child = makeChildSession({
+      lastState: "errored",
+      prUrl: "https://github.com/org/repo/pull/99",
+      activeSessionId: undefined,
+    })
+    const parent = makeParentSession([child])
+
+    internals.topicSessions.set(child.threadId, child)
+    internals.topicSessions.set(parent.threadId, parent)
+
+    await internals.updatePinnedSplitStatus(parent)
+
+    const sendCalls = (telegram.sendMessage as ReturnType<typeof vi.fn>).mock.calls
+    const pinCall = sendCalls.find((c: [string]) => c[0].includes("child-slug"))
+    expect(pinCall).toBeDefined()
+    expect(pinCall![0]).toContain("❌")
+  })
+
+  it("shows 'failed' for child with no lastState and no activeSessionId", async () => {
+    const telegram = makeMockTelegram()
+    const config = makeConfig()
+    const observer = new Observer(telegram, 1)
+    const dispatcher = new Dispatcher(telegram, observer, config)
+    const internals = dispatcher as unknown as DispatcherInternals
+
+    const child = makeChildSession({
+      lastState: undefined,
+      prUrl: undefined,
+      activeSessionId: undefined,
+    })
+    const parent = makeParentSession([child])
+
+    internals.topicSessions.set(child.threadId, child)
+    internals.topicSessions.set(parent.threadId, parent)
+
+    await internals.updatePinnedSplitStatus(parent)
+
+    const sendCalls = (telegram.sendMessage as ReturnType<typeof vi.fn>).mock.calls
+    const pinCall = sendCalls.find((c: [string]) => c[0].includes("child-slug"))
+    expect(pinCall).toBeDefined()
+    expect(pinCall![0]).toContain("❌")
+  })
+})
+
+describe("allDone succeeded count uses lastState", () => {
+  it("counts completed children without prUrl as succeeded", async () => {
+    const telegram = makeMockTelegram()
+    const config = makeConfig()
+    const observer = new Observer(telegram, 1)
+    const dispatcher = new Dispatcher(telegram, observer, config)
+    const internals = dispatcher as unknown as DispatcherInternals
+
+    const child1 = makeChildSession({
+      threadId: 201,
+      slug: "child-1",
+      splitLabel: "Task 1",
+      lastState: "completed",
+      prUrl: "https://github.com/org/repo/pull/1",
+      activeSessionId: undefined,
+    })
+    const child2 = makeChildSession({
+      threadId: 202,
+      slug: "child-2",
+      splitLabel: "Task 2",
+      lastState: "completed",
+      prUrl: undefined, // Completed but no PR
+      activeSessionId: undefined,
+    })
+    const child3 = makeChildSession({
+      threadId: 203,
+      slug: "child-3",
+      splitLabel: "Task 3",
+      lastState: "errored",
+      prUrl: undefined,
+      activeSessionId: undefined,
+    })
+
+    const parent = makeParentSession([child1, child2, child3])
+    parent.pendingSplitItems = []
+
+    internals.topicSessions.set(child1.threadId, child1)
+    internals.topicSessions.set(child2.threadId, child2)
+    internals.topicSessions.set(child3.threadId, child3)
+    internals.topicSessions.set(parent.threadId, parent)
+
+    // Notify for the last child to trigger allDone
+    await internals.notifyParentOfChildComplete(child3, "errored")
+
+    // Should find the "Split complete" message with 2/3 succeeded
+    const calls = (telegram.sendMessage as ReturnType<typeof vi.fn>).mock.calls
+    const allDoneCall = calls.find((c: [string]) => c[0].includes("Split complete"))
+    expect(allDoneCall).toBeDefined()
+    expect(allDoneCall![0]).toContain("2/3 succeeded")
+  })
+
+  it("counts 4/4 when all children completed even without prUrl", async () => {
+    const telegram = makeMockTelegram()
+    const config = makeConfig()
+    const observer = new Observer(telegram, 1)
+    const dispatcher = new Dispatcher(telegram, observer, config)
+    const internals = dispatcher as unknown as DispatcherInternals
+
+    const children = [201, 202, 203, 204].map((id, i) =>
+      makeChildSession({
+        threadId: id,
+        slug: `child-${i}`,
+        splitLabel: `Task ${i}`,
+        lastState: "completed",
+        prUrl: i === 0 ? "https://github.com/org/repo/pull/1" : undefined,
+        activeSessionId: undefined,
+      }),
+    )
+
+    const parent = makeParentSession(children)
+    parent.pendingSplitItems = []
+
+    for (const child of children) {
+      internals.topicSessions.set(child.threadId, child)
+    }
+    internals.topicSessions.set(parent.threadId, parent)
+
+    // Notify last child
+    await internals.notifyParentOfChildComplete(children[3], "completed")
+
+    const calls = (telegram.sendMessage as ReturnType<typeof vi.fn>).mock.calls
+    const allDoneCall = calls.find((c: [string]) => c[0].includes("Split complete"))
+    expect(allDoneCall).toBeDefined()
+    expect(allDoneCall![0]).toContain("4/4 succeeded")
   })
 })

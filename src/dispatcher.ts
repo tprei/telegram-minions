@@ -421,7 +421,7 @@ export class Dispatcher {
         slug: child.slug,
         label: child.splitLabel ?? child.slug,
         prUrl: child.prUrl,
-        status: child.activeSessionId ? "running" : child.prUrl ? "done" : "failed",
+        status: child.activeSessionId ? "running" : child.lastState === "completed" ? "done" : "failed",
       })
     }
 
@@ -1925,10 +1925,7 @@ export class Dispatcher {
       let succeeded = 0
       for (const id of parent.childThreadIds) {
         const child = this.topicSessions.get(id)
-        if (child) {
-          const prFound = this.extractPRFromConversation(child)
-          if (prFound) succeeded++
-        }
+        if (child?.lastState === "completed") succeeded++
       }
 
       await this.telegram.sendMessage(
