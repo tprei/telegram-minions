@@ -607,6 +607,23 @@ describe("formatSplitAllDone", () => {
     expect(msg).toContain("2/3")
     expect(msg).toContain("Split complete")
   })
+
+  it("omits withPR when all succeeded have PRs", () => {
+    const msg = formatSplitAllDone(3, 3, 3)
+    expect(msg).toContain("3/3 succeeded")
+    expect(msg).not.toContain("with PR")
+  })
+
+  it("shows withPR count when some succeeded without PR", () => {
+    const msg = formatSplitAllDone(4, 4, 3)
+    expect(msg).toContain("4/4 succeeded (3 with PR)")
+  })
+
+  it("omits withPR when undefined", () => {
+    const msg = formatSplitAllDone(2, 4)
+    expect(msg).toContain("2/4 succeeded")
+    expect(msg).not.toContain("with PR")
+  })
 })
 
 describe("formatReviewStart", () => {

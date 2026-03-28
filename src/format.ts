@@ -652,8 +652,9 @@ export function formatSplitChildComplete(slug: string, state: string, label: str
   return `${emoji} <b>${esc(slug)}</b> ${esc(state)}: ${esc(label)}${prSuffix}`
 }
 
-export function formatSplitAllDone(succeeded: number, total: number): string {
-  return `📊 <b>Split complete</b>: ${succeeded}/${total} succeeded`
+export function formatSplitAllDone(succeeded: number, total: number, withPR?: number): string {
+  const prNote = withPR !== undefined && withPR < succeeded ? ` (${withPR} with PR)` : ""
+  return `📊 <b>Split complete</b>: ${succeeded}/${total} succeeded${prNote}`
 }
 
 export function formatStackAnalyzing(slug: string): string {

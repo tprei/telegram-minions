@@ -1918,13 +1918,17 @@ export class Dispatcher {
 
     if (allDone && !hasPending) {
       let succeeded = 0
+      let withPR = 0
       for (const id of parent.childThreadIds) {
         const child = this.topicSessions.get(id)
-        if (child?.lastState === "completed") succeeded++
+        if (child?.lastState === "completed") {
+          succeeded++
+          if (child.prUrl) withPR++
+        }
       }
 
       await this.telegram.sendMessage(
-        formatSplitAllDone(succeeded, parent.childThreadIds.length),
+        formatSplitAllDone(succeeded, parent.childThreadIds.length, withPR),
         parent.threadId,
       )
       await this.updateTopicTitle(parent, succeeded === parent.childThreadIds.length ? "✅" : "⚠️")
