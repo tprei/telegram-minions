@@ -51,7 +51,17 @@ fi
 - Check if the error is a typecheck (`npx tsc --noEmit`), lint, test, or build failure
 - For test failures: read the test file, understand what it tests, then fix either the test or the implementation
 - For typecheck errors: follow the type chain to find the real mismatch
-- For lint errors: apply the fix the linter suggests
+- For lint errors: fix the underlying code properly (see "Fix quality" below)
+
+## Fix quality
+
+Apply real fixes, not band-aids. Specifically:
+
+- **Unused variables/parameters**: Remove them from the function signature and update all call sites. Do NOT prefix with `_` — that hides the problem instead of fixing it.
+- **Lint suppressions**: Never add `eslint-disable`, `@ts-ignore`, `@ts-expect-error`, or similar. Fix the actual code.
+- **Type errors**: Fix the types or the code, not with `as any` casts.
+
+The goal is to leave the code in a state where the original author would be satisfied, not just to make CI green by any means necessary.
 
 ## When to give up
 
