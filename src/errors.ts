@@ -213,3 +213,12 @@ export function isConfigError(error: unknown): error is ConfigError | ConfigForm
 export function isTelegramError(error: unknown): error is TelegramApiError {
   return error instanceof TelegramApiError
 }
+
+/** Check if a Telegram error indicates the message thread no longer exists. */
+export function isThreadNotFoundError(error: unknown): error is TelegramHttpError {
+  return (
+    error instanceof TelegramHttpError &&
+    error.statusCode === 400 &&
+    error.responseText.includes("message thread not found")
+  )
+}

@@ -4,6 +4,7 @@ import type { TelegramClient } from "./telegram.js"
 import type { GooseStreamEvent, GooseMessage, GooseToolRequestContent, GooseToolResponseContent, SessionMeta } from "./types.js"
 import { captureException } from "./sentry.js"
 import { loggers } from "./logger.js"
+import { isThreadNotFoundError } from "./errors.js"
 import {
   formatToolLine,
   formatActivityLog,
@@ -54,6 +55,8 @@ interface SessionState {
   sentScreenshots: Set<string>
   // Optional callback for capturing flushed text (used by plan mode)
   onTextCapture?: TextCaptureCallback
+  // Optional callback fired when the Telegram thread no longer exists
+  onDeadThread?: () => void
 }
 
 export class Observer {
@@ -74,6 +77,7 @@ export class Observer {
     meta: SessionMeta,
     task: string,
     onTextCapture?: TextCaptureCallback,
+    onDeadThread?: () => void,
   ): Promise<void> {
     this.sessions.set(meta.sessionId, {
       textBuffer: "",
@@ -88,6 +92,7 @@ export class Observer {
       screenshotPending: false,
       sentScreenshots: new Set(),
       onTextCapture,
+      onDeadThread,
     })
     const msg = meta.mode === "think"
       ? formatThinkStart(meta.repo, meta.topicName, task)
@@ -96,7 +101,24 @@ export class Observer {
       : meta.mode === "review"
       ? formatReviewStart(meta.repo, meta.topicName, task)
       : formatSessionStart(meta.repo, meta.topicName, task)
-    await this.telegram.sendMessage(msg, meta.threadId)
+    await this.safeSendMessage(meta, msg)
+  }
+
+  private async safeSendMessage(
+    meta: SessionMeta,
+    html: string,
+  ): Promise<{ ok: boolean; messageId: number | null }> {
+    try {
+      return await this.telegram.sendMessage(html, meta.threadId)
+    } catch (err) {
+      if (isThreadNotFoundError(err)) {
+        log.warn({ threadId: meta.threadId, slug: meta.topicName }, "thread not found, triggering cleanup")
+        const state = this.sessions.get(meta.sessionId)
+        state?.onDeadThread?.()
+        return { ok: false, messageId: null }
+      }
+      throw err
+    }
   }
 
   async onEvent(meta: SessionMeta, event: GooseStreamEvent): Promise<void> {
@@ -107,10 +129,7 @@ export class Observer {
 
       case "error":
         await this.flushTextBuffer(meta)
-        await this.telegram.sendMessage(
-          formatSessionError(meta.topicName, event.error),
-          meta.threadId,
-        )
+        await this.safeSendMessage(meta, formatSessionError(meta.topicName, event.error))
         break
 
       case "complete":
@@ -257,7 +276,7 @@ export class Observer {
 
     // Send each chunk as a separate message with a small delay to avoid rate limits
     for (let i = 0; i < chunks.length; i++) {
-      await this.telegram.sendMessage(chunks[i], meta.threadId)
+      await this.safeSendMessage(meta, chunks[i])
       // Add delay between chunks (but not after the last one)
       if (i < chunks.length - 1) {
         await sleep(CHUNK_SEND_DELAY_MS)
@@ -320,7 +339,7 @@ export class Observer {
 
     // Outside throttle window or no existing message: send new activity message
     state.activityLastSentAt = now
-    const { messageId } = await this.telegram.sendMessage(html, meta.threadId)
+    const { messageId } = await this.safeSendMessage(meta, html)
     state.activityMessageId = messageId
   }
 
@@ -339,15 +358,9 @@ export class Observer {
     this.sessions.delete(meta.sessionId)
 
     if (finalState === "errored") {
-      await this.telegram.sendMessage(
-        formatSessionError(meta.topicName, "Session ended with an error. Check logs."),
-        meta.threadId,
-      )
+      await this.safeSendMessage(meta, formatSessionError(meta.topicName, "Session ended with an error. Check logs."))
     } else {
-      await this.telegram.sendMessage(
-        formatSessionComplete(meta.topicName, durationMs, meta.totalTokens, sessionToolCount),
-        meta.threadId,
-      )
+      await this.safeSendMessage(meta, formatSessionComplete(meta.topicName, durationMs, meta.totalTokens, sessionToolCount))
     }
   }
 

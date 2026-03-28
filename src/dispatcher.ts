@@ -1410,7 +1410,12 @@ export class Dispatcher {
 
     await this.updateTopicTitle(topicSession, "⚡")
     this.updatePinnedSummary()
-    await this.observer.onSessionStart(meta, task, onTextCapture)
+    const onDeadThread = () => {
+      log.warn({ threadId: meta.threadId, slug: topicSession.slug }, "thread not found, removing session from store")
+      this.topicSessions.delete(meta.threadId)
+      this.persistTopicSessions().catch(() => {})
+    }
+    await this.observer.onSessionStart(meta, task, onTextCapture, onDeadThread)
     const systemPrompt = systemPromptOverride ?? (topicSession.mode === "task" ? prompts.task : undefined)
     handle.start(task, systemPrompt)
   }
@@ -1779,7 +1784,12 @@ export class Dispatcher {
 
     this.sessions.set(topicSession.threadId, { handle, meta, task })
 
-    await this.observer.onSessionStart(meta, task)
+    const onDeadThread = () => {
+      log.warn({ threadId: meta.threadId, slug: topicSession.slug }, "thread not found, removing session from store")
+      this.topicSessions.delete(meta.threadId)
+      this.persistTopicSessions().catch(() => {})
+    }
+    await this.observer.onSessionStart(meta, task, undefined, onDeadThread)
     handle.start(task, DEFAULT_CI_FIX_PROMPT)
   }
 

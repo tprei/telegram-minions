@@ -29,6 +29,7 @@ export class SessionStore {
     const data: StoreData = { sessions: entries, offset }
     const tmp = this.filePath + ".tmp"
     try {
+      await fs.mkdir(path.dirname(tmp), { recursive: true })
       await fs.writeFile(tmp, JSON.stringify(data), "utf-8")
       await fs.rename(tmp, this.filePath)
       // Keep a backup of the last good write for crash recovery

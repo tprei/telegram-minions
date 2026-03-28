@@ -10,6 +10,7 @@ import {
   TelegramHttpError,
   TelegramResponseError,
   TelegramRetryExhaustedError,
+  isThreadNotFoundError,
 } from "./errors.js"
 
 const MAX_LENGTH = 4096
@@ -230,6 +231,9 @@ export class TelegramClient {
       const result = await this.call<{ message_id: number }>("sendMessage", body)
       return result.message_id
     } catch (err) {
+      if (isThreadNotFoundError(err)) {
+        throw err
+      }
       log.error({ err, method: "sendMessage" }, "sendMessage failed")
       captureException(err, { method: "sendMessage" })
       return null
