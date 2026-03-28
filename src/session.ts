@@ -133,6 +133,22 @@ export class SessionHandle {
       }
     }
 
+    if (this.sessionConfig.mcp.supabaseEnabled) {
+      const supabaseToken = process.env["SUPABASE_ACCESS_TOKEN"]
+      if (supabaseToken) {
+        const supabaseArgs = ["-y", "@supabase/mcp-server-supabase@latest", "--access-token", supabaseToken]
+        if (this.sessionConfig.mcp.supabaseProjectRef) {
+          supabaseArgs.push("--project-ref", this.sessionConfig.mcp.supabaseProjectRef)
+        }
+        servers.supabase = {
+          command: "npx",
+          args: supabaseArgs,
+        }
+      } else {
+        this.log.warn("MCP: Supabase MCP enabled but SUPABASE_ACCESS_TOKEN is not set — skipping")
+      }
+    }
+
     if (this.sessionConfig.mcp.zaiEnabled && this.sessionConfig.goose.provider === "z-ai") {
       // Prefer profile.authToken for z-ai, fall back to env var
       const zaiKey = this.sessionConfig.profile?.authToken || process.env["ZAI_API_KEY"]
@@ -245,6 +261,7 @@ export class SessionHandle {
       CLAUDE_CODE_STREAM_CLOSE_TIMEOUT: "30000",
       GITHUB_PERSONAL_ACCESS_TOKEN: process.env["GITHUB_TOKEN"] ?? "",
       SENTRY_ACCESS_TOKEN: process.env["SENTRY_ACCESS_TOKEN"] ?? "",
+      SUPABASE_ACCESS_TOKEN: process.env["SUPABASE_ACCESS_TOKEN"] ?? "",
       ZAI_API_KEY: process.env["ZAI_API_KEY"] ?? "",
     }
 

@@ -149,6 +149,7 @@ All MCPs are installed globally in the Docker image and enabled by default via e
 | **GitHub** | `ENABLE_GITHUB_MCP` | PRs, issues, reviews, code search via GitHub API | `GITHUB_TOKEN` must be set (logs warning if missing) |
 | **Context7** | `ENABLE_CONTEXT7_MCP` | Up-to-date library/framework documentation lookup | None (uses public docs) |
 | **Sentry** | `ENABLE_SENTRY_MCP` | Error tracking, issue search, stack traces via Sentry API | `SENTRY_ACCESS_TOKEN` must be set as a Fly secret. Optional: `SENTRY_ORG_SLUG`, `SENTRY_PROJECT_SLUG` to scope queries |
+| **Supabase** | `ENABLE_SUPABASE_MCP` | Database queries, migrations, logs via Supabase API | `SUPABASE_ACCESS_TOKEN` must be set. Optional: `SUPABASE_PROJECT_REF` to scope to a specific project |
 | **Z.AI Web Search** | `ENABLE_ZAI_MCP` | Web search, real-time information | Uses `ZAI_API_KEY` from z-ai provider. **Only enabled when `GOOSE_PROVIDER=z-ai`** |
 
 MCP config is built dynamically in `src/session.ts` via `buildMcpServers()`. For Goose sessions it generates `--with-extension` flags; for Claude sessions it generates `--mcp-config` JSON. If an MCP's prerequisites aren't met (e.g., missing `GITHUB_TOKEN`), it's skipped with a stderr warning rather than crashing.

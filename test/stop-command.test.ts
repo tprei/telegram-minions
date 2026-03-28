@@ -39,6 +39,8 @@ function makeConfig(): MinionConfig {
         sentryEnabled: false,
         sentryOrgSlug: "",
         sentryProjectSlug: "",
+        supabaseEnabled: false,
+        supabaseProjectRef: "",
         zaiEnabled: false,
       },
     },

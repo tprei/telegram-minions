@@ -24,7 +24,8 @@
       "mcp__playwright__*",
       "mcp__github__*",
       "mcp__context7__*",
-      "mcp__sentry__*"
+      "mcp__sentry__*",
+      "mcp__supabase__*"
     ]
   },
   "sandbox": {

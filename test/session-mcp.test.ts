@@ -12,6 +12,8 @@ const baseConfig: SessionConfig = {
     sentryEnabled: false,
     sentryOrgSlug: "",
     sentryProjectSlug: "",
+    supabaseEnabled: false,
+    supabaseProjectRef: "",
     zaiEnabled: false,
   },
 }
@@ -58,6 +60,8 @@ describe("SessionHandle MCP building", () => {
   beforeEach(() => {
     originalEnv["ZAI_API_KEY"] = process.env["ZAI_API_KEY"]
     originalEnv["GITHUB_TOKEN"] = process.env["GITHUB_TOKEN"]
+    originalEnv["SENTRY_ACCESS_TOKEN"] = process.env["SENTRY_ACCESS_TOKEN"]
+    originalEnv["SUPABASE_ACCESS_TOKEN"] = process.env["SUPABASE_ACCESS_TOKEN"]
   })
 
   afterEach(() => {
@@ -206,6 +210,54 @@ describe("SessionHandle MCP building", () => {
         env: undefined,
       })
       expect(config.mcpServers["web-search-prime"].type).toBe("http")
+    })
+  })
+
+  describe("Supabase MCP", () => {
+    it("does not include Supabase when supabaseEnabled is false", () => {
+      process.env["SUPABASE_ACCESS_TOKEN"] = "sbt_test-token"
+      const handle = makeHandle({
+        mcp: { ...baseConfig.mcp, supabaseEnabled: false },
+      })
+      const servers = getMcpServers(handle)
+
+      expect(servers["supabase"]).toBeUndefined()
+    })
+
+    it("does not include Supabase when SUPABASE_ACCESS_TOKEN is not set", () => {
+      delete process.env["SUPABASE_ACCESS_TOKEN"]
+      const handle = makeHandle({
+        mcp: { ...baseConfig.mcp, supabaseEnabled: true },
+      })
+      const servers = getMcpServers(handle)
+
+      expect(servers["supabase"]).toBeUndefined()
+    })
+
+    it("includes Supabase when enabled with access token", () => {
+      process.env["SUPABASE_ACCESS_TOKEN"] = "sbt_test-token"
+      const handle = makeHandle({
+        mcp: { ...baseConfig.mcp, supabaseEnabled: true },
+      })
+      const servers = getMcpServers(handle)
+
+      expect(servers["supabase"]).toEqual({
+        command: "npx",
+        args: ["-y", "@supabase/mcp-server-supabase@latest", "--access-token", "sbt_test-token"],
+      })
+    })
+
+    it("includes project ref in args when configured", () => {
+      process.env["SUPABASE_ACCESS_TOKEN"] = "sbt_test-token"
+      const handle = makeHandle({
+        mcp: { ...baseConfig.mcp, supabaseEnabled: true, supabaseProjectRef: "abc123" },
+      })
+      const servers = getMcpServers(handle)
+
+      expect(servers["supabase"]).toEqual({
+        command: "npx",
+        args: ["-y", "@supabase/mcp-server-supabase@latest", "--access-token", "sbt_test-token", "--project-ref", "abc123"],
+      })
     })
   })
 
