@@ -131,7 +131,8 @@ describe("Session inactivity timeout", () => {
     const handle = makeHandle(1000)
     const interruptSpy = vi.spyOn(handle, "interrupt")
 
-    const proc = spawn("node", ["-e", "process.exit(0)"], {
+    // Use a short delay before exiting so the close handler is attached before exit
+    const proc = spawn("node", ["-e", "setTimeout(() => process.exit(0), 50)"], {
       stdio: ["ignore", "pipe", "pipe"],
       detached: true,
     })
@@ -142,8 +143,8 @@ describe("Session inactivity timeout", () => {
     }).attachProcessHandlers.bind(handle)
     attachHandlers(() => {})
 
-    // Wait for close event to be processed (well under 1000ms)
-    await new Promise((r) => setTimeout(r, 50))
+    // Wait for the process to exit and close event to be processed
+    await new Promise((r) => setTimeout(r, 200))
 
     expect(interruptSpy).not.toHaveBeenCalled()
     expect(getInactivityHandle(handle)).toBeNull()
