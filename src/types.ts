@@ -114,7 +114,7 @@ export type GooseStreamEvent =
 
 export type SessionState = "spawning" | "working" | "idle" | "completed" | "errored"
 
-export type SessionMode = "task" | "plan" | "think" | "review" | "ci-fix" | "dag-review"
+export type SessionMode = "task" | "plan" | "think" | "review" | "ci-fix" | "dag-review" | "ship-think" | "ship-plan" | "ship-verify"
 
 export interface SessionMeta {
   sessionId: string
@@ -169,4 +169,50 @@ export interface TopicSession {
   allSplitItems?: { title: string; description: string }[]
   pinnedMessageId?: number
   pendingDagItems?: PendingDagItem[]
+  autoAdvance?: AutoAdvance
+}
+
+// Ship pipeline types
+
+/** Tracks the auto-advance state for the /ship pipeline: think → plan → dag → verify → land */
+export type ShipPhase = "think" | "plan" | "dag" | "verify" | "done"
+
+export interface AutoAdvance {
+  /** The current phase in the ship pipeline */
+  phase: ShipPhase
+  /** Original feature description from the /ship command */
+  featureDescription: string
+  /** Whether to auto-land after verification passes */
+  autoLand: boolean
+}
+
+// Verification types
+
+export type VerificationCheckKind = "quality-gates" | "ci" | "completeness-review"
+
+export type VerificationCheckStatus = "pending" | "running" | "passed" | "failed" | "skipped"
+
+export interface VerificationCheck {
+  kind: VerificationCheckKind
+  status: VerificationCheckStatus
+  /** Which DAG node this check applies to */
+  nodeId: string
+  output?: string
+  startedAt?: number
+  finishedAt?: number
+}
+
+export interface VerificationRound {
+  round: number
+  checks: VerificationCheck[]
+  startedAt: number
+  finishedAt?: number
+}
+
+export interface VerificationState {
+  dagId: string
+  maxRounds: number
+  rounds: VerificationRound[]
+  /** Overall status: running while rounds are active, passed when all green, failed when max rounds exhausted */
+  status: "running" | "passed" | "failed"
 }
