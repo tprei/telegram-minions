@@ -138,6 +138,12 @@ export interface DispatcherContext {
   /** Advance to the ship verification phase (used by DagOrchestrator → ShipPipeline). */
   shipAdvanceToVerification(topicSession: TopicSession, graph: DagGraph): Promise<void>
 
+  /** Handle the /land command (used by ShipPipeline → LandingManager). */
+  handleLandCommand(topicSession: TopicSession): Promise<void>
+
+  /** Advance to the next ship phase (used by session completion handler → ShipPipeline). */
+  handleShipAdvance(topicSession: TopicSession): Promise<void>
+
   /** Handle the /execute command (used by SplitOrchestrator). */
   handleExecuteCommand(topicSession: TopicSession, directive?: string): Promise<void>
 
