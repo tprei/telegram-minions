@@ -26,6 +26,7 @@ export const DAG_CMD = "/dag"
 export const LAND_CMD = "/land"
 export const RETRY_CMD = "/retry"
 export const FORCE_CMD = "/force"
+export const SHIP_PREFIX = "/ship"
 
 /**
  * Parse task arguments to extract repo URL and task description.
@@ -127,7 +128,7 @@ export function buildReviewAllTask(repoUrl: string): string {
  */
 export function buildRepoKeyboard(
   repoKeys: string[],
-  prefix: "repo" | "plan" | "think" | "review" = "repo",
+  prefix: "repo" | "plan" | "think" | "review" | "ship" = "repo",
 ): { text: string; callback_data: string }[][] {
   const dataPrefix =
     prefix === "think"
@@ -136,7 +137,9 @@ export function buildRepoKeyboard(
         ? "plan-repo"
         : prefix === "review"
           ? "review-repo"
-          : "repo"
+          : prefix === "ship"
+            ? "ship-repo"
+            : "repo"
   const rows: { text: string; callback_data: string }[][] = []
   for (let i = 0; i < repoKeys.length; i += 2) {
     const row = [{ text: repoKeys[i], callback_data: `${dataPrefix}:${repoKeys[i]}` }]
