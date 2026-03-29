@@ -114,6 +114,7 @@ export class Dispatcher {
       telegram: this.telegram,
       topicSessions: this.topicSessions,
       workspaceRoot: this.config.workspace.root,
+      chatId: this.config.telegram.chatId,
     })
   }
 

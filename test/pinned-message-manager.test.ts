@@ -271,6 +271,36 @@ describe("PinnedMessageManager", () => {
         1,
       )
     })
+
+    it("includes thread hyperlinks when chatId is provided", async () => {
+      const telegram = makeTelegram()
+      const topicSessions = new Map<number, TopicSession>()
+      const child = makeSession({ threadId: 5, slug: "red-bear", splitLabel: "Add auth", activeSessionId: "x" })
+      topicSessions.set(5, child)
+      const parent = makeSession({ childThreadIds: [5] })
+
+      const mgr = new PinnedMessageManager({ telegram, topicSessions, workspaceRoot: "/tmp/workspace", chatId: -1001234567890 })
+      await mgr.updatePinnedSplitStatus(parent)
+
+      const html = telegram.sendMessage.mock.calls[0][0] as string
+      expect(html).toContain('href="https://t.me/c/1234567890/5"')
+      expect(html).toContain(">red-bear</a>")
+    })
+
+    it("uses code tags when chatId is not provided", async () => {
+      const telegram = makeTelegram()
+      const topicSessions = new Map<number, TopicSession>()
+      const child = makeSession({ threadId: 5, slug: "red-bear", splitLabel: "Add auth", activeSessionId: "x" })
+      topicSessions.set(5, child)
+      const parent = makeSession({ childThreadIds: [5] })
+
+      const mgr = new PinnedMessageManager({ telegram, topicSessions, workspaceRoot: "/tmp/workspace" })
+      await mgr.updatePinnedSplitStatus(parent)
+
+      const html = telegram.sendMessage.mock.calls[0][0] as string
+      expect(html).toContain("<code>red-bear</code>")
+      expect(html).not.toContain("t.me/c/")
+    })
   })
 
   describe("updatePinnedDagStatus", () => {
@@ -297,6 +327,52 @@ describe("PinnedMessageManager", () => {
         expect.stringContaining("First"),
         1,
       )
+    })
+
+    it("includes thread hyperlinks when chatId is provided", async () => {
+      const telegram = makeTelegram()
+      const topicSessions = new Map<number, TopicSession>()
+      const parent = makeSession()
+
+      const graph: DagGraph = {
+        id: "dag-1",
+        parentThreadId: 1,
+        repoUrl: "https://github.com/org/repo",
+        startBranch: "main",
+        nodes: [
+          { id: "1", title: "First", description: "first task", dependsOn: [], status: "done", prUrl: "https://pr/1", branch: "b1", threadId: 10 } as DagNode,
+          { id: "2", title: "Second", description: "second task", dependsOn: ["1"], status: "running", branch: "b2", threadId: 11 } as DagNode,
+        ],
+      }
+
+      const mgr = new PinnedMessageManager({ telegram, topicSessions, workspaceRoot: "/tmp/workspace", chatId: -1001234567890 })
+      await mgr.updatePinnedDagStatus(parent, graph)
+
+      const html = telegram.sendMessage.mock.calls[0][0] as string
+      expect(html).toContain('href="https://t.me/c/1234567890/10"')
+      expect(html).toContain('href="https://t.me/c/1234567890/11"')
+    })
+
+    it("uses plain text when chatId is not provided", async () => {
+      const telegram = makeTelegram()
+      const topicSessions = new Map<number, TopicSession>()
+      const parent = makeSession()
+
+      const graph: DagGraph = {
+        id: "dag-1",
+        parentThreadId: 1,
+        repoUrl: "https://github.com/org/repo",
+        startBranch: "main",
+        nodes: [
+          { id: "1", title: "First", description: "first task", dependsOn: [], status: "done", prUrl: "https://pr/1", branch: "b1", threadId: 10 } as DagNode,
+        ],
+      }
+
+      const mgr = new PinnedMessageManager({ telegram, topicSessions, workspaceRoot: "/tmp/workspace" })
+      await mgr.updatePinnedDagStatus(parent, graph)
+
+      const html = telegram.sendMessage.mock.calls[0][0] as string
+      expect(html).not.toContain("t.me/c/")
     })
   })
 
