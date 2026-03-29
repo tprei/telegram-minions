@@ -33,6 +33,9 @@ import {
   formatCINoChecks,
   formatUsage,
   formatDagNodeComplete,
+  formatShipThinkStart,
+  formatShipPlanStart,
+  formatShipVerifyStart,
 } from "../src/format.js"
 import type { ClaudeUsageResponse } from "../src/claude-usage.js"
 import type { AggregateStats, SessionRecord, ModeBreakdown } from "../src/stats.js"
@@ -639,6 +642,63 @@ describe("formatReviewComplete", () => {
     expect(msg).toContain("Review complete")
     expect(msg).toContain("cool-slug")
     expect(msg).toContain("/reply")
+  })
+})
+
+describe("formatShipThinkStart", () => {
+  it("includes ship header, repo, slug, and task", () => {
+    const msg = formatShipThinkStart("my-repo", "cool-slug", "Build auth system")
+    expect(msg).toContain("Ship: researching")
+    expect(msg).toContain("my-repo")
+    expect(msg).toContain("cool-slug")
+    expect(msg).toContain("Build auth system")
+  })
+
+  it("includes auto-advance description", () => {
+    const msg = formatShipThinkStart("repo", "slug", "task")
+    expect(msg).toContain("Auto-advancing")
+    expect(msg).toContain("think")
+    expect(msg).toContain("plan")
+    expect(msg).toContain("dag")
+    expect(msg).toContain("verify")
+  })
+
+  it("truncates long tasks", () => {
+    const longTask = "x".repeat(300)
+    const msg = formatShipThinkStart("repo", "slug", longTask)
+    expect(msg).toContain("…")
+  })
+})
+
+describe("formatShipPlanStart", () => {
+  it("includes ship planning header, repo, slug, and task", () => {
+    const msg = formatShipPlanStart("my-repo", "cool-slug", "Build auth system")
+    expect(msg).toContain("Ship: planning")
+    expect(msg).toContain("my-repo")
+    expect(msg).toContain("cool-slug")
+    expect(msg).toContain("Build auth system")
+  })
+
+  it("includes planning description", () => {
+    const msg = formatShipPlanStart("repo", "slug", "task")
+    expect(msg).toContain("implementation plan")
+  })
+})
+
+describe("formatShipVerifyStart", () => {
+  it("includes ship verify header, repo, slug, and task", () => {
+    const msg = formatShipVerifyStart("my-repo", "cool-slug", "Build auth system")
+    expect(msg).toContain("Ship: verifying")
+    expect(msg).toContain("my-repo")
+    expect(msg).toContain("cool-slug")
+    expect(msg).toContain("Build auth system")
+  })
+
+  it("includes verification description", () => {
+    const msg = formatShipVerifyStart("repo", "slug", "task")
+    expect(msg).toContain("quality gates")
+    expect(msg).toContain("CI checks")
+    expect(msg).toContain("completeness review")
   })
 })
 

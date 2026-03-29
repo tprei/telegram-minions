@@ -56,6 +56,42 @@ describe("Observer", () => {
       expect(msg).toContain("bold-arc")
     })
 
+    it("sends a ship-think start message for ship-think mode", async () => {
+      const telegram = makeTelegram()
+      const observer = new Observer(telegram as any, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
+      const meta = makeMeta({ mode: "ship-think" })
+
+      await observer.onSessionStart(meta, "build auth system")
+
+      const msg = telegram.sendMessage.mock.calls[0][0]
+      expect(msg).toContain("Ship: researching")
+      expect(msg).toContain("Auto-advancing")
+    })
+
+    it("sends a ship-plan start message for ship-plan mode", async () => {
+      const telegram = makeTelegram()
+      const observer = new Observer(telegram as any, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
+      const meta = makeMeta({ mode: "ship-plan" })
+
+      await observer.onSessionStart(meta, "build auth system")
+
+      const msg = telegram.sendMessage.mock.calls[0][0]
+      expect(msg).toContain("Ship: planning")
+      expect(msg).toContain("implementation plan")
+    })
+
+    it("sends a ship-verify start message for ship-verify mode", async () => {
+      const telegram = makeTelegram()
+      const observer = new Observer(telegram as any, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
+      const meta = makeMeta({ mode: "ship-verify" })
+
+      await observer.onSessionStart(meta, "build auth system")
+
+      const msg = telegram.sendMessage.mock.calls[0][0]
+      expect(msg).toContain("Ship: verifying")
+      expect(msg).toContain("quality gates")
+    })
+
     it("sends a plan start message for plan mode", async () => {
       const telegram = makeTelegram()
       const observer = new Observer(telegram as any, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })

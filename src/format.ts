@@ -320,6 +320,51 @@ export function formatTaskComplete(
   ].join("\n")
 }
 
+export function formatShipThinkStart(
+  repo: string,
+  slug: string,
+  task: string,
+): string {
+  const MAX_TASK = 200
+  return [
+    `🚢 <b>Ship: researching</b>  ·  📦 <b>${esc(repo)}</b>  ·  🏷 <code>${esc(slug)}</code>`,
+    ``,
+    `<blockquote>${esc(truncate(task, MAX_TASK))}</blockquote>`,
+    ``,
+    `Auto-advancing through think → plan → dag → verify.`,
+  ].join("\n")
+}
+
+export function formatShipPlanStart(
+  repo: string,
+  slug: string,
+  task: string,
+): string {
+  const MAX_TASK = 200
+  return [
+    `🚢 <b>Ship: planning</b>  ·  📦 <b>${esc(repo)}</b>  ·  🏷 <code>${esc(slug)}</code>`,
+    ``,
+    `<blockquote>${esc(truncate(task, MAX_TASK))}</blockquote>`,
+    ``,
+    `Building implementation plan from research findings.`,
+  ].join("\n")
+}
+
+export function formatShipVerifyStart(
+  repo: string,
+  slug: string,
+  task: string,
+): string {
+  const MAX_TASK = 200
+  return [
+    `🚢 <b>Ship: verifying</b>  ·  📦 <b>${esc(repo)}</b>  ·  🏷 <code>${esc(slug)}</code>`,
+    ``,
+    `<blockquote>${esc(truncate(task, MAX_TASK))}</blockquote>`,
+    ``,
+    `Running quality gates, CI checks, and completeness review.`,
+  ].join("\n")
+}
+
 export function formatReviewStart(
   repo: string,
   slug: string,
