@@ -38,6 +38,8 @@ import {
   formatShipVerifyStart,
   formatShipPhaseAdvance,
   formatShipComplete,
+  threadLink,
+  formatPinnedSplitStatus,
 } from "../src/format.js"
 import type { ClaudeUsageResponse } from "../src/claude-usage.js"
 import type { AggregateStats, SessionRecord, ModeBreakdown } from "../src/stats.js"
@@ -860,6 +862,92 @@ describe("formatDagNodeComplete", () => {
   it("includes progress when provided", () => {
     const result = formatDagNodeComplete("my-slug", "completed", "My Task", undefined, { done: 3, total: 5, running: 1 })
     expect(result).toContain("3/5 complete")
+    expect(result).toContain("1 running")
+  })
+})
+
+describe("threadLink", () => {
+  it("builds a t.me/c/ URL from numeric chatId and threadId", () => {
+    expect(threadLink(-1001234567890, 42)).toBe("https://t.me/c/1234567890/42")
+  })
+
+  it("strips -100 prefix from string chatId", () => {
+    expect(threadLink("-1001234567890", 99)).toBe("https://t.me/c/1234567890/99")
+  })
+
+  it("works with chatId that has no -100 prefix", () => {
+    expect(threadLink("1234567890", 7)).toBe("https://t.me/c/1234567890/7")
+  })
+
+  it("returns undefined when chatId is undefined", () => {
+    expect(threadLink(undefined, 42)).toBeUndefined()
+  })
+
+  it("returns undefined when threadId is undefined", () => {
+    expect(threadLink(-1001234567890, undefined)).toBeUndefined()
+  })
+})
+
+describe("formatPinnedSplitStatus", () => {
+  const children = [
+    { slug: "bold-fox", label: "Fix auth", status: "done" as const, prUrl: "https://github.com/org/repo/pull/1", threadId: 10 },
+    { slug: "calm-owl", label: "Add tests", status: "running" as const, threadId: 20 },
+    { slug: "dark-elk", label: "Update docs", status: "failed" as const, threadId: 30 },
+  ]
+
+  it("uses tree branch characters (├── and └──)", () => {
+    const result = formatPinnedSplitStatus("parent-slug", "my-repo", children)
+    expect(result).toContain("├── ")
+    expect(result).toContain("└── ")
+  })
+
+  it("uses └── only for the last child", () => {
+    const lines = formatPinnedSplitStatus("parent-slug", "my-repo", children).split("\n")
+    const branchLines = lines.filter((l) => l.includes("├── ") || l.includes("└── "))
+    expect(branchLines).toHaveLength(3)
+    expect(branchLines[0]).toContain("├── ")
+    expect(branchLines[1]).toContain("├── ")
+    expect(branchLines[2]).toContain("└── ")
+  })
+
+  it("includes status icons", () => {
+    const result = formatPinnedSplitStatus("parent-slug", "my-repo", children)
+    expect(result).toContain("✅")
+    expect(result).toContain("⚡")
+    expect(result).toContain("❌")
+  })
+
+  it("adds thread hyperlinks when chatId is provided", () => {
+    const result = formatPinnedSplitStatus("parent-slug", "my-repo", children, -1001234567890)
+    expect(result).toContain('<a href="https://t.me/c/1234567890/10">bold-fox</a>')
+    expect(result).toContain('<a href="https://t.me/c/1234567890/20">calm-owl</a>')
+    expect(result).toContain('<a href="https://t.me/c/1234567890/30">dark-elk</a>')
+  })
+
+  it("falls back to code tags when chatId is not provided", () => {
+    const result = formatPinnedSplitStatus("parent-slug", "my-repo", children)
+    expect(result).toContain("<code>bold-fox</code>")
+    expect(result).toContain("<code>calm-owl</code>")
+  })
+
+  it("falls back to code tags when child has no threadId", () => {
+    const noThreadChildren = [
+      { slug: "bold-fox", label: "Fix auth", status: "done" as const },
+    ]
+    const result = formatPinnedSplitStatus("parent-slug", "my-repo", noThreadChildren, -1001234567890)
+    expect(result).toContain("<code>bold-fox</code>")
+    expect(result).not.toContain("t.me")
+  })
+
+  it("includes PR links for completed children", () => {
+    const result = formatPinnedSplitStatus("parent-slug", "my-repo", children)
+    expect(result).toContain('<a href="https://github.com/org/repo/pull/1">PR</a>')
+  })
+
+  it("shows progress summary", () => {
+    const result = formatPinnedSplitStatus("parent-slug", "my-repo", children)
+    expect(result).toContain("1/3 done")
+    expect(result).toContain("1 failed")
     expect(result).toContain("1 running")
   })
 })
