@@ -1,13 +1,11 @@
 #!/usr/bin/env node
 import "dotenv/config"
 import { createMinion, configFromEnv } from "./index.js"
-import { initSentry, captureException, flush as flushSentry } from "./sentry.js"
+import { captureException, flush as flushSentry } from "./sentry.js"
 import { loggers } from "./logger.js"
 
 const config = configFromEnv()
 const log = loggers.main
-
-await initSentry(config.sentry?.dsn)
 
 log.info({ chatId: config.telegram.chatId, allowedUsers: config.telegram.allowedUserIds, workspace: config.workspace.root, maxSessions: config.workspace.maxConcurrentSessions }, "starting telegram-minions")
 

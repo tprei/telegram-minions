@@ -8,6 +8,7 @@ import { Observer } from "./observer.js"
 import { Dispatcher } from "./dispatcher.js"
 import { createApiServer, StateBroadcaster, type DispatcherApi } from "./api-server.js"
 import { loggers } from "./logger.js"
+import { initSentry } from "./sentry.js"
 
 const log = loggers.minion
 
@@ -83,6 +84,8 @@ export function createMinion(config: MinionConfig, options?: MinionOptions): Min
 
   return {
     async start() {
+      await initSentry(config.sentry?.dsn)
+
       // Start API server first
       if (apiServer) {
         await new Promise<void>((resolve) => {
