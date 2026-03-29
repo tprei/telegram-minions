@@ -54,6 +54,7 @@ export const loggers = {
   minion: createLogger({ component: "minion" }),
   verification: createLogger({ component: "verification" }),
   ship: createLogger({ component: "ship" }),
+  conflictResolver: createLogger({ component: "conflict-resolver" }),
 } as const
 
 /**

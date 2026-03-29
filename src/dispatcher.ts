@@ -55,6 +55,9 @@ import {
   formatLandProgress,
   formatLandComplete,
   formatLandError,
+  formatLandSkipped,
+  formatLandSummary,
+  formatLandConflictResolution,
   formatLandRestacking,
   formatDagCIWaiting,
   formatDagCIFailed,
@@ -71,7 +74,7 @@ import { extractStackItems, extractDagItems, buildDagChildPrompt } from "./dag-e
 import {
   buildDag, advanceDag, failNode, resetFailedNode, isDagComplete,
   readyNodes, dagProgress, getUpstreamBranches, topologicalSort,
-  renderDagForGitHub, renderDagStatus, upsertDagSection, needsRestack,
+  renderDagForGitHub, renderDagStatus, upsertDagSection, needsRestack, cleanupMergedBranch,
   type DagGraph, type DagNode, type DagInput,
 } from "./dag.js"
 import { runQualityGates, type QualityReport } from "./quality-gates.js"
@@ -79,6 +82,7 @@ import { StatsTracker } from "./stats.js"
 import { fetchClaudeUsage } from "./claude-usage.js"
 import { writeSessionLog } from "./session-log.js"
 import { extractPRUrl, findPRByBranch, waitForCI, getFailedCheckLogs, buildCIFixPrompt, buildQualityGateFixPrompt, buildMergeConflictPrompt, checkPRMergeability } from "./ci-babysit.js"
+import { resolveConflictsWithAgent } from "./conflict-resolver.js"
 import { buildConversationDigest } from "./conversation-digest.js"
 import { truncateConversation } from "./conversation-limits.js"
 import { DEFAULT_CI_FIX_PROMPT, DEFAULT_RECOVERY_PROMPT } from "./prompts.js"
@@ -3149,7 +3153,6 @@ export class Dispatcher {
       return
     }
 
-    // Find a working directory from a child session that has a repo checkout
     const anyCwd = this.findChildCwd(topicSession, graph) ?? topicSession.cwd
     const gitOpts = { stdio: ["pipe" as const, "pipe" as const, "pipe" as const], timeout: 120_000 }
 
@@ -3158,7 +3161,6 @@ export class Dispatcher {
       topicSession.threadId,
     )
 
-    // Determine the base branch (usually main/master)
     let baseBranch: string
     try {
       baseBranch = execSync(
@@ -3170,25 +3172,58 @@ export class Dispatcher {
     }
 
     let succeeded = 0
+    let skipped = 0
+    const failedTitles: string[] = []
 
     for (const node of prNodes) {
       try {
-        // Merge the PR with squash and delete the branch
+        const prState = execSync(
+          `gh pr view ${JSON.stringify(node.prUrl!)} --json state --jq .state`,
+          { ...gitOpts, cwd: anyCwd, encoding: "utf-8", env: { ...process.env } },
+        ).trim()
+
+        if (prState === "MERGED") {
+          node.status = "landed"
+          skipped++
+          await this.telegram.sendMessage(
+            formatLandSkipped(node.title, prState),
+            topicSession.threadId,
+          )
+          continue
+        }
+
+        if (prState === "CLOSED") {
+          skipped++
+          await this.telegram.sendMessage(
+            formatLandSkipped(node.title, prState),
+            topicSession.threadId,
+          )
+          continue
+        }
+      } catch (err) {
+        log.warn({ err, nodeId: node.id }, "PR state check failed, attempting merge anyway")
+      }
+
+      try {
         execSync(
-          `gh pr merge ${JSON.stringify(node.prUrl!)} --squash --delete-branch`,
+          `gh pr merge ${JSON.stringify(node.prUrl!)} --squash`,
           { ...gitOpts, cwd: anyCwd, env: { ...process.env } },
         )
+        node.status = "landed"
         succeeded++
+
+        if (node.branch) {
+          const worktreePath = this.findWorktreePathForBranch(node)
+          cleanupMergedBranch(node.branch, worktreePath, anyCwd)
+        }
 
         await this.telegram.sendMessage(
           formatLandProgress(node.title, node.prUrl!, succeeded - 1, prNodes.length),
           topicSession.threadId,
         )
 
-        // Restack downstream branches that need rebasing
         const toRestack = needsRestack(graph, node.id)
         if (toRestack.length > 0) {
-          // Fetch latest state after the merge
           try {
             execSync(`git fetch origin`, { ...gitOpts, cwd: anyCwd, env: { ...process.env } })
           } catch (err) {
@@ -3204,9 +3239,6 @@ export class Dispatcher {
             )
 
             try {
-              // Rebase the downstream branch onto the new base
-              // After a squash merge, the upstream branch is gone and its commits
-              // are collapsed into a single commit on baseBranch
               const newBase = `origin/${baseBranch}`
 
               execSync(`git checkout ${JSON.stringify(downstream.branch)}`, { ...gitOpts, cwd: anyCwd, env: { ...process.env } })
@@ -3219,10 +3251,8 @@ export class Dispatcher {
                 { ...gitOpts, cwd: anyCwd, env: { ...process.env } },
               )
 
-              // Update mergeBase for the next restack iteration
               downstream.mergeBase = execSync("git rev-parse HEAD", { cwd: anyCwd, encoding: "utf-8", timeout: 10_000 }).trim()
 
-              // Explicitly update PR base branch (don't rely on GitHub auto-retarget)
               execSync(
                 `gh pr edit ${JSON.stringify(downstream.prUrl)} --base ${baseBranch}`,
                 { ...gitOpts, cwd: anyCwd, env: { ...process.env } },
@@ -3230,32 +3260,73 @@ export class Dispatcher {
             } catch (err) {
               const errMsg = err instanceof Error ? err.message : String(err)
               log.error({ err, nodeId: downstream.id, branch: downstream.branch }, "restack failed")
-              await this.telegram.sendMessage(
-                `⚠️ Restack failed for <b>${esc(downstream.title)}</b>: <code>${esc(errMsg)}</code>`,
-                topicSession.threadId,
-              )
-              // Abort any in-progress rebase
-              try { execSync(`git rebase --abort`, { cwd: anyCwd, stdio: "pipe" }) } catch { /* ignore */ }
+
+              let conflictResolved = false
+              try {
+                const unmerged = execSync("git diff --name-only --diff-filter=U", { cwd: anyCwd, encoding: "utf-8" }).trim()
+                if (unmerged.length > 0) {
+                  await this.telegram.sendMessage(
+                    `🤖 Attempting conflict resolution for <b>${esc(downstream.title)}</b>…`,
+                    topicSession.threadId,
+                  )
+                  conflictResolved = await resolveConflictsWithAgent(anyCwd, downstream.branch, baseBranch)
+
+                  if (conflictResolved) {
+                    execSync(`git rebase --continue`, { ...gitOpts, cwd: anyCwd, env: { ...process.env, GIT_EDITOR: "true" } })
+                    execSync(
+                      `git push --force-with-lease origin ${JSON.stringify(downstream.branch)}`,
+                      { ...gitOpts, cwd: anyCwd, env: { ...process.env } },
+                    )
+                    downstream.mergeBase = execSync("git rev-parse HEAD", { cwd: anyCwd, encoding: "utf-8", timeout: 10_000 }).trim()
+                    execSync(
+                      `gh pr edit ${JSON.stringify(downstream.prUrl)} --base ${baseBranch}`,
+                      { ...gitOpts, cwd: anyCwd, env: { ...process.env } },
+                    )
+                  }
+
+                  await this.telegram.sendMessage(
+                    formatLandConflictResolution(downstream.title, downstream.branch, conflictResolved),
+                    topicSession.threadId,
+                  )
+                }
+              } catch {
+                // Conflict resolution itself failed
+              }
+
+              if (!conflictResolved) {
+                await this.telegram.sendMessage(
+                  `⚠️ Restack failed for <b>${esc(downstream.title)}</b>: <code>${esc(errMsg)}</code>`,
+                  topicSession.threadId,
+                )
+                try { execSync(`git rebase --abort`, { cwd: anyCwd, stdio: "pipe" }) } catch { /* ignore */ }
+              }
             }
           }
         }
 
-        // Brief pause for GitHub to process
         await new Promise((resolve) => setTimeout(resolve, 3000))
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err)
+        failedTitles.push(node.title)
         await this.telegram.sendMessage(
           formatLandError(node.title, errMsg),
           topicSession.threadId,
         )
-        break
+        continue
       }
     }
 
-    await this.telegram.sendMessage(
-      formatLandComplete(succeeded, prNodes.length),
-      topicSession.threadId,
-    )
+    if (failedTitles.length === 0 && skipped === 0) {
+      await this.telegram.sendMessage(
+        formatLandComplete(succeeded, prNodes.length),
+        topicSession.threadId,
+      )
+    } else {
+      await this.telegram.sendMessage(
+        formatLandSummary(succeeded, failedTitles.length, skipped, prNodes.length, failedTitles),
+        topicSession.threadId,
+      )
+    }
   }
 
   /**
@@ -3273,6 +3344,14 @@ export class Dispatcher {
         const child = this.topicSessions.get(id)
         if (child?.cwd) return child.cwd
       }
+    }
+    return undefined
+  }
+
+  private findWorktreePathForBranch(node: DagNode): string | undefined {
+    if (node.threadId) {
+      const child = this.topicSessions.get(node.threadId)
+      if (child?.cwd) return child.cwd
     }
     return undefined
   }
@@ -3308,10 +3387,39 @@ export class Dispatcher {
     )
 
     let succeeded = 0
+    let skipped = 0
+    const failedTitles: string[] = []
     const gitOpts = { stdio: ["pipe" as const, "pipe" as const, "pipe" as const], timeout: 60_000 }
     const anyCwd = topicSession.cwd || this.topicSessions.get(topicSession.childThreadIds[0])?.cwd
 
     for (const { title, prUrl } of prUrls) {
+      try {
+        const prState = execSync(
+          `gh pr view ${JSON.stringify(prUrl)} --json state --jq .state`,
+          { ...gitOpts, cwd: anyCwd, encoding: "utf-8", env: { ...process.env } },
+        ).trim()
+
+        if (prState === "MERGED") {
+          skipped++
+          await this.telegram.sendMessage(
+            formatLandSkipped(title, prState),
+            topicSession.threadId,
+          )
+          continue
+        }
+
+        if (prState === "CLOSED") {
+          skipped++
+          await this.telegram.sendMessage(
+            formatLandSkipped(title, prState),
+            topicSession.threadId,
+          )
+          continue
+        }
+      } catch (err) {
+        log.warn({ err, prUrl }, "PR state check failed, attempting merge anyway")
+      }
+
       try {
         execSync(
           `gh pr merge ${JSON.stringify(prUrl)} --squash`,
@@ -3327,18 +3435,26 @@ export class Dispatcher {
         await new Promise((resolve) => setTimeout(resolve, 3000))
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err)
+        failedTitles.push(title)
         await this.telegram.sendMessage(
           formatLandError(title, errMsg),
           topicSession.threadId,
         )
-        break
+        continue
       }
     }
 
-    await this.telegram.sendMessage(
-      formatLandComplete(succeeded, prUrls.length),
-      topicSession.threadId,
-    )
+    if (failedTitles.length === 0 && skipped === 0) {
+      await this.telegram.sendMessage(
+        formatLandComplete(succeeded, prUrls.length),
+        topicSession.threadId,
+      )
+    } else {
+      await this.telegram.sendMessage(
+        formatLandSummary(succeeded, failedTitles.length, skipped, prUrls.length, failedTitles),
+        topicSession.threadId,
+      )
+    }
   }
 
   /**

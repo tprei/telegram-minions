@@ -807,6 +807,29 @@ export function formatLandError(title: string, error: string): string {
   return `❌ <b>Landing failed</b> at: ${esc(title)}\n<code>${esc(error)}</code>`
 }
 
+export function formatLandSkipped(title: string, state: string): string {
+  return `⏭ <b>Skipped</b>: ${esc(title)} (already ${esc(state.toLowerCase())})`
+}
+
+export function formatLandSummary(succeeded: number, failed: number, skipped: number, total: number, failedTitles: string[]): string {
+  const parts = [`🛬 <b>Landing complete</b>: ${succeeded}/${total} PRs merged to main`]
+  if (skipped > 0) parts.push(`⏭ ${skipped} skipped (already merged/closed)`)
+  if (failed > 0) {
+    parts.push(`❌ ${failed} failed:`)
+    for (const title of failedTitles) {
+      parts.push(`  • ${esc(title)}`)
+    }
+  }
+  return parts.join("\n")
+}
+
+export function formatLandConflictResolution(title: string, branch: string, resolved: boolean): string {
+  if (resolved) {
+    return `🤖 Resolved conflicts for <b>${esc(title)}</b> (<code>${esc(branch)}</code>)`
+  }
+  return `⚠️ Could not resolve conflicts for <b>${esc(title)}</b> (<code>${esc(branch)}</code>)`
+}
+
 export function formatLandRestacking(title: string, branch: string): string {
   return `🔄 Restacking <b>${esc(title)}</b> (<code>${esc(branch)}</code>)…`
 }
