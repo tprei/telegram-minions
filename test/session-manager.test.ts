@@ -10,7 +10,7 @@ import {
   buildExecutionPrompt as sessionBuildExecutionPrompt,
   dirSizeBytes,
   cleanBuildArtifacts,
-  updateLocalHead,
+
   resolveDefaultBranch,
   prepareWorkspace,
   removeWorkspace,

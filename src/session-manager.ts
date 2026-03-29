@@ -162,15 +162,24 @@ export function prepareWorkspace(
 
       if (fs.existsSync(bareDir)) {
         log.debug({ repoUrl, bareDir }, "fetching repo")
-        execSync(`git fetch --prune origin`, { ...gitOpts, cwd: bareDir })
-        updateLocalHead(bareDir, gitOpts)
       } else {
         log.debug({ repoUrl, bareDir }, "cloning bare repo")
         execSync(
           `git clone --bare ${JSON.stringify(repoUrl)} ${JSON.stringify(bareDir)}`,
           gitOpts,
         )
+        // bare clones don't configure a fetch refspec — add one so
+        // subsequent fetches update refs/heads/* from the remote
+        execSync(
+          `git config remote.origin.fetch "+refs/heads/*:refs/heads/*"`,
+          { ...gitOpts, cwd: bareDir },
+        )
       }
+      // Always fetch with explicit refspec to update local branch refs
+      execSync(
+        `git fetch --prune origin "+refs/heads/*:refs/heads/*"`,
+        { ...gitOpts, cwd: bareDir },
+      )
 
       const branch = `minion/${slug}`
       const startRef = startBranch ?? resolveDefaultBranch(bareDir, gitOpts, repoUrl)
@@ -261,20 +270,6 @@ export async function removeWorkspace(
   }
 }
 
-/**
- * Update local HEAD ref to match remote default branch.
- */
-export function updateLocalHead(bareDir: string, gitOpts: object): void {
-  const defaultBranch = resolveDefaultBranch(bareDir, gitOpts)
-  try {
-    execSync(
-      `git update-ref refs/heads/${defaultBranch} refs/remotes/origin/${defaultBranch}`,
-      { ...gitOpts, cwd: bareDir },
-    )
-  } catch {
-    /* remote ref may not exist yet */
-  }
-}
 
 /**
  * Resolve the default branch name from a bare git repo.
