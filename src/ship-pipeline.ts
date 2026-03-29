@@ -205,10 +205,13 @@ export class ShipPipeline {
             loggers.observer.error({ err, sessionId }, "verify onEvent error")
           })
         },
-        (m, state) => {
+        async (m, state) => {
           if (childSession.activeSessionId !== m.sessionId) return
           this.ctx.sessions.delete(childSession.threadId)
           childSession.activeSessionId = undefined
+
+          const durationMs = Date.now() - m.startedAt
+          await this.ctx.observer.onSessionComplete(m, state, durationMs).catch(() => {})
 
           const output = childSession.conversation
             .filter((msg) => msg.role === "assistant")
@@ -222,9 +225,6 @@ export class ShipPipeline {
             failed++
           }
           pending--
-
-          const durationMs = Date.now() - m.startedAt
-          this.ctx.observer.onSessionComplete(m, state, durationMs).catch(() => {})
 
           this.ctx.telegram.sendMessage(
             `${result.passed ? "✅" : "❌"} Verification ${result.passed ? "passed" : "failed"}: <b>${esc(node.title)}</b>`,
