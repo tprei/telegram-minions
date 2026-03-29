@@ -33,6 +33,11 @@ import {
   formatCINoChecks,
   formatUsage,
   formatDagNodeComplete,
+  formatShipThinkStart,
+  formatShipPlanStart,
+  formatShipVerifyStart,
+  formatShipPhaseAdvance,
+  formatShipComplete,
 } from "../src/format.js"
 import type { ClaudeUsageResponse } from "../src/claude-usage.js"
 import type { AggregateStats, SessionRecord, ModeBreakdown } from "../src/stats.js"
@@ -639,6 +644,69 @@ describe("formatReviewComplete", () => {
     expect(msg).toContain("Review complete")
     expect(msg).toContain("cool-slug")
     expect(msg).toContain("/reply")
+  })
+})
+
+describe("formatShipThinkStart", () => {
+  it("includes ship header, repo, slug, and task", () => {
+    const msg = formatShipThinkStart("my-repo", "cool-slug", "Build auth system")
+    expect(msg).toContain("Ship: researching")
+    expect(msg).toContain("my-repo")
+    expect(msg).toContain("cool-slug")
+    expect(msg).toContain("Build auth system")
+  })
+
+  it("includes auto-advance description", () => {
+    const msg = formatShipThinkStart("repo", "slug", "task")
+    expect(msg).toContain("Auto-advancing")
+  })
+
+  it("truncates long tasks", () => {
+    const longTask = "x".repeat(300)
+    const msg = formatShipThinkStart("repo", "slug", longTask)
+    expect(msg).toContain("\u2026")
+  })
+})
+
+describe("formatShipPlanStart", () => {
+  it("includes ship planning header", () => {
+    const msg = formatShipPlanStart("my-repo", "cool-slug", "Build auth system")
+    expect(msg).toContain("Ship: planning")
+    expect(msg).toContain("my-repo")
+    expect(msg).toContain("implementation plan")
+  })
+})
+
+describe("formatShipVerifyStart", () => {
+  it("includes ship verify header", () => {
+    const msg = formatShipVerifyStart("my-repo", "cool-slug", "Build auth system")
+    expect(msg).toContain("Ship: verifying")
+    expect(msg).toContain("quality gates")
+  })
+})
+
+describe("formatShipPhaseAdvance", () => {
+  it("shows phase transition", () => {
+    const msg = formatShipPhaseAdvance("cool-slug", "think", "plan")
+    expect(msg).toContain("think complete")
+    expect(msg).toContain("plan")
+    expect(msg).toContain("cool-slug")
+  })
+})
+
+describe("formatShipComplete", () => {
+  it("shows success when all passed", () => {
+    const msg = formatShipComplete("cool-slug", 3, 0, 3)
+    expect(msg).toContain("Ship complete")
+    expect(msg).toContain("All 3 node(s) verified")
+    expect(msg).toContain("\u2705")
+  })
+
+  it("shows warning when some failed", () => {
+    const msg = formatShipComplete("cool-slug", 2, 1, 3)
+    expect(msg).toContain("2/3")
+    expect(msg).toContain("1 failed")
+    expect(msg).toContain("\u26a0\ufe0f")
   })
 })
 

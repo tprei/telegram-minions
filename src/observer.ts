@@ -12,6 +12,9 @@ import {
   formatPlanStart,
   formatThinkStart,
   formatReviewStart,
+  formatShipThinkStart,
+  formatShipPlanStart,
+  formatShipVerifyStart,
   formatSessionComplete,
   formatSessionError,
   formatAssistantTextChunks,
@@ -94,7 +97,13 @@ export class Observer {
       onTextCapture,
       onDeadThread,
     })
-    const msg = meta.mode === "think"
+    const msg = meta.mode === "ship-think"
+      ? formatShipThinkStart(meta.repo, meta.topicName, task)
+      : meta.mode === "ship-plan"
+      ? formatShipPlanStart(meta.repo, meta.topicName, task)
+      : meta.mode === "ship-verify"
+      ? formatShipVerifyStart(meta.repo, meta.topicName, task)
+      : meta.mode === "think"
       ? formatThinkStart(meta.repo, meta.topicName, task)
       : meta.mode === "plan"
       ? formatPlanStart(meta.repo, meta.topicName, task)

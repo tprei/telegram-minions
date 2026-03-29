@@ -35,7 +35,7 @@ export {
   validateProviderProfile,
 } from "./config-validator.js"
 export type { ValidationResult } from "./config-validator.js"
-export { DEFAULT_PROMPTS, DEFAULT_TASK_PROMPT, DEFAULT_PLAN_PROMPT, DEFAULT_THINK_PROMPT, DEFAULT_REVIEW_PROMPT } from "./prompts.js"
+export { DEFAULT_PROMPTS, DEFAULT_TASK_PROMPT, DEFAULT_PLAN_PROMPT, DEFAULT_THINK_PROMPT, DEFAULT_REVIEW_PROMPT, DEFAULT_SHIP_PLAN_PROMPT, DEFAULT_SHIP_VERIFY_PROMPT } from "./prompts.js"
 export { TelegramClient } from "./telegram.js"
 export { Observer } from "./observer.js"
 export { Dispatcher } from "./dispatcher.js"
@@ -48,4 +48,10 @@ export type {
   SessionState,
   GooseStreamEvent,
   GooseMessage,
+  ShipPhase,
+  AutoAdvance,
+  VerificationState,
+  VerificationCheck,
+  VerificationRound,
 } from "./types.js"
+export { SHIP_PREFIX } from "./command-parser.js"

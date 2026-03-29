@@ -102,6 +102,8 @@ export interface SystemPrompts {
   plan: string
   think: string
   review: string
+  ship_plan: string
+  ship_verify: string
 }
 
 export interface ProviderProfile {

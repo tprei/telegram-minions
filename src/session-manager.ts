@@ -30,7 +30,7 @@ export interface PendingTask {
   threadId?: number
   repoSlug?: string
   repoUrl?: string
-  mode: "task" | "plan" | "think" | "review"
+  mode: "task" | "plan" | "think" | "review" | "ship-think"
 }
 
 /**
@@ -38,8 +38,8 @@ export interface PendingTask {
  * Used when resuming a session with user feedback.
  */
 export function buildContextPrompt(topicSession: TopicSession): string {
-  const isThink = topicSession.mode === "think"
-  const isPlan = topicSession.mode === "plan"
+  const isThink = topicSession.mode === "think" || topicSession.mode === "ship-think"
+  const isPlan = topicSession.mode === "plan" || topicSession.mode === "ship-plan"
   const isReview = topicSession.mode === "review"
   const header = isThink
     ? "## Research context\n\nYou are continuing a deep-research conversation. Here is the history:"
@@ -100,7 +100,7 @@ export function buildExecutionPrompt(
   const lines: string[] = ["## Task", "", originalRequest, ""]
 
   if (conversation.length > 1) {
-    const isThink = topicSession.mode === "think"
+    const isThink = topicSession.mode === "think" || topicSession.mode === "ship-think"
     const isReview = topicSession.mode === "review"
     lines.push(
       isThink

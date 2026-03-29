@@ -6,7 +6,7 @@ import type { GooseConfig, ClaudeConfig, McpConfig, ProviderProfile } from "./co
 import type { GooseStreamEvent, SessionMeta, SessionState } from "./types.js"
 import { translateClaudeEvents } from "./claude-stream.js"
 import { captureException, setContext, addBreadcrumb } from "./sentry.js"
-import { DEFAULT_TASK_PROMPT, DEFAULT_PLAN_PROMPT, DEFAULT_THINK_PROMPT, DEFAULT_REVIEW_PROMPT } from "./prompts.js"
+import { DEFAULT_TASK_PROMPT, DEFAULT_PLAN_PROMPT, DEFAULT_THINK_PROMPT, DEFAULT_REVIEW_PROMPT, DEFAULT_SHIP_PLAN_PROMPT, DEFAULT_SHIP_VERIFY_PROMPT } from "./prompts.js"
 import { createSessionLogger } from "./logger.js"
 
 export const SCREENSHOTS_DIR = ".screenshots"
@@ -26,6 +26,7 @@ export interface SessionConfig {
 const PLAN_DISALLOWED_TOOLS = ["Edit", "Write", "NotebookEdit"]
 const THINK_DISALLOWED_TOOLS = ["Edit", "Write", "NotebookEdit"]
 const REVIEW_DISALLOWED_TOOLS = ["Edit", "Write", "NotebookEdit"]
+const SHIP_PLAN_DISALLOWED_TOOLS = ["Edit", "Write", "NotebookEdit"]
 
 type McpServerConfig = {
   command: string
@@ -73,10 +74,14 @@ export class SessionHandle {
       data: { repo: this.meta.repo, sessionId: this.meta.sessionId },
     })
 
-    if (this.meta.mode === "think" && !systemPrompt) {
+    if ((this.meta.mode === "think" || this.meta.mode === "ship-think") && !systemPrompt) {
       this.startClaudeThink(task)
     } else if (this.meta.mode === "plan" && !systemPrompt) {
       this.startClaude(task)
+    } else if (this.meta.mode === "ship-plan" && !systemPrompt) {
+      this.startClaudeShipPlan(task)
+    } else if (this.meta.mode === "ship-verify" && !systemPrompt) {
+      this.startClaudeShipVerify(task)
     } else if (this.meta.mode === "review" && !systemPrompt) {
       this.startClaudeReview(task)
     } else {
@@ -414,6 +419,63 @@ export class SessionHandle {
         cwd: this.meta.cwd,
         env,
         stdio: ["ignore", "pipe", "pipe"],
+      },
+    )
+
+    this.attachProcessHandlers(this.parseClaudeLine.bind(this))
+  }
+
+  private startClaudeShipPlan(task: string): void {
+    const env = this.buildIsolatedEnv()
+
+    this.process = spawn(
+      "claude",
+      [
+        "--print",
+        "--output-format", "stream-json",
+        "--verbose",
+        "--include-partial-messages",
+        "--dangerously-skip-permissions",
+        "--no-session-persistence",
+        "--disallowed-tools", ...SHIP_PLAN_DISALLOWED_TOOLS,
+        ...this.buildClaudeMcpConfigArgs(),
+        "--append-system-prompt", DEFAULT_SHIP_PLAN_PROMPT,
+        "--model", this.sessionConfig.claude.planModel,
+        task,
+      ],
+      {
+        cwd: this.meta.cwd,
+        env,
+        stdio: ["ignore", "pipe", "pipe"],
+        detached: true,
+      },
+    )
+
+    this.attachProcessHandlers(this.parseClaudeLine.bind(this))
+  }
+
+  private startClaudeShipVerify(task: string): void {
+    const env = this.buildIsolatedEnv()
+
+    this.process = spawn(
+      "claude",
+      [
+        "--print",
+        "--output-format", "stream-json",
+        "--verbose",
+        "--include-partial-messages",
+        "--dangerously-skip-permissions",
+        "--no-session-persistence",
+        ...this.buildClaudeMcpConfigArgs(),
+        "--append-system-prompt", DEFAULT_SHIP_VERIFY_PROMPT,
+        "--model", this.sessionConfig.claude.reviewModel,
+        task,
+      ],
+      {
+        cwd: this.meta.cwd,
+        env,
+        stdio: ["ignore", "pipe", "pipe"],
+        detached: true,
       },
     )
 

@@ -6,7 +6,7 @@ import type { TelegramClient } from "./telegram.js"
 import { captureException } from "./sentry.js"
 import { SessionHandle, type SessionConfig } from "./session.js"
 import { Observer } from "./observer.js"
-import type { TelegramUpdate, TelegramCallbackQuery, TelegramPhotoSize, SessionMeta, TopicSession, SessionState, TopicMessage } from "./types.js"
+import type { TelegramUpdate, TelegramCallbackQuery, TelegramPhotoSize, SessionMeta, TopicSession, SessionMode, SessionState, TopicMessage, AutoAdvance } from "./types.js"
 import { generateSlug } from "./slugs.js"
 import type { MinionConfig, McpConfig } from "./config-types.js"
 import { DEFAULT_PROMPTS } from "./prompts.js"
@@ -62,7 +62,10 @@ import {
   formatPinnedStatus,
   formatPinnedSplitStatus,
   formatPinnedDagStatus,
+  formatShipPhaseAdvance,
+  formatShipComplete,
 } from "./format.js"
+import { buildCompletenessReviewPrompt, parseCompletenessResult } from "./verification.js"
 import { extractSplitItems, buildSplitChildPrompt } from "./split.js"
 import { extractStackItems, extractDagItems, buildDagChildPrompt } from "./dag-extract.js"
 import {
@@ -86,7 +89,7 @@ import {
   TASK_PREFIX, TASK_SHORT, PLAN_PREFIX, THINK_PREFIX, REVIEW_PREFIX,
   EXECUTE_CMD, STATUS_CMD, STATS_CMD, REPLY_PREFIX, REPLY_SHORT,
   CLOSE_CMD, STOP_CMD, HELP_CMD, CLEAN_CMD, USAGE_CMD, CONFIG_CMD,
-  SPLIT_CMD, STACK_CMD, DAG_CMD, LAND_CMD, RETRY_CMD, FORCE_CMD,
+  SPLIT_CMD, STACK_CMD, DAG_CMD, LAND_CMD, RETRY_CMD, FORCE_CMD, SHIP_PREFIX,
   parseTaskArgs, parseReviewArgs, buildReviewAllTask,
   buildRepoKeyboard, buildProfileKeyboard,
   escapeHtml, extractRepoName, appendImageContext,
@@ -526,6 +529,11 @@ export class Dispatcher {
       return
     }
 
+    if (text?.startsWith(SHIP_PREFIX)) {
+      await this.handleShipCommand(text.slice(SHIP_PREFIX.length).trim(), message.message_thread_id)
+      return
+    }
+
     if (text?.startsWith(TASK_PREFIX) || text?.startsWith(TASK_SHORT + " ") || text === TASK_SHORT) {
       const body = text.startsWith(TASK_PREFIX)
         ? text.slice(TASK_PREFIX.length).trim()
@@ -594,7 +602,7 @@ export class Dispatcher {
       return
     }
 
-    if (!data.startsWith("repo:") && !data.startsWith("plan-repo:") && !data.startsWith("think-repo:") && !data.startsWith("review-repo:")) {
+    if (!data.startsWith("repo:") && !data.startsWith("plan-repo:") && !data.startsWith("think-repo:") && !data.startsWith("review-repo:") && !data.startsWith("ship-repo:")) {
       await this.telegram.answerCallbackQuery(query.id)
       return
     }
@@ -602,12 +610,15 @@ export class Dispatcher {
     const isThink = data.startsWith("think-repo:")
     const isPlan = data.startsWith("plan-repo:")
     const isReview = data.startsWith("review-repo:")
+    const isShip = data.startsWith("ship-repo:")
     const repoSlug = isThink
       ? data.slice("think-repo:".length)
       : isPlan
       ? data.slice("plan-repo:".length)
       : isReview
       ? data.slice("review-repo:".length)
+      : isShip
+      ? data.slice("ship-repo:".length)
       : data.slice("repo:".length)
     const repoUrl = this.config.repos[repoSlug]
     if (!repoUrl) {
@@ -631,7 +642,10 @@ export class Dispatcher {
         }
 
         const defaultProfileId = this.profileStore.getDefaultId()
-        if (defaultProfileId) {
+        if (pending.mode === "ship-think") {
+          const autoAdvance: AutoAdvance = { phase: "think", featureDescription: pending.task, autoLand: false }
+          await this.startTopicSession(repoUrl, pending.task, "ship-think", undefined, defaultProfileId, autoAdvance)
+        } else if (defaultProfileId) {
           await this.startTopicSessionWithProfile(repoUrl, pending.task, pending.mode, defaultProfileId)
         } else {
           const profiles = this.profileStore.list()
@@ -1133,17 +1147,74 @@ export class Dispatcher {
     await this.startTopicSession(repoUrl, task, "review")
   }
 
+  private async handleShipCommand(args: string, replyThreadId?: number): Promise<void> {
+    const { repoUrl, task } = parseTaskArgs(this.config.repos, args)
+
+    if (!task) {
+      if (replyThreadId !== undefined) {
+        await this.telegram.sendMessage(
+          `Usage: <code>/ship [repo] description of the feature to build</code>`,
+          replyThreadId,
+        )
+      }
+      return
+    }
+
+    const autoAdvance: AutoAdvance = { phase: "think", featureDescription: task, autoLand: false }
+
+    if (!repoUrl) {
+      const repoKeys = Object.keys(this.config.repos)
+      if (repoKeys.length > 0) {
+        const keyboard = buildRepoKeyboard(repoKeys, "ship")
+        const msgId = await this.telegram.sendMessageWithKeyboard(
+          `Pick a repo for ship: <i>${escapeHtml(task)}</i>`,
+          keyboard,
+          replyThreadId,
+        )
+        if (msgId) {
+          this.pendingTasks.set(msgId, { task, threadId: replyThreadId, mode: "ship-think" })
+        }
+        return
+      }
+    }
+
+    const defaultProfileId = this.profileStore.getDefaultId()
+    if (defaultProfileId) {
+      await this.startTopicSession(repoUrl, task, "ship-think", undefined, defaultProfileId, autoAdvance)
+      return
+    }
+
+    const profiles = this.profileStore.list()
+    if (profiles.length > 1) {
+      const keyboard = buildProfileKeyboard(profiles)
+      const msgId = await this.telegram.sendMessageWithKeyboard(
+        `Pick a profile for ship: <i>${escapeHtml(task)}</i>`,
+        keyboard,
+        replyThreadId,
+      )
+      if (msgId) {
+        this.pendingProfiles.set(msgId, { task, threadId: replyThreadId, repoUrl, mode: "ship-think" })
+      }
+      return
+    }
+
+    await this.startTopicSession(repoUrl, task, "ship-think", undefined, undefined, autoAdvance)
+  }
+
   private async startTopicSession(
     repoUrl: string | undefined,
     task: string,
-    mode: "task" | "plan" | "think" | "review",
+    mode: SessionMode,
     photos?: TelegramPhotoSize[],
     profileId?: string,
+    autoAdvance?: AutoAdvance,
   ): Promise<void> {
     const sessionId = crypto.randomUUID()
     const slug = generateSlug(sessionId)
     const repo = repoUrl ? extractRepoName(repoUrl) : "local"
-    const topicName = mode === "think"
+    const topicName = autoAdvance
+      ? `🚢 ${repo} · ${slug}`
+      : mode === "think"
       ? `🧠 ${repo} · ${slug}`
       : mode === "plan"
       ? `📋 ${repo} · ${slug}`
@@ -1184,6 +1255,7 @@ export class Dispatcher {
       lastActivityAt: Date.now(),
       profileId,
       branch: repoUrl ? `minion/${slug}` : undefined,
+      autoAdvance,
     }
 
     this.topicSessions.set(threadId, topicSession)
@@ -1196,7 +1268,7 @@ export class Dispatcher {
   private async startTopicSessionWithProfile(
     repoUrl: string | undefined,
     task: string,
-    mode: "task" | "plan" | "think" | "review",
+    mode: SessionMode,
     profileId?: string,
   ): Promise<void> {
     return this.startTopicSession(repoUrl, task, mode, undefined, profileId)
@@ -1279,6 +1351,37 @@ export class Dispatcher {
           totalTokens: m.totalTokens ?? 0,
           timestamp: Date.now(),
         }).catch(() => {}) // best effort
+
+        // Ship auto-advance: intercept completion for ship-* modes
+        if (topicSession.autoAdvance && (topicSession.mode === "ship-think" || topicSession.mode === "ship-plan" || topicSession.mode === "ship-verify")) {
+          if (state === "completed") {
+            this.observer.flushAndComplete(m, state, durationMs).then(() => {
+              writeSessionLog(topicSession, m, state, durationMs)
+              this.handleShipAdvance(topicSession).catch((err) => {
+                loggers.ship.error({ err, slug: topicSession.slug }, "ship advance error")
+                this.telegram.sendMessage(
+                  `❌ Ship pipeline error during ${topicSession.autoAdvance!.phase} phase: ${err instanceof Error ? err.message : String(err)}`,
+                  topicSession.threadId,
+                ).catch(() => {})
+              })
+            }).catch((err) => {
+              loggers.ship.error({ err }, "flushAndComplete error in ship phase")
+            })
+          } else {
+            // errored — halt pipeline
+            topicSession.autoAdvance.phase = "done"
+            this.updateTopicTitle(topicSession, "❌").catch(() => {})
+            this.observer.onSessionComplete(m, state, durationMs).catch(() => {})
+            this.telegram.sendMessage(
+              `❌ Ship pipeline halted: ${topicSession.mode} phase errored.`,
+              topicSession.threadId,
+            ).catch(() => {})
+            writeSessionLog(topicSession, m, state, durationMs)
+          }
+          this.persistTopicSessions().catch(() => {})
+          this.cleanBuildArtifacts(topicSession.cwd)
+          return
+        }
 
         if (topicSession.mode === "think") {
           this.updateTopicTitle(topicSession, "💬").catch(() => {})
@@ -2591,7 +2694,19 @@ export class Dispatcher {
       // Run deferred babysit for any remaining non-DAG children (splits)
       await this.runDeferredBabysit(parent.threadId)
 
-      if (totalFailed > 0) {
+      // Ship pipeline: auto-advance to verification
+      if (parent.autoAdvance?.phase === "dag") {
+        if (totalFailed > 0) {
+          parent.autoAdvance.phase = "done"
+          await this.updateTopicTitle(parent, "⚠️")
+          await this.telegram.sendMessage(
+            `🚢 Ship pipeline halted: ${totalFailed} DAG node(s) failed. Use <code>/retry</code> to fix failed nodes.`,
+            parent.threadId,
+          )
+        } else {
+          await this.shipAdvanceToVerification(parent, graph)
+        }
+      } else if (totalFailed > 0) {
         await this.updateTopicTitle(parent, "⚠️")
         await this.telegram.sendMessage(
           `Send <code>/retry</code> to retry failed nodes, <code>/force node-id</code> to advance past CI failures, or <code>/close</code> to finish.`,
@@ -2730,6 +2845,266 @@ export class Dispatcher {
     this.broadcastDag(graph, "dag_updated")
     await this.updatePinnedDagStatus(topicSession, graph)
     await this.updateDagPRDescriptions(graph, topicSession.cwd)
+    await this.persistTopicSessions()
+  }
+
+  // ── Ship pipeline state machine ──────────────────────────────────────
+
+  private async handleShipAdvance(topicSession: TopicSession): Promise<void> {
+    const advance = topicSession.autoAdvance
+    if (!advance) return
+
+    switch (advance.phase) {
+      case "think":
+        await this.shipAdvanceToPlanning(topicSession)
+        break
+      case "plan":
+        await this.shipAdvanceToDag(topicSession)
+        break
+      case "dag":
+        // DAG completion is handled in onDagChildComplete
+        break
+      case "verify":
+        await this.shipFinalize(topicSession)
+        break
+      case "done":
+        break
+    }
+  }
+
+  private async shipAdvanceToPlanning(topicSession: TopicSession): Promise<void> {
+    await this.telegram.sendMessage(
+      formatShipPhaseAdvance(topicSession.slug, "think", "plan"),
+      topicSession.threadId,
+    )
+
+    const MAX_CHARS = 4000
+    const researchFindings = topicSession.conversation
+      .filter((m) => m.role === "assistant")
+      .map((m) => m.text.length > MAX_CHARS ? m.text.slice(-MAX_CHARS) : m.text)
+      .join("\n\n")
+
+    const planTask = [
+      "## Feature request",
+      "",
+      topicSession.autoAdvance!.featureDescription,
+      "",
+      "## Research findings",
+      "",
+      researchFindings || "(no research output)",
+      "",
+      "---",
+      "",
+      "Based on the research above, produce a detailed DAG-ready implementation plan.",
+    ].join("\n")
+
+    topicSession.autoAdvance!.phase = "plan"
+    topicSession.mode = "ship-plan"
+    topicSession.pendingFeedback = []
+    this.persistTopicSessions().catch(() => {})
+
+    await this.spawnTopicAgent(topicSession, planTask)
+  }
+
+  private async shipAdvanceToDag(topicSession: TopicSession): Promise<void> {
+    await this.telegram.sendMessage(
+      formatShipPhaseAdvance(topicSession.slug, "plan", "dag"),
+      topicSession.threadId,
+    )
+
+    topicSession.autoAdvance!.phase = "dag"
+
+    const GRACE_PERIOD_MS = 2000
+    await new Promise((resolve) => setTimeout(resolve, GRACE_PERIOD_MS))
+
+    const profile = topicSession.profileId ? this.profileStore.get(topicSession.profileId) : undefined
+    const result = await extractDagItems(topicSession.conversation, undefined, profile)
+
+    if (result.error === "system") {
+      topicSession.autoAdvance!.phase = "done"
+      await this.telegram.sendMessage(
+        `❌ Ship pipeline halted: DAG extraction failed — <code>${result.errorMessage ?? "Unknown error"}</code>`,
+        topicSession.threadId,
+      )
+      await this.updateTopicTitle(topicSession, "❌")
+      return
+    }
+
+    if (result.items.length === 0) {
+      topicSession.autoAdvance!.phase = "done"
+      await this.telegram.sendMessage(
+        `❌ Ship pipeline halted: could not extract work items from the plan.`,
+        topicSession.threadId,
+      )
+      await this.updateTopicTitle(topicSession, "❌")
+      return
+    }
+
+    await this.startDag(topicSession, result.items, false)
+    await this.persistTopicSessions()
+  }
+
+  private async shipAdvanceToVerification(topicSession: TopicSession, graph: DagGraph): Promise<void> {
+    await this.telegram.sendMessage(
+      formatShipPhaseAdvance(topicSession.slug, "dag", "verify"),
+      topicSession.threadId,
+    )
+
+    topicSession.autoAdvance!.phase = "verify"
+
+    const completedNodes = graph.nodes.filter((n) => n.status === "done" && n.prUrl && n.branch)
+    if (completedNodes.length === 0) {
+      await this.shipFinalize(topicSession)
+      return
+    }
+
+    let pending = completedNodes.length
+    let passed = 0
+    let failed = 0
+
+    const onVerifyDone = async () => {
+      if (pending > 0) return
+      topicSession.verificationState = {
+        dagId: graph.id,
+        maxRounds: 1,
+        rounds: [{
+          round: 1,
+          checks: completedNodes.map((n) => ({
+            kind: "completeness-review" as const,
+            status: (passed === completedNodes.length ? "passed" : "failed") as "passed" | "failed",
+            nodeId: n.id,
+            finishedAt: Date.now(),
+          })),
+          startedAt: Date.now(),
+        }],
+        status: failed === 0 ? "passed" : "failed",
+      }
+      await this.shipFinalize(topicSession)
+    }
+
+    for (const node of completedNodes) {
+      const childSession = this.findChildSession(topicSession, node.threadId)
+      if (!childSession) {
+        pending--
+        failed++
+        continue
+      }
+
+      const verifyTask = buildCompletenessReviewPrompt(
+        node.title,
+        node.description,
+        node.branch!,
+        node.prUrl!,
+      )
+
+      childSession.mode = "ship-verify"
+
+      const sessionId = crypto.randomUUID()
+      childSession.activeSessionId = sessionId
+
+      const meta: SessionMeta = {
+        sessionId,
+        threadId: childSession.threadId,
+        topicName: childSession.slug,
+        repo: childSession.repo,
+        cwd: childSession.cwd,
+        startedAt: Date.now(),
+        mode: "ship-verify",
+      }
+
+      const onTextCapture = (_sid: string, text: string) => {
+        this.pushToConversation(childSession, { role: "assistant", text })
+      }
+
+      const childProfile = childSession.profileId ? this.profileStore.get(childSession.profileId) : undefined
+      const sessionConfig: import("./session.js").SessionConfig = {
+        goose: this.config.goose,
+        claude: this.config.claude,
+        mcp: this.config.mcp,
+        profile: childProfile,
+        sessionEnvPassthrough: this.config.sessionEnvPassthrough,
+      }
+
+      const handle = new SessionHandle(
+        meta,
+        (event) => {
+          this.observer.onEvent(meta, event).catch((err) => {
+            loggers.observer.error({ err, sessionId }, "verify onEvent error")
+          })
+        },
+        (m, state) => {
+          if (childSession.activeSessionId !== m.sessionId) return
+          this.sessions.delete(childSession.threadId)
+          childSession.activeSessionId = undefined
+
+          const output = childSession.conversation
+            .filter((msg) => msg.role === "assistant")
+            .map((msg) => msg.text)
+            .join("\n")
+          const result = parseCompletenessResult(output)
+
+          if (result.passed) {
+            passed++
+          } else {
+            failed++
+          }
+          pending--
+
+          const durationMs = Date.now() - m.startedAt
+          this.observer.onSessionComplete(m, state, durationMs).catch(() => {})
+
+          this.telegram.sendMessage(
+            `${result.passed ? "✅" : "❌"} Verification ${result.passed ? "passed" : "failed"}: <b>${esc(node.title)}</b>`,
+            topicSession.threadId,
+          ).catch(() => {})
+
+          onVerifyDone().catch((err) => {
+            loggers.ship.error({ err }, "shipFinalize error after verification")
+          })
+        },
+        this.config.workspace.sessionTimeoutMs,
+        this.config.workspace.sessionInactivityTimeoutMs,
+        sessionConfig,
+      )
+
+      this.sessions.set(childSession.threadId, { handle, meta, task: verifyTask })
+      const onDeadThread = () => {
+        this.topicSessions.delete(meta.threadId)
+        this.persistTopicSessions().catch(() => {})
+      }
+      await this.observer.onSessionStart(meta, verifyTask, onTextCapture, onDeadThread)
+      handle.start(verifyTask)
+    }
+  }
+
+  private findChildSession(parent: TopicSession, threadId?: number): TopicSession | undefined {
+    if (!threadId) return undefined
+    return this.topicSessions.get(threadId)
+  }
+
+  private async shipFinalize(topicSession: TopicSession): Promise<void> {
+    topicSession.autoAdvance!.phase = "done"
+
+    const vs = topicSession.verificationState
+    const passed = vs ? vs.rounds.flatMap((r) => r.checks).filter((c) => c.status === "passed").length : 0
+    const failed = vs ? vs.rounds.flatMap((r) => r.checks).filter((c) => c.status === "failed").length : 0
+    const total = passed + failed
+
+    await this.telegram.sendMessage(
+      formatShipComplete(topicSession.slug, passed, failed, total),
+      topicSession.threadId,
+    )
+
+    if (topicSession.autoAdvance!.autoLand && failed === 0 && topicSession.dagId) {
+      await this.handleLandCommand(topicSession)
+    } else if (failed === 0 && topicSession.dagId) {
+      await this.telegram.sendMessage(
+        `Use <code>/land</code> to merge PRs, or <code>/close</code> to clean up.`,
+        topicSession.threadId,
+      )
+    }
+
+    await this.updateTopicTitle(topicSession, failed === 0 ? "✅" : "⚠️")
     await this.persistTopicSessions()
   }
 

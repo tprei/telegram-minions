@@ -320,6 +320,76 @@ export function formatTaskComplete(
   ].join("\n")
 }
 
+export function formatShipThinkStart(
+  repo: string,
+  slug: string,
+  task: string,
+): string {
+  const MAX_TASK = 200
+  return [
+    `🚢 <b>Ship: researching</b>  ·  📦 <b>${esc(repo)}</b>  ·  🏷 <code>${esc(slug)}</code>`,
+    ``,
+    `<blockquote>${esc(truncate(task, MAX_TASK))}</blockquote>`,
+    ``,
+    `Auto-advancing through think → plan → dag → verify.`,
+  ].join("\n")
+}
+
+export function formatShipPlanStart(
+  repo: string,
+  slug: string,
+  task: string,
+): string {
+  const MAX_TASK = 200
+  return [
+    `🚢 <b>Ship: planning</b>  ·  📦 <b>${esc(repo)}</b>  ·  🏷 <code>${esc(slug)}</code>`,
+    ``,
+    `<blockquote>${esc(truncate(task, MAX_TASK))}</blockquote>`,
+    ``,
+    `Building implementation plan from research findings.`,
+  ].join("\n")
+}
+
+export function formatShipVerifyStart(
+  repo: string,
+  slug: string,
+  task: string,
+): string {
+  const MAX_TASK = 200
+  return [
+    `🚢 <b>Ship: verifying</b>  ·  📦 <b>${esc(repo)}</b>  ·  🏷 <code>${esc(slug)}</code>`,
+    ``,
+    `<blockquote>${esc(truncate(task, MAX_TASK))}</blockquote>`,
+    ``,
+    `Running quality gates, CI checks, and completeness review.`,
+  ].join("\n")
+}
+
+export function formatShipPhaseAdvance(
+  slug: string,
+  from: string,
+  to: string,
+): string {
+  return `🚢 <b>Ship: ${esc(from)} complete</b>  ·  🏷 <code>${esc(slug)}</code>\n\nAdvancing to <b>${esc(to)}</b> phase…`
+}
+
+export function formatShipComplete(
+  slug: string,
+  passed: number,
+  failed: number,
+  total: number,
+): string {
+  const icon = failed === 0 ? "✅" : "⚠️"
+  const summary = failed === 0
+    ? `All ${total} node(s) verified.`
+    : `${passed}/${total} node(s) passed, ${failed} failed.`
+  return [
+    `${icon} <b>Ship complete</b>  ·  🏷 <code>${esc(slug)}</code>`,
+    ``,
+    summary,
+  ].join("\n")
+}
+
 export function formatReviewStart(
   repo: string,
   slug: string,
@@ -363,7 +433,7 @@ export function formatStatus(
     const state = handle.getState()
     const icon = handle.isActive() ? "🟢" : "🔴"
     const elapsed = formatElapsed(Date.now() - meta.startedAt)
-    const mode = meta.mode === "think" ? "🧠 think" : meta.mode === "plan" ? "📋 plan" : meta.mode === "review" ? "👀 review" : meta.mode === "ci-fix" ? "🔧 ci-fix" : "⚡ task"
+    const mode = meta.mode === "think" ? "🧠 think" : meta.mode === "plan" ? "📋 plan" : meta.mode === "review" ? "👀 review" : meta.mode === "ci-fix" ? "🔧 ci-fix" : meta.mode === "ship-think" ? "🚢 think" : meta.mode === "ship-plan" ? "🚢 plan" : meta.mode === "ship-verify" ? "🚢 verify" : "⚡ task"
     lines.push(`${icon} <b>${esc(meta.topicName)}</b>  ·  📦 ${esc(meta.repo)}  ·  ${mode}  ·  ${state}  ·  ⏱ ${elapsed}`)
     lines.push(`   <blockquote>${esc(truncate(task, 120))}</blockquote>`)
     lines.push("")
@@ -372,7 +442,7 @@ export function formatStatus(
   const standbyTopics = topicSessions.filter((p) => !p.activeSessionId)
   for (const topic of standbyTopics) {
     const originalTask = topic.conversation[0]?.text ?? ""
-    const topicMode = topic.mode === "think" ? "🧠 think" : topic.mode === "review" ? "👀 review" : "📋 plan"
+    const topicMode = topic.mode === "think" ? "🧠 think" : topic.mode === "review" ? "👀 review" : topic.mode === "ship-think" ? "🚢 think" : topic.mode === "ship-plan" ? "🚢 plan" : topic.mode === "ship-verify" ? "🚢 verify" : "📋 plan"
     lines.push(`🟡 <b>${esc(topic.slug)}</b>  ·  📦 ${esc(topic.repo)}  ·  ${topicMode}  ·  awaiting feedback`)
     lines.push(`   <blockquote>${esc(truncate(originalTask, 120))}</blockquote>`)
     lines.push("")
@@ -388,6 +458,7 @@ export function formatHelp(): string {
     `<code>/task [repo] description</code> (or <code>/w</code>) — start a one-shot coding task`,
     `<code>/plan [repo] description</code> — start a multi-turn planning session`,
     `<code>/think [repo] question</code> — start a deep research session`,
+    `<code>/ship [repo] description</code> — automated pipeline: think → plan → dag → verify`,
     `<code>/review [repo] PR#</code> — review a pull request (or all unreviewed PRs)`,
     `<code>/status</code> — show active sessions`,
     `<code>/stats</code> — show aggregate usage statistics`,
