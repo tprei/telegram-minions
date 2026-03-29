@@ -332,6 +332,17 @@ describe("isDagComplete", () => {
     graph.nodes[0].status = "done"
     expect(isDagComplete(graph)).toBe(false) // b still pending
   })
+
+  it("returns true when all nodes are landed", () => {
+    const graph = buildDag("test", [
+      { id: "a", title: "A", description: "A", dependsOn: [] },
+      { id: "b", title: "B", description: "B", dependsOn: ["a"] },
+    ], 1, "repo")
+
+    graph.nodes[0].status = "landed"
+    graph.nodes[1].status = "landed"
+    expect(isDagComplete(graph)).toBe(true)
+  })
 })
 
 describe("getUpstreamBranches", () => {
@@ -493,6 +504,35 @@ describe("needsRestack", () => {
     expect(needsRestack(graph, "a")).toEqual([])
   })
 
+  it("excludes landed nodes from restacking", () => {
+    const graph = buildDag("test", [
+      { id: "a", title: "A", description: "A", dependsOn: [] },
+      { id: "b", title: "B", description: "B", dependsOn: ["a"] },
+    ], 1, "repo")
+
+    graph.nodes[0].status = "done"
+    graph.nodes[1].status = "landed"
+    graph.nodes[1].branch = "minion/b"
+    graph.nodes[1].mergeBase = "abc"
+
+    expect(needsRestack(graph, "a")).toEqual([])
+  })
+
+  it("includes done-but-not-landed nodes for restacking", () => {
+    const graph = buildDag("test", [
+      { id: "a", title: "A", description: "A", dependsOn: [] },
+      { id: "b", title: "B", description: "B", dependsOn: ["a"] },
+    ], 1, "repo")
+
+    graph.nodes[0].status = "done"
+    graph.nodes[1].status = "running"
+    graph.nodes[1].branch = "minion/b"
+    graph.nodes[1].mergeBase = "abc"
+
+    const result = needsRestack(graph, "a")
+    expect(result.map((n) => n.id)).toEqual(["b"])
+  })
+
   it("returns nodes in topological order", () => {
     const graph = buildDag("test", [
       { id: "a", title: "A", description: "A", dependsOn: [] },
@@ -603,6 +643,21 @@ describe("dagProgress", () => {
     expect(progress.pending).toBe(2)
     expect(progress.failed).toBe(0)
     expect(progress.skipped).toBe(0)
+    expect(progress.landed).toBe(0)
+  })
+
+  it("counts landed status", () => {
+    const graph = buildDag("test", [
+      { id: "a", title: "A", description: "A", dependsOn: [] },
+      { id: "b", title: "B", description: "B", dependsOn: ["a"] },
+    ], 1, "repo")
+
+    graph.nodes[0].status = "landed"
+    graph.nodes[1].status = "done"
+
+    const progress = dagProgress(graph)
+    expect(progress.landed).toBe(1)
+    expect(progress.done).toBe(1)
   })
 })
 
