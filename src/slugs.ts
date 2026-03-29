@@ -37,3 +37,24 @@ export function generateSlug(seed: string): string {
   const noun = NOUNS[Math.floor(h / ADJECTIVES.length) % NOUNS.length]
   return `${adj}-${noun}`
 }
+
+export function taskToLabel(text: string, maxLen = 40): string {
+  const stripped = text
+    .replace(/https?:\/\/\S+/g, "")
+    .replace(/[^a-zA-Z0-9\s-]/g, " ")
+    .trim()
+  if (!stripped) return "task"
+  const words = stripped
+    .split(/[\s-]+/)
+    .map((w) => w.toLowerCase())
+    .filter((w) => w.length > 1)
+    .slice(0, 5)
+  if (words.length === 0) return "task"
+  let label = words.join("-")
+  if (label.length > maxLen) {
+    label = label.slice(0, maxLen + 1)
+    const lastHyphen = label.lastIndexOf("-")
+    label = lastHyphen > 0 ? label.slice(0, lastHyphen) : label.slice(0, maxLen)
+  }
+  return label
+}
