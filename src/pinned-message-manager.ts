@@ -124,7 +124,9 @@ export class PinnedMessageManager {
     const nodes = graph.nodes.map((n) => ({
       id: n.id,
       title: n.title,
+      dependsOn: n.dependsOn,
       prUrl: n.prUrl,
+      threadId: n.threadId,
       status: n.status as "pending" | "ready" | "running" | "done" | "failed",
     }))
 

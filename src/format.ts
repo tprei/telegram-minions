@@ -935,11 +935,21 @@ export function formatPinnedSplitStatus(
   return lines.join("\n")
 }
 
+export interface PinnedDagNode {
+  id: string
+  title: string
+  dependsOn: string[]
+  prUrl?: string
+  threadId?: number
+  status: "pending" | "ready" | "running" | "done" | "failed" | "skipped"
+}
+
 export function formatPinnedDagStatus(
   parentSlug: string,
   repo: string,
-  nodes: { id: string; title: string; prUrl?: string; status: "pending" | "ready" | "running" | "done" | "failed" | "skipped" }[],
+  nodes: PinnedDagNode[],
   isStack: boolean,
+  chatId?: number | string,
 ): string {
   const icon = isStack ? "📚" : "🔗"
   const label = isStack ? "Stack" : "DAG"
@@ -957,17 +967,117 @@ export function formatPinnedDagStatus(
   lines.push(`<b>Progress:</b> ${done}/${nodes.length} done${failed > 0 ? ` · ${failed} failed` : ""}${running > 0 ? ` · ${running} running` : ""}${pending > 0 ? ` · ${pending} pending` : ""}`)
   lines.push(``)
 
-  for (const node of nodes) {
-    const nodeIcon = node.status === "done" ? "✅" : node.status === "failed" ? "❌" : node.status === "running" ? "⚡" : node.status === "skipped" ? "⏭️" : "⏳"
-    const prPart = node.prUrl ? ` — <a href="${esc(node.prUrl)}">PR</a>` : ""
-    const title = esc(node.title)
-    const styledTitle = node.status === "done" || node.status === "skipped"
-      ? `<s>${title}</s>`
-      : node.status === "running" || node.status === "failed"
-        ? `<b>${title}</b>`
-        : title
-    lines.push(`${nodeIcon} <code>${esc(node.id)}</code>: ${styledTitle}${prPart}`)
+  if (isStack) {
+    renderStackTree(lines, nodes, chatId)
+  } else {
+    renderDagTree(lines, nodes, chatId)
   }
 
   return lines.join("\n")
+}
+
+function nodeStatusIcon(status: PinnedDagNode["status"]): string {
+  return status === "done" ? "✅" : status === "failed" ? "❌" : status === "running" ? "⚡" : status === "skipped" ? "⏭️" : "⏳"
+}
+
+function formatNodeLine(node: PinnedDagNode, chatId?: number | string): string {
+  const nodeIcon = nodeStatusIcon(node.status)
+  const link = threadLink(chatId, node.threadId)
+  const idPart = link
+    ? `<a href="${esc(link)}">${esc(node.id)}</a>`
+    : `<code>${esc(node.id)}</code>`
+  const prPart = node.prUrl ? ` — <a href="${esc(node.prUrl)}">PR</a>` : ""
+  const title = esc(node.title)
+  const styledTitle = node.status === "done" || node.status === "skipped"
+    ? `<s>${title}</s>`
+    : node.status === "running" || node.status === "failed"
+      ? `<b>${title}</b>`
+      : title
+  return `${nodeIcon} ${idPart}: ${styledTitle}${prPart}`
+}
+
+function renderStackTree(lines: string[], nodes: PinnedDagNode[], chatId?: number | string): void {
+  for (let i = 0; i < nodes.length; i++) {
+    const node = nodes[i]
+    const isLast = i === nodes.length - 1
+    const branch = isLast ? "└── " : "├── "
+    lines.push(`${branch}${formatNodeLine(node, chatId)}`)
+    if (!isLast) {
+      lines.push("│")
+    }
+  }
+}
+
+function renderDagTree(lines: string[], nodes: PinnedDagNode[], chatId?: number | string): void {
+  const nodeMap = new Map(nodes.map((n) => [n.id, n]))
+
+  // Topological sort via Kahn's algorithm
+  const inDegree = new Map<string, number>()
+  const children = new Map<string, string[]>()
+  for (const node of nodes) {
+    inDegree.set(node.id, node.dependsOn.length)
+    children.set(node.id, [])
+  }
+  for (const node of nodes) {
+    for (const dep of node.dependsOn) {
+      children.get(dep)?.push(node.id)
+    }
+  }
+  const sorted: string[] = []
+  const queue: string[] = []
+  for (const [id, deg] of inDegree) {
+    if (deg === 0) queue.push(id)
+  }
+  while (queue.length > 0) {
+    const id = queue.shift()!
+    sorted.push(id)
+    for (const child of children.get(id) ?? []) {
+      const newDeg = inDegree.get(child)! - 1
+      inDegree.set(child, newDeg)
+      if (newDeg === 0) queue.push(child)
+    }
+  }
+
+  // Build tree by depth
+  const depth = new Map<string, number>()
+  for (const id of sorted) {
+    const node = nodeMap.get(id)!
+    const maxDepDepth = node.dependsOn.length > 0
+      ? Math.max(...node.dependsOn.map((d) => depth.get(d) ?? 0))
+      : -1
+    depth.set(id, maxDepDepth + 1)
+  }
+
+  // Group by depth for rendering
+  const maxDepth = Math.max(0, ...depth.values())
+  const levels: string[][] = Array.from({ length: maxDepth + 1 }, () => [])
+  for (const id of sorted) {
+    levels[depth.get(id)!].push(id)
+  }
+
+  for (let d = 0; d <= maxDepth; d++) {
+    const levelNodes = levels[d]
+    for (let i = 0; i < levelNodes.length; i++) {
+      const id = levelNodes[i]
+      const node = nodeMap.get(id)!
+      const isLastAtLevel = i === levelNodes.length - 1
+      const isLastOverall = d === maxDepth && isLastAtLevel
+
+      const indent = "  ".repeat(d)
+      const branch = d === 0 && levelNodes.length === 1
+        ? isLastOverall ? "└── " : "├── "
+        : isLastAtLevel ? "└── " : "├── "
+
+      const depSuffix = node.dependsOn.length > 0
+        ? ` ← ${node.dependsOn.join(", ")}`
+        : ""
+      lines.push(`${indent}${branch}${formatNodeLine(node, chatId)}${depSuffix}`)
+    }
+
+    // Add connector between levels
+    if (d < maxDepth) {
+      const indent = "  ".repeat(d)
+      lines.push(`${indent}│`)
+    }
+  }
 }
