@@ -132,6 +132,25 @@ export function buildExecutionPrompt(
   return lines.join("\n")
 }
 
+type GitOpts = { stdio: import("node:child_process").StdioOptions; timeout: number; env: NodeJS.ProcessEnv }
+
+function fetchBareRepo(bareDir: string, gitOpts: GitOpts): void {
+  const excludeRefs: string[] = []
+  try {
+    const wtOutput = execSync("git worktree list --porcelain", { ...gitOpts, cwd: bareDir }).toString()
+    for (const m of wtOutput.matchAll(/^branch refs\/heads\/(.+)$/gm)) {
+      excludeRefs.push(`^refs/heads/${m[1]}`)
+    }
+  } catch {
+    // worktree list failed — proceed without exclusions
+  }
+
+  const refspecs = [`+refs/heads/*:refs/heads/*`, ...excludeRefs]
+    .map((r) => JSON.stringify(r))
+    .join(" ")
+  execSync(`git fetch --prune origin ${refspecs}`, { ...gitOpts, cwd: bareDir })
+}
+
 /**
  * Prepare a workspace directory for a session.
  * For repos: clones bare, creates worktree branch.
@@ -175,11 +194,7 @@ export function prepareWorkspace(
           { ...gitOpts, cwd: bareDir },
         )
       }
-      // Always fetch with explicit refspec to update local branch refs
-      execSync(
-        `git fetch --prune origin "+refs/heads/*:refs/heads/*"`,
-        { ...gitOpts, cwd: bareDir },
-      )
+      fetchBareRepo(bareDir, gitOpts)
 
       const branch = `minion/${slug}`
       const startRef = startBranch ?? resolveDefaultBranch(bareDir, gitOpts, repoUrl)
@@ -474,8 +489,7 @@ export function prepareFanInBranch(
   const gitOpts = { stdio, timeout: 120_000, env: gitEnv }
 
   try {
-    // Fetch latest state
-    execSync(`git fetch --prune origin`, { ...gitOpts, cwd: bareDir })
+    fetchBareRepo(bareDir, gitOpts)
 
     // Use git merge-tree to check for conflicts before creating a real merge
     const baseBranch = upstreamBranches[0]
