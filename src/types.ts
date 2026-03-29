@@ -150,6 +150,7 @@ export interface TopicSession {
   repoUrl?: string
   cwd: string
   slug: string
+  topicHandle?: string
   conversation: TopicMessage[]
   activeSessionId?: string
   pendingFeedback: string[]
