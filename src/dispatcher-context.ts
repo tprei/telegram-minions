@@ -7,8 +7,7 @@
 
 import type { TelegramClient } from "./telegram.js"
 import type { Observer } from "./observer.js"
-import type { SessionHandle, SessionConfig } from "./session.js"
-import type { TopicSession, SessionMeta, SessionMode, TopicMessage, AutoAdvance, TelegramPhotoSize } from "./types.js"
+import type { TopicSession, SessionMode, TopicMessage, AutoAdvance, TelegramPhotoSize } from "./types.js"
 import type { MinionConfig, McpConfig } from "./config-types.js"
 import type { StateBroadcaster } from "./api-server.js"
 import type { ProfileStore } from "./profile-store.js"
