@@ -7,7 +7,7 @@ import { captureException } from "./sentry.js"
 import { SessionHandle, type SessionConfig } from "./session.js"
 import { Observer } from "./observer.js"
 import type { TelegramUpdate, TelegramCallbackQuery, TelegramPhotoSize, SessionMeta, TopicSession, SessionMode, SessionState, TopicMessage, AutoAdvance } from "./types.js"
-import { generateSlug } from "./slugs.js"
+import { generateSlug, taskToLabel } from "./slugs.js"
 import type { MinionConfig, McpConfig } from "./config-types.js"
 import { DEFAULT_PROMPTS } from "./prompts.js"
 import { SessionStore } from "./store.js"
@@ -1216,15 +1216,18 @@ export class Dispatcher {
     const sessionId = crypto.randomUUID()
     const slug = generateSlug(sessionId)
     const repo = repoUrl ? extractRepoName(repoUrl) : "local"
-    const topicName = autoAdvance
-      ? `🚢 ${repo} · ${slug}`
+    const label = taskToLabel(task)
+    const topicHandle = `${slug}/${label}`
+    const emoji = autoAdvance
+      ? "🚢"
       : mode === "think"
-      ? `🧠 ${repo} · ${slug}`
+      ? "🧠"
       : mode === "plan"
-      ? `📋 ${repo} · ${slug}`
+      ? "📋"
       : mode === "review"
-      ? `👀 ${repo} · ${slug}`
-      : `${repo} · ${slug}`
+      ? "👀"
+      : ""
+    const topicName = emoji ? `${emoji} ${topicHandle}` : topicHandle
 
     let topic: { message_thread_id: number }
     try {
@@ -1253,6 +1256,7 @@ export class Dispatcher {
       repoUrl,
       cwd,
       slug,
+      topicHandle,
       conversation: [{ role: "user", text: fullTask, images: imagePaths.length > 0 ? imagePaths : undefined }],
       pendingFeedback: [],
       mode,
@@ -1279,7 +1283,8 @@ export class Dispatcher {
   }
 
   private async updateTopicTitle(topicSession: TopicSession, stateEmoji: string): Promise<void> {
-    const name = `${stateEmoji} ${topicSession.repo} · ${topicSession.slug}`
+    const handle = topicSession.topicHandle ?? topicSession.slug
+    const name = `${stateEmoji} ${handle}`
     await this.telegram.editForumTopic(topicSession.threadId, name).catch(() => {})
   }
 
@@ -1299,7 +1304,7 @@ export class Dispatcher {
     const meta: SessionMeta = {
       sessionId,
       threadId: topicSession.threadId,
-      topicName: topicSession.slug,
+      topicName: topicSession.topicHandle ?? topicSession.slug,
       repo: topicSession.repo,
       cwd: topicSession.cwd,
       startedAt: Date.now(),
@@ -1838,7 +1843,7 @@ export class Dispatcher {
     const meta: SessionMeta = {
       sessionId,
       threadId: topicSession.threadId,
-      topicName: topicSession.slug,
+      topicName: topicSession.topicHandle ?? topicSession.slug,
       repo: topicSession.repo,
       cwd: topicSession.cwd,
       startedAt: Date.now(),
@@ -2154,7 +2159,9 @@ export class Dispatcher {
     const sessionId = crypto.randomUUID()
     const slug = generateSlug(sessionId)
     const repo = parent.repo
-    const topicName = `⚡ ${repo} · ${slug}`
+    const childLabel = taskToLabel(item.title)
+    const topicHandle = `${parent.slug}/${childLabel}`
+    const topicName = `⚡ ${topicHandle}`
 
     let topic: { message_thread_id: number }
     try {
@@ -2182,6 +2189,7 @@ export class Dispatcher {
       repoUrl: parent.repoUrl,
       cwd,
       slug,
+      topicHandle,
       conversation: [{ role: "user", text: task }],
       pendingFeedback: [],
       mode: "task",
@@ -2409,7 +2417,9 @@ export class Dispatcher {
     const sessionId = crypto.randomUUID()
     const slug = generateSlug(sessionId)
     const repo = parent.repo
-    const topicName = `${isStack ? "📚" : "🔗"} ${repo} · ${slug}`
+    const childLabel = taskToLabel(node.title)
+    const topicHandle = `${parent.slug}/${childLabel}`
+    const topicName = `${isStack ? "📚" : "🔗"} ${topicHandle}`
 
     let topic: { message_thread_id: number }
     try {
@@ -2490,6 +2500,7 @@ export class Dispatcher {
       repoUrl: parent.repoUrl,
       cwd,
       slug,
+      topicHandle,
       conversation: [{ role: "user", text: task }],
       pendingFeedback: [],
       mode: "task",
@@ -3009,7 +3020,7 @@ export class Dispatcher {
       const meta: SessionMeta = {
         sessionId,
         threadId: childSession.threadId,
-        topicName: childSession.slug,
+        topicName: childSession.topicHandle ?? childSession.slug,
         repo: childSession.repo,
         cwd: childSession.cwd,
         startedAt: Date.now(),
