@@ -10,31 +10,107 @@
 
 ## Project overview
 
-Telegram-controlled Goose coding agents on fly.io. The Dispatcher polls Telegram for `/task` commands, spawns Goose sessions for each task, and the Observer streams Goose events back to Telegram forum topics.
+Telegram-controlled AI coding agents on fly.io. The Dispatcher polls Telegram for commands (`/task`, `/plan`, `/think`, `/review`, `/ship`), spawns Claude or Goose sessions, and the Observer streams events back to Telegram forum topics. Also available as an npm package (`telegram-minions`) for programmatic use.
 
 ## Key files
+
+### Core
 
 | File | Purpose |
 |---|---|
 | `src/main.ts` | Entry point — starts Dispatcher with SIGTERM/SIGINT handlers |
-| `src/dispatcher.ts` | Telegram poll loop, `/task` parsing, session lifecycle |
-| `src/session.ts` | SessionHandle — wraps a single `goose run` subprocess |
-| `src/observer.ts` | Translates Goose stream-json events to Telegram messages |
+| `src/minion.ts` | `createMinion()` factory — top-level API for library consumers |
+| `src/dispatcher.ts` | Telegram poll loop, command routing, session lifecycle |
+| `src/session.ts` | SessionHandle — wraps a single `claude` or `goose run` subprocess |
+| `src/observer.ts` | Translates stream-json events to Telegram messages |
 | `src/telegram.ts` | Telegram Bot API client (sendMessage, editMessage, topics) |
 | `src/format.ts` | HTML message formatters for Telegram |
-| `src/config.ts` | Centralized config from env vars |
+| `src/index.ts` | Public npm package exports |
+| `src/types.ts` | TypeScript types (SessionMode, ShipPhase, AutoAdvance, events) |
+| `src/errors.ts` | Custom error classes (ConfigError, ConfigFormatError) |
+
+### Configuration
+
+| File | Purpose |
+|---|---|
+| `src/config-types.ts` | TypeScript interfaces for all config (`MinionConfig`, etc.) |
+| `src/config-env.ts` | `configFromEnv()` — builds config from environment variables |
+| `src/config-validator.ts` | Config validation with typed error reporting |
+| `src/config-manager.ts` | Runtime config management |
+| `src/profile-store.ts` | Provider profile persistence (`profiles.json`) |
+| `src/prompts.ts` | Default system prompts for task, plan, think, review, ship phases |
+
+### Commands and routing
+
+| File | Purpose |
+|---|---|
+| `src/command-parser.ts` | Command prefix constants and argument parsing |
+| `src/command-router.ts` | Routes incoming Telegram messages to typed `RoutedCommand` |
+| `src/cli.ts` | CLI entry point for `telegram-minions` binary |
+
+### Orchestration
+
+| File | Purpose |
+|---|---|
+| `src/ship-pipeline.ts` | Multi-phase ship pipeline (think → plan → dag → verify → done) |
+| `src/split-orchestrator.ts` | Parallel sub-task spawning from `/split` |
+| `src/dag-orchestrator.ts` | DAG execution — schedules tasks via Kahn's algorithm |
+| `src/dag.ts` | DAG data model, topological sort, status rendering |
+| `src/dag-extract.ts` | DAG/stack item extraction from conversations |
+| `src/landing-manager.ts` | `/land` — merges PRs in topological order |
+| `src/conflict-resolver.ts` | Automated merge conflict resolution via agent |
+| `src/verification.ts` | Quality gates and completeness checks for ship pipeline |
+| `src/quality-gates.ts` | Quality validation rules |
+
+### Session management
+
+| File | Purpose |
+|---|---|
+| `src/session-manager.ts` | Workspace prep/cleanup, branch management, worktrees |
+| `src/session-log.ts` | Session event logging |
+| `src/conversation-limits.ts` | Conversation length enforcement |
+| `src/conversation-digest.ts` | Conversation summarization for context management |
+| `src/dispatcher-context.ts` | Shared dispatcher context and state |
+
+### CI and observability
+
+| File | Purpose |
+|---|---|
+| `src/ci-babysit.ts` | CI failure log parsing, fix prompt builder |
+| `src/ci-babysitter.ts` | CI polling loop, auto-retry orchestration |
+| `src/claude-stream.ts` | Claude API stream event handling |
+| `src/claude-usage.ts` | Token usage tracking for Claude sessions |
+| `src/stats.ts` | Session and usage statistics |
+| `src/sentry.ts` | Sentry error reporting integration |
+| `src/logger.ts` | Structured logging |
+
+### Supporting modules
+
+| File | Purpose |
+|---|---|
 | `src/slugs.ts` | Deterministic adjective-noun slug generator |
-| `src/types.ts` | TypeScript types for Goose events and Telegram API |
-| `src/ci-babysit.ts` | CI polling, failure log parsing, fix prompt builder |
-| `src/dag.ts` | DAG data model, topological sort, scheduling, status rendering |
-| `src/dag-extract.ts` | DAG/stack item extraction from conversations, child prompt building |
-| `goose/config.yaml` | Goose agent configuration (mode, extensions, limits) |
+| `src/split.ts` | Split item data types and helpers |
+| `src/store.ts` | Persistent key-value store |
+| `src/pinned-message-manager.ts` | Telegram pinned message lifecycle |
+| `src/http-utils.ts` | HTTP request helpers |
+| `src/api-server.ts` | Optional HTTP dashboard API |
+
+### Agent definitions
+
+| File | Purpose |
+|---|---|
 | `.claude/agents/post-task-router.md` | Haiku classifier — routes completed work to the right action |
 | `.claude/agents/ci-fix.md` | CI fix specialist — diagnoses and fixes CI failures |
 | `.claude/agents/git-commit-specialist.md` | Git workflow — commits, pushes, opens PRs |
 | `.claude/agents/explorer.md` | Read-only codebase exploration |
 | `.claude/agents/planner.md` | Implementation planning |
 | `.claude/agents/technical-architect.md` | System architecture design |
+
+### Other
+
+| File | Purpose |
+|---|---|
+| `goose/config.yaml` | Goose agent configuration (mode, extensions, limits) |
 
 ## Claude authentication (ACP provider)
 
@@ -61,20 +137,24 @@ Credentials write to `/workspace/home/.claude/` (HOME=/workspace/home in fly.tom
 ```sh
 npm install
 npm run typecheck        # type check
+npm test                 # run tests
 npm run dev              # run directly with tsx (requires .env)
 npm run build            # compile to dist/
 ```
 
 ## Command format
 
-### Task (one-shot execution)
+### Session-creating commands
+
+#### Task (one-shot execution)
 ```
 /task https://github.com/org/repo Description of the coding task
 /task repo-alias Description of the task
 /task Description of the task (no repo, uses current workspace)
 ```
+Alias: `/w` (short form for `/task`)
 
-### Plan (multi-turn planning → execution)
+#### Plan (multi-turn planning → execution)
 ```
 /plan repo-alias Let's work on feature A
 ```
@@ -85,7 +165,41 @@ npm run build            # compile to dist/
 5. Or send `/stack` to create stacked PRs (sequential chain)
 6. Or send `/dag` to create a dependency graph of tasks
 
-### Split (parallel sub-tasks from plan/think)
+#### Think (research-only exploration)
+```
+/think repo-alias Investigate the auth flow
+/think What's the current test coverage?
+```
+Like `/plan` but read-only — the agent explores and reports without proposing changes. Supports the same follow-up commands (`/split`, `/stack`, `/dag`, `/execute`).
+
+#### Review (code review)
+```
+/review https://github.com/org/repo 123
+/review repo-alias 123
+/review repo-alias
+/review 123
+```
+Spawns a review session that examines a specific PR (by number) or all open PRs on a repo. Uses the `REVIEW_MODEL` (default: opus).
+
+#### Ship (automated feature pipeline)
+```
+/ship repo-alias Build a user settings page
+/ship https://github.com/org/repo Add rate limiting to the API
+```
+Runs a multi-phase automated pipeline:
+1. **Think** — researches the codebase (read-only exploration)
+2. **Plan** — produces an implementation plan
+3. **DAG** — extracts work items with dependencies and schedules them
+4. **Verify** — runs quality gates on completed work
+5. **Done** — reports results
+
+Each phase auto-advances to the next. The ship pipeline uses the profile selection flow if multiple provider profiles are configured.
+
+### Thread-scoped commands
+
+These commands are sent as replies within an active session topic.
+
+#### Split (parallel sub-tasks from plan/think)
 ```
 /split
 /split Focus on the first two items only
@@ -96,7 +210,7 @@ npm run build            # compile to dist/
 4. The parent topic tracks children and reports aggregate status
 5. Send `/close` in the parent to terminate all children
 
-### Stack (sequential stacked PRs from plan/think)
+#### Stack (sequential stacked PRs from plan/think)
 ```
 /stack
 /stack Focus on the auth flow
@@ -107,7 +221,7 @@ npm run build            # compile to dist/
 4. Parent topic tracks progress and shows DAG status
 5. Send `/land` to merge the stack bottom-up into main
 
-### DAG (dependency graph from plan/think)
+#### DAG (dependency graph from plan/think)
 ```
 /dag
 /dag Only the backend items
@@ -118,13 +232,47 @@ npm run build            # compile to dist/
 4. Failed nodes skip all transitive dependents
 5. Send `/land` to merge completed PRs in topological order
 
-### Land (merge stack/DAG PRs)
+#### Land (merge stack/DAG PRs)
 ```
 /land
 ```
 1. Merges completed PRs in topological order (bottom-up for stacks)
 2. Uses squash merge with branch deletion
 3. GitHub auto-retargets downstream PRs after each merge
+
+#### Other thread commands
+
+| Command | Purpose |
+|---|---|
+| `/execute` | Close planning thread and spawn execution task with the final plan |
+| `/reply` (or `/r`) | Send follow-up feedback to the active session |
+| `/retry` | Retry a failed DAG node |
+| `/force` | Force-advance a DAG node |
+| `/close` | Terminate session and all children |
+| `/stop` | Stop the running session |
+
+### Global commands
+
+These commands work anywhere, no active session required.
+
+| Command | Purpose |
+|---|---|
+| `/status` | Show all active sessions |
+| `/stats` | Show session statistics |
+| `/usage` | Show token/cost usage |
+| `/clean` | Clean up stale sessions and worktrees |
+| `/help` | Show available commands |
+
+### Config (provider profile management)
+```
+/config                    Show current config and available profiles
+/config add                Add a new provider profile
+/config set <id>           Switch to a profile
+/config remove <id>        Remove a profile
+/config default <id>       Set the default profile
+/config default clear      Clear default (prompt every time)
+```
+Profiles let you configure multiple AI providers (claude-acp, custom API endpoints) and switch between them. Each profile stores: `id`, `name`, `baseUrl`, `authToken`, `opusModel`, `sonnetModel`, `haikuModel`.
 
 ## Goose stream-json event schema
 
