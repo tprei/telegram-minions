@@ -55,6 +55,7 @@ const STACK_EXTRACTION_PROMPT = [
 
 const MAX_RETRIES = 3
 const INITIAL_DELAY_MS = 2000
+const EXTRACTION_TIMEOUT_MS = 120_000
 const MAX_ASSISTANT_CHARS = 4000
 
 function runClaudeExtraction(
@@ -160,7 +161,7 @@ export async function extractDagItems(
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
       log.debug({ attempt, maxRetries: MAX_RETRIES }, "attempt")
-      const output = await runClaudeExtraction(task, DAG_EXTRACTION_PROMPT, 60_000, profile)
+      const output = await runClaudeExtraction(task, DAG_EXTRACTION_PROMPT, EXTRACTION_TIMEOUT_MS, profile)
       log.debug({ outputLength: output.length }, "raw output")
 
       const items = parseDagItems(output)
@@ -204,7 +205,7 @@ export async function extractStackItems(
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
       log.debug({ attempt, maxRetries: MAX_RETRIES }, "stack attempt")
-      const output = await runClaudeExtraction(task, STACK_EXTRACTION_PROMPT, 60_000, profile)
+      const output = await runClaudeExtraction(task, STACK_EXTRACTION_PROMPT, EXTRACTION_TIMEOUT_MS, profile)
       log.debug({ outputLength: output.length }, "stack raw output")
 
       const ordered = parseStackItems(output)
