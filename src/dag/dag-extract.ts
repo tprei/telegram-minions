@@ -1,7 +1,7 @@
-import { spawn } from "node:child_process"
 import type { TopicMessage } from "../types.js"
 import type { DagInput } from "./dag.js"
 import type { ProviderProfile } from "../config/config-types.js"
+import { retryClaudeExtraction, buildConversationText } from "../claude-extract.js"
 import { loggers } from "../logger.js"
 
 const log = loggers.dagExtract
@@ -53,97 +53,7 @@ const STACK_EXTRACTION_PROMPT = [
   "If you cannot identify discrete sequential items, output an empty array: []",
 ].join("\n")
 
-const MAX_RETRIES = 3
-const INITIAL_DELAY_MS = 2000
 const EXTRACTION_TIMEOUT_MS = 120_000
-const MAX_ASSISTANT_CHARS = 4000
-
-function runClaudeExtraction(
-  task: string,
-  systemPrompt: string,
-  timeoutMs: number,
-  profile?: ProviderProfile,
-): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const args = [
-      "--print",
-      "--output-format", "text",
-      "--model", "haiku",
-      "--no-session-persistence",
-      "--append-system-prompt", systemPrompt,
-    ]
-
-    const child = spawn("claude", args, {
-      stdio: ["pipe", "pipe", "pipe"],
-      env: {
-        ...process.env,
-        ...(profile?.baseUrl && { ANTHROPIC_BASE_URL: profile.baseUrl }),
-        ...(profile?.authToken && { ANTHROPIC_AUTH_TOKEN: profile.authToken }),
-        ...(profile?.haikuModel && { ANTHROPIC_DEFAULT_HAIKU_MODEL: profile.haikuModel }),
-      },
-    })
-
-    let stdout = ""
-    let stderr = ""
-
-    child.stdout.on("data", (data: Buffer) => {
-      stdout += data.toString()
-    })
-
-    child.stderr.on("data", (data: Buffer) => {
-      stderr += data.toString()
-    })
-
-    const timeout = setTimeout(() => {
-      child.kill("SIGKILL")
-      reject(new Error(`claude CLI timed out after ${timeoutMs}ms`))
-    }, timeoutMs)
-
-    child.on("error", (err) => {
-      clearTimeout(timeout)
-      reject(err)
-    })
-
-    child.on("close", (code) => {
-      clearTimeout(timeout)
-      if (code === 0) {
-        resolve(stdout.trim())
-      } else {
-        const err = new Error(`claude CLI exited with code ${code}: ${stderr.trim()}`)
-        ;(err as NodeJS.ErrnoException).code = code?.toString()
-        reject(err)
-      }
-    })
-
-    child.stdin.write(task)
-    child.stdin.end()
-  })
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
-}
-
-function buildConversationText(conversation: TopicMessage[], directive?: string): string {
-  const lines: string[] = ["## Conversation\n"]
-
-  for (const msg of conversation) {
-    const label = msg.role === "user" ? "**User**" : "**Agent**"
-    lines.push(`${label}:`)
-    if (msg.role === "assistant" && msg.text.length > MAX_ASSISTANT_CHARS) {
-      lines.push(`[earlier output truncated]\n…${msg.text.slice(-MAX_ASSISTANT_CHARS)}`)
-    } else {
-      lines.push(msg.text)
-    }
-    lines.push("")
-  }
-
-  if (directive) {
-    lines.push(`## Directive\n\n${directive}`)
-  }
-
-  return lines.join("\n")
-}
 
 /**
  * Extract DAG items (with dependencies) from a planning conversation.
@@ -156,37 +66,18 @@ export async function extractDagItems(
   const task = buildConversationText(conversation, directive)
   log.debug({ messageCount: conversation.length }, "analyzing conversation for DAG items")
 
-  let lastError: Error | undefined
+  const result = await retryClaudeExtraction(
+    task,
+    DAG_EXTRACTION_PROMPT,
+    (output) => parseDagItems(output),
+    { timeoutMs: EXTRACTION_TIMEOUT_MS, profile, log },
+  )
 
-  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      log.debug({ attempt, maxRetries: MAX_RETRIES }, "attempt")
-      const output = await runClaudeExtraction(task, DAG_EXTRACTION_PROMPT, EXTRACTION_TIMEOUT_MS, profile)
-      log.debug({ outputLength: output.length }, "raw output")
-
-      const items = parseDagItems(output)
-      log.debug({ itemCount: items.length }, "extracted valid items")
-      return { items }
-    } catch (err) {
-      lastError = err instanceof Error ? err : new Error(String(err))
-      const isSpawnError =
-        (err as NodeJS.ErrnoException).code === "ETIMEDOUT" ||
-        (err as NodeJS.ErrnoException).code === "ENOENT" ||
-        (err as NodeJS.ErrnoException).code === "EAGAIN" ||
-        (err instanceof Error && err.message.includes("spawn"))
-
-      if (isSpawnError && attempt < MAX_RETRIES) {
-        const delay = INITIAL_DELAY_MS * Math.pow(2, attempt - 1)
-        log.warn({ attempt, delay, err }, "spawn error, retrying")
-        await sleep(delay)
-      } else {
-        log.error({ err }, "extraction failed")
-        return { items: [], error: "system", errorMessage: lastError.message }
-      }
-    }
+  if (result.data) {
+    log.debug({ itemCount: result.data.length }, "extracted valid items")
+    return { items: result.data }
   }
-
-  return { items: [], error: "system", errorMessage: lastError?.message ?? "Unknown error" }
+  return { items: [], error: result.error, errorMessage: result.errorMessage }
 }
 
 /**
@@ -200,46 +91,26 @@ export async function extractStackItems(
   const task = buildConversationText(conversation, directive)
   log.debug({ messageCount: conversation.length }, "analyzing conversation for stack items")
 
-  let lastError: Error | undefined
-
-  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      log.debug({ attempt, maxRetries: MAX_RETRIES }, "stack attempt")
-      const output = await runClaudeExtraction(task, STACK_EXTRACTION_PROMPT, EXTRACTION_TIMEOUT_MS, profile)
-      log.debug({ outputLength: output.length }, "stack raw output")
-
+  const result = await retryClaudeExtraction(
+    task,
+    STACK_EXTRACTION_PROMPT,
+    (output) => {
       const ordered = parseStackItems(output)
-      log.debug({ itemCount: ordered.length }, "extracted stack items")
-
-      // Convert ordered items to DagInput with linear dependencies
-      const items: DagInput[] = ordered.map((item, i) => ({
+      return ordered.map((item, i): DagInput => ({
         id: `step-${i}`,
         title: item.title,
         description: item.description,
         dependsOn: i > 0 ? [`step-${i - 1}`] : [],
       }))
+    },
+    { timeoutMs: EXTRACTION_TIMEOUT_MS, profile, log },
+  )
 
-      return { items }
-    } catch (err) {
-      lastError = err instanceof Error ? err : new Error(String(err))
-      const isSpawnError =
-        (err as NodeJS.ErrnoException).code === "ETIMEDOUT" ||
-        (err as NodeJS.ErrnoException).code === "ENOENT" ||
-        (err as NodeJS.ErrnoException).code === "EAGAIN" ||
-        (err instanceof Error && err.message.includes("spawn"))
-
-      if (isSpawnError && attempt < MAX_RETRIES) {
-        const delay = INITIAL_DELAY_MS * Math.pow(2, attempt - 1)
-        log.warn({ attempt, delay, err }, "spawn error, retrying")
-        await sleep(delay)
-      } else {
-        log.error({ err }, "stack extraction failed")
-        return { items: [], error: "system", errorMessage: lastError.message }
-      }
-    }
+  if (result.data) {
+    log.debug({ itemCount: result.data.length }, "extracted stack items")
+    return { items: result.data }
   }
-
-  return { items: [], error: "system", errorMessage: lastError?.message ?? "Unknown error" }
+  return { items: [], error: result.error, errorMessage: result.errorMessage }
 }
 
 export function parseDagItems(output: string): DagInput[] {
