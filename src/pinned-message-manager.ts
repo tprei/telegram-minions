@@ -166,11 +166,13 @@ export class PinnedMessageManager {
     const nodes = graph.nodes.map((n) => ({
       id: n.id,
       title: n.title,
+      dependsOn: n.dependsOn,
       prUrl: n.prUrl,
+      threadId: n.threadId,
       status: n.status as "pending" | "ready" | "running" | "done" | "failed",
     }))
 
-    const html = formatPinnedDagStatus(parent.slug, parent.repo, nodes, isStack)
+    const html = formatPinnedDagStatus(parent.slug, parent.repo, nodes, isStack, this.deps.chatId)
     await this.pinThreadMessage(parent, html)
   }
 

@@ -40,6 +40,7 @@ import {
   formatShipComplete,
   threadLink,
   formatPinnedSplitStatus,
+  formatPinnedDagStatus,
 } from "../src/format.js"
 import type { ClaudeUsageResponse } from "../src/claude-usage.js"
 import type { AggregateStats, SessionRecord, ModeBreakdown } from "../src/stats.js"
@@ -949,5 +950,177 @@ describe("formatPinnedSplitStatus", () => {
     expect(result).toContain("1/3 done")
     expect(result).toContain("1 failed")
     expect(result).toContain("1 running")
+  })
+})
+
+describe("formatPinnedDagStatus", () => {
+  const stackNodes = [
+    { id: "step-0", title: "Set up auth", dependsOn: [], status: "done" as const, threadId: 10, prUrl: "https://github.com/org/repo/pull/1" },
+    { id: "step-1", title: "Add middleware", dependsOn: ["step-0"], status: "running" as const, threadId: 20 },
+    { id: "step-2", title: "Write tests", dependsOn: ["step-1"], status: "pending" as const },
+  ]
+
+  const dagNodes = [
+    { id: "auth", title: "Auth service", dependsOn: [], status: "done" as const, threadId: 10, prUrl: "https://github.com/org/repo/pull/1" },
+    { id: "api", title: "API layer", dependsOn: ["auth"], status: "running" as const, threadId: 20 },
+    { id: "ui", title: "UI components", dependsOn: ["auth"], status: "pending" as const, threadId: 30 },
+    { id: "integration", title: "Integration tests", dependsOn: ["api", "ui"], status: "pending" as const },
+  ]
+
+  describe("stack mode (isStack=true)", () => {
+    it("uses tree branch characters (├── and └──)", () => {
+      const result = formatPinnedDagStatus("parent-slug", "my-repo", stackNodes, true)
+      expect(result).toContain("├── ")
+      expect(result).toContain("└── ")
+    })
+
+    it("uses └── only for the last node", () => {
+      const result = formatPinnedDagStatus("parent-slug", "my-repo", stackNodes, true)
+      const lines = result.split("\n").filter((l) => l.includes("├── ") || l.includes("└── "))
+      expect(lines).toHaveLength(3)
+      expect(lines[0]).toContain("├── ")
+      expect(lines[1]).toContain("├── ")
+      expect(lines[2]).toContain("└── ")
+    })
+
+    it("adds │ connectors between stack nodes", () => {
+      const result = formatPinnedDagStatus("parent-slug", "my-repo", stackNodes, true)
+      const lines = result.split("\n")
+      const connectors = lines.filter((l) => l.trim() === "│")
+      expect(connectors.length).toBeGreaterThan(0)
+    })
+
+    it("shows status icons", () => {
+      const result = formatPinnedDagStatus("parent-slug", "my-repo", stackNodes, true)
+      expect(result).toContain("✅")
+      expect(result).toContain("⚡")
+      expect(result).toContain("⏳")
+    })
+
+    it("includes thread hyperlinks when chatId is provided", () => {
+      const result = formatPinnedDagStatus("parent-slug", "my-repo", stackNodes, true, -1001234567890)
+      expect(result).toContain('<a href="https://t.me/c/1234567890/10">step-0</a>')
+      expect(result).toContain('<a href="https://t.me/c/1234567890/20">step-1</a>')
+    })
+
+    it("falls back to code tags when chatId is not provided", () => {
+      const result = formatPinnedDagStatus("parent-slug", "my-repo", stackNodes, true)
+      expect(result).toContain("<code>step-0</code>")
+      expect(result).toContain("<code>step-1</code>")
+    })
+
+    it("falls back to code tags when threadId is missing", () => {
+      const result = formatPinnedDagStatus("parent-slug", "my-repo", stackNodes, true, -1001234567890)
+      expect(result).toContain("<code>step-2</code>")
+      expect(result).not.toContain("t.me/c/1234567890/undefined")
+    })
+
+    it("includes PR links", () => {
+      const result = formatPinnedDagStatus("parent-slug", "my-repo", stackNodes, true)
+      expect(result).toContain('<a href="https://github.com/org/repo/pull/1">PR</a>')
+    })
+
+    it("shows header with 📚 Stack label", () => {
+      const result = formatPinnedDagStatus("parent-slug", "my-repo", stackNodes, true)
+      expect(result).toContain("📚")
+      expect(result).toContain("Stack")
+    })
+
+    it("shows progress summary", () => {
+      const result = formatPinnedDagStatus("parent-slug", "my-repo", stackNodes, true)
+      expect(result).toContain("1/3 done")
+      expect(result).toContain("1 running")
+      expect(result).toContain("1 pending")
+    })
+
+    it("strikethrough for done nodes", () => {
+      const result = formatPinnedDagStatus("parent-slug", "my-repo", stackNodes, true)
+      expect(result).toContain("<s>Set up auth</s>")
+    })
+
+    it("bold for running nodes", () => {
+      const result = formatPinnedDagStatus("parent-slug", "my-repo", stackNodes, true)
+      expect(result).toContain("<b>Add middleware</b>")
+    })
+  })
+
+  describe("DAG mode (isStack=false)", () => {
+    it("shows header with 🔗 DAG label", () => {
+      const result = formatPinnedDagStatus("parent-slug", "my-repo", dagNodes, false)
+      expect(result).toContain("🔗")
+      expect(result).toContain("DAG")
+    })
+
+    it("shows dependency notation (← dep) for nodes with dependencies", () => {
+      const result = formatPinnedDagStatus("parent-slug", "my-repo", dagNodes, false)
+      expect(result).toContain("← auth")
+      expect(result).toContain("← api, ui")
+    })
+
+    it("uses tree branch characters", () => {
+      const result = formatPinnedDagStatus("parent-slug", "my-repo", dagNodes, false)
+      expect(result).toContain("├── ")
+      expect(result).toContain("└── ")
+    })
+
+    it("includes thread hyperlinks when chatId is provided", () => {
+      const result = formatPinnedDagStatus("parent-slug", "my-repo", dagNodes, false, -1001234567890)
+      expect(result).toContain('<a href="https://t.me/c/1234567890/10">auth</a>')
+      expect(result).toContain('<a href="https://t.me/c/1234567890/20">api</a>')
+      expect(result).toContain('<a href="https://t.me/c/1234567890/30">ui</a>')
+    })
+
+    it("falls back to code tags when threadId is missing", () => {
+      const result = formatPinnedDagStatus("parent-slug", "my-repo", dagNodes, false, -1001234567890)
+      expect(result).toContain("<code>integration</code>")
+    })
+
+    it("shows progress summary", () => {
+      const result = formatPinnedDagStatus("parent-slug", "my-repo", dagNodes, false)
+      expect(result).toContain("1/4 done")
+      expect(result).toContain("1 running")
+      expect(result).toContain("2 pending")
+    })
+
+    it("includes PR links for nodes that have them", () => {
+      const result = formatPinnedDagStatus("parent-slug", "my-repo", dagNodes, false)
+      expect(result).toContain('<a href="https://github.com/org/repo/pull/1">PR</a>')
+    })
+
+    it("renders root nodes at depth 0 and dependents indented", () => {
+      const result = formatPinnedDagStatus("parent-slug", "my-repo", dagNodes, false)
+      const lines = result.split("\n")
+      const authLine = lines.find((l) => l.includes("Auth service"))
+      const integrationLine = lines.find((l) => l.includes("Integration tests"))
+      expect(authLine).toBeDefined()
+      expect(integrationLine).toBeDefined()
+      expect(integrationLine!.search(/\S/)).toBeGreaterThan(authLine!.search(/\S/))
+    })
+  })
+
+  describe("edge cases", () => {
+    it("handles single node", () => {
+      const single = [{ id: "only", title: "Only task", dependsOn: [], status: "running" as const }]
+      const result = formatPinnedDagStatus("slug", "repo", single, true)
+      expect(result).toContain("└── ")
+      expect(result).toContain("⚡")
+      expect(result).toContain("Only task")
+    })
+
+    it("handles empty nodes array", () => {
+      const result = formatPinnedDagStatus("slug", "repo", [], false)
+      expect(result).toContain("0/0 done")
+    })
+
+    it("handles skipped status", () => {
+      const nodes = [
+        { id: "a", title: "Task A", dependsOn: [], status: "failed" as const },
+        { id: "b", title: "Task B", dependsOn: ["a"], status: "skipped" as const },
+      ]
+      const result = formatPinnedDagStatus("slug", "repo", nodes, false)
+      expect(result).toContain("❌")
+      expect(result).toContain("⏭️")
+      expect(result).toContain("<s>Task B</s>")
+    })
   })
 })
