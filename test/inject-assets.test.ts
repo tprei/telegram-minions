@@ -1,0 +1,239 @@
+import { describe, it, expect, beforeEach, afterEach } from "vitest"
+import fs from "node:fs"
+import path from "node:path"
+import os from "node:os"
+import { injectAgentFiles, resolvePackageAssetsDir } from "../src/inject-assets.js"
+
+function makeTmpDir(): string {
+  return fs.mkdtempSync(path.join(os.tmpdir(), "inject-assets-test-"))
+}
+
+function cleanup(dir: string): void {
+  fs.rmSync(dir, { recursive: true, force: true })
+}
+
+describe("resolvePackageAssetsDir", () => {
+  it("returns a path ending with assets/", () => {
+    const dir = resolvePackageAssetsDir()
+    expect(dir).toMatch(/assets$/)
+  })
+
+  it("points to an existing directory", () => {
+    const dir = resolvePackageAssetsDir()
+    expect(fs.existsSync(dir)).toBe(true)
+  })
+})
+
+describe("injectAgentFiles", () => {
+  let tmpDir: string
+
+  beforeEach(() => {
+    tmpDir = makeTmpDir()
+  })
+
+  afterEach(() => {
+    cleanup(tmpDir)
+  })
+
+  describe("agent injection from default assets", () => {
+    it("copies agent .md files into .claude/agents/", () => {
+      const result = injectAgentFiles(tmpDir)
+
+      const agentsDir = path.join(tmpDir, ".claude", "agents")
+      expect(fs.existsSync(agentsDir)).toBe(true)
+      expect(result.agents).toBeGreaterThan(0)
+
+      const files = fs.readdirSync(agentsDir)
+      expect(files.length).toBeGreaterThan(0)
+      expect(files.every((f) => f.endsWith(".md"))).toBe(true)
+    })
+
+    it("includes known default agents", () => {
+      injectAgentFiles(tmpDir)
+
+      const agentsDir = path.join(tmpDir, ".claude", "agents")
+      const files = fs.readdirSync(agentsDir)
+      expect(files).toContain("post-task-router.md")
+      expect(files).toContain("git-commit-specialist.md")
+    })
+  })
+
+  describe("no-overwrite policy", () => {
+    it("does not overwrite existing agent files", () => {
+      const agentsDir = path.join(tmpDir, ".claude", "agents")
+      fs.mkdirSync(agentsDir, { recursive: true })
+      fs.writeFileSync(path.join(agentsDir, "post-task-router.md"), "custom content")
+
+      injectAgentFiles(tmpDir)
+
+      const content = fs.readFileSync(path.join(agentsDir, "post-task-router.md"), "utf8")
+      expect(content).toBe("custom content")
+    })
+
+    it("does not overwrite existing .goosehints", () => {
+      fs.writeFileSync(path.join(tmpDir, ".goosehints"), "existing hints")
+
+      // Create a custom goosehints source
+      const customDir = makeTmpDir()
+      fs.writeFileSync(path.join(customDir, "goosehints"), "new hints")
+
+      injectAgentFiles(tmpDir, { goosehintsPath: path.join(customDir, "goosehints") })
+
+      const content = fs.readFileSync(path.join(tmpDir, ".goosehints"), "utf8")
+      expect(content).toBe("existing hints")
+
+      cleanup(customDir)
+    })
+
+    it("does not overwrite existing CLAUDE.md", () => {
+      const claudeDir = path.join(tmpDir, ".claude")
+      fs.mkdirSync(claudeDir, { recursive: true })
+      fs.writeFileSync(path.join(claudeDir, "CLAUDE.md"), "custom CLAUDE.md")
+
+      const srcDir = makeTmpDir()
+      fs.writeFileSync(path.join(srcDir, "CLAUDE.md"), "injected")
+
+      injectAgentFiles(tmpDir, { claudeMd: path.join(srcDir, "CLAUDE.md") })
+
+      const content = fs.readFileSync(path.join(claudeDir, "CLAUDE.md"), "utf8")
+      expect(content).toBe("custom CLAUDE.md")
+
+      cleanup(srcDir)
+    })
+  })
+
+  describe("custom agentDefs paths", () => {
+    it("uses custom agentsDir when provided", () => {
+      const customAgentsDir = makeTmpDir()
+      fs.writeFileSync(path.join(customAgentsDir, "custom-agent.md"), "# Custom Agent")
+      fs.writeFileSync(path.join(customAgentsDir, "another.md"), "# Another")
+      fs.writeFileSync(path.join(customAgentsDir, "not-md.txt"), "ignored")
+
+      const result = injectAgentFiles(tmpDir, { agentsDir: customAgentsDir })
+
+      expect(result.agents).toBe(2)
+      const files = fs.readdirSync(path.join(tmpDir, ".claude", "agents"))
+      expect(files).toContain("custom-agent.md")
+      expect(files).toContain("another.md")
+      expect(files).not.toContain("not-md.txt")
+
+      cleanup(customAgentsDir)
+    })
+
+    it("uses custom goosehintsPath when provided", () => {
+      const hintsDir = makeTmpDir()
+      const hintsPath = path.join(hintsDir, "my-hints")
+      fs.writeFileSync(hintsPath, "custom goose hints content")
+
+      const result = injectAgentFiles(tmpDir, { goosehintsPath: hintsPath })
+
+      expect(result.goosehints).toBe(true)
+      const content = fs.readFileSync(path.join(tmpDir, ".goosehints"), "utf8")
+      expect(content).toBe("custom goose hints content")
+
+      cleanup(hintsDir)
+    })
+
+    it("uses custom claudeMd path when provided", () => {
+      const mdDir = makeTmpDir()
+      const mdPath = path.join(mdDir, "custom-claude.md")
+      fs.writeFileSync(mdPath, "# Custom CLAUDE guidance")
+
+      const result = injectAgentFiles(tmpDir, { claudeMd: mdPath })
+
+      expect(result.claudeMd).toBe(true)
+      const content = fs.readFileSync(path.join(tmpDir, ".claude", "CLAUDE.md"), "utf8")
+      expect(content).toBe("# Custom CLAUDE guidance")
+
+      cleanup(mdDir)
+    })
+
+    it("injects settingsJson as JSON file", () => {
+      const settings = { permissions: { allow: ["Bash(*)"] } }
+
+      const result = injectAgentFiles(tmpDir, { settingsJson: settings })
+
+      expect(result.settingsJson).toBe(true)
+      const content = JSON.parse(fs.readFileSync(path.join(tmpDir, ".claude", "settings.json"), "utf8"))
+      expect(content).toEqual(settings)
+    })
+  })
+
+  describe("skills injection", () => {
+    it("copies skill directories into .claude/skills/", () => {
+      const skillsDir = makeTmpDir()
+
+      // Create a skill with files
+      const skillPath = path.join(skillsDir, "code-review")
+      fs.mkdirSync(skillPath, { recursive: true })
+      fs.writeFileSync(path.join(skillPath, "skill.md"), "# Code Review Skill")
+      fs.writeFileSync(path.join(skillPath, "config.json"), '{"name": "code-review"}')
+
+      const result = injectAgentFiles(tmpDir, { skillsDir })
+
+      expect(result.skills).toBe(1)
+      const injectedSkill = path.join(tmpDir, ".claude", "skills", "code-review")
+      expect(fs.existsSync(injectedSkill)).toBe(true)
+      expect(fs.readFileSync(path.join(injectedSkill, "skill.md"), "utf8")).toBe("# Code Review Skill")
+      expect(fs.readFileSync(path.join(injectedSkill, "config.json"), "utf8")).toBe('{"name": "code-review"}')
+
+      cleanup(skillsDir)
+    })
+
+    it("does not overwrite existing skill directories", () => {
+      const skillsDir = makeTmpDir()
+      const skillPath = path.join(skillsDir, "my-skill")
+      fs.mkdirSync(skillPath, { recursive: true })
+      fs.writeFileSync(path.join(skillPath, "skill.md"), "new content")
+
+      // Pre-create the skill in the workspace
+      const existingSkill = path.join(tmpDir, ".claude", "skills", "my-skill")
+      fs.mkdirSync(existingSkill, { recursive: true })
+      fs.writeFileSync(path.join(existingSkill, "skill.md"), "existing content")
+
+      const result = injectAgentFiles(tmpDir, { skillsDir })
+
+      expect(result.skills).toBe(0)
+      const content = fs.readFileSync(path.join(existingSkill, "skill.md"), "utf8")
+      expect(content).toBe("existing content")
+
+      cleanup(skillsDir)
+    })
+  })
+
+  describe("missing source paths", () => {
+    it("handles non-existent agentsDir gracefully", () => {
+      const result = injectAgentFiles(tmpDir, { agentsDir: "/nonexistent/path" })
+      expect(result.agents).toBe(0)
+    })
+
+    it("handles non-existent skillsDir gracefully", () => {
+      const result = injectAgentFiles(tmpDir, { skillsDir: "/nonexistent/path" })
+      expect(result.skills).toBe(0)
+    })
+
+    it("handles non-existent goosehintsPath gracefully", () => {
+      const result = injectAgentFiles(tmpDir, { goosehintsPath: "/nonexistent/hints" })
+      expect(result.goosehints).toBe(false)
+    })
+
+    it("handles non-existent claudeMd gracefully", () => {
+      const result = injectAgentFiles(tmpDir, { claudeMd: "/nonexistent/CLAUDE.md" })
+      expect(result.claudeMd).toBe(false)
+    })
+  })
+
+  describe("idempotency", () => {
+    it("produces same result when called twice", () => {
+      const first = injectAgentFiles(tmpDir)
+      const second = injectAgentFiles(tmpDir)
+
+      // Second call should inject nothing since files already exist
+      expect(second.agents).toBe(0)
+      expect(second.claudeMd).toBe(false)
+
+      // First call should have injected something
+      expect(first.agents).toBeGreaterThan(0)
+    })
+  })
+})

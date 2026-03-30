@@ -369,6 +369,12 @@ export function validateAgentDefinitions(config: unknown, path = "agentDefs"): V
   const agentsDirErr = validateOptionalString(c.agentsDir, `${path}.agentsDir`)
   if (agentsDirErr) errors.push(agentsDirErr)
 
+  const skillsDirErr = validateOptionalString(c.skillsDir, `${path}.skillsDir`)
+  if (skillsDirErr) errors.push(skillsDirErr)
+
+  const goosehintsErr = validateOptionalString(c.goosehintsPath, `${path}.goosehintsPath`)
+  if (goosehintsErr) errors.push(goosehintsErr)
+
   const claudeMdErr = validateOptionalString(c.claudeMd, `${path}.claudeMd`)
   if (claudeMdErr) errors.push(claudeMdErr)
 

@@ -175,6 +175,7 @@ export class ShipPipeline {
         mcp: this.ctx.config.mcp,
         profile: childProfile,
         sessionEnvPassthrough: this.ctx.config.sessionEnvPassthrough,
+        agentDefs: this.ctx.config.agentDefs,
       }
 
       await new Promise<void>((resolve) => {

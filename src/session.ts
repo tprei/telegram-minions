@@ -2,12 +2,13 @@ import { spawn, type ChildProcess } from "node:child_process"
 import { createInterface } from "node:readline"
 import fs from "node:fs"
 import path from "node:path"
-import type { GooseConfig, ClaudeConfig, McpConfig, ProviderProfile } from "./config-types.js"
+import type { GooseConfig, ClaudeConfig, McpConfig, ProviderProfile, AgentDefinitions } from "./config-types.js"
 import type { GooseStreamEvent, SessionMeta, SessionState } from "./types.js"
 import { translateClaudeEvents } from "./claude-stream.js"
 import { captureException, setContext, addBreadcrumb } from "./sentry.js"
 import { DEFAULT_TASK_PROMPT, DEFAULT_PLAN_PROMPT, DEFAULT_THINK_PROMPT, DEFAULT_REVIEW_PROMPT, DEFAULT_SHIP_PLAN_PROMPT, DEFAULT_SHIP_VERIFY_PROMPT } from "./prompts.js"
 import { createSessionLogger } from "./logger.js"
+import { injectAgentFiles } from "./inject-assets.js"
 
 export const SCREENSHOTS_DIR = ".screenshots"
 
@@ -21,6 +22,8 @@ export interface SessionConfig {
   profile?: ProviderProfile
   /** List of environment variable names to pass through to minion sessions */
   sessionEnvPassthrough?: string[]
+  /** Agent definitions, skills, and goosehints to inject into workspaces */
+  agentDefs?: AgentDefinitions
 }
 
 const PLAN_DISALLOWED_TOOLS = ["Edit", "Write", "NotebookEdit"]
@@ -284,6 +287,13 @@ export class SessionHandle {
       if (profile.opusModel) baseEnv["ANTHROPIC_DEFAULT_OPUS_MODEL"] = profile.opusModel
       if (profile.sonnetModel) baseEnv["ANTHROPIC_DEFAULT_SONNET_MODEL"] = profile.sonnetModel
       if (profile.haikuModel) baseEnv["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = profile.haikuModel
+    }
+
+    // Inject agent files, skills, and goosehints into the workspace
+    try {
+      injectAgentFiles(this.meta.cwd, this.sessionConfig.agentDefs)
+    } catch (err) {
+      this.log.warn({ err }, "failed to inject agent files (non-fatal)")
     }
 
     // Add passthrough env vars from config

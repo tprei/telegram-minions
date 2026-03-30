@@ -1115,6 +1115,7 @@ export class Dispatcher {
       mcp: mcpOverrides ? { ...this.config.mcp, ...mcpOverrides } : this.config.mcp,
       profile,
       sessionEnvPassthrough: this.config.sessionEnvPassthrough,
+      agentDefs: this.config.agentDefs,
     }
 
     const handle = new SessionHandle(
@@ -1349,6 +1350,7 @@ export class Dispatcher {
       claude: this.config.claude,
       mcp: this.config.mcp,
       sessionEnvPassthrough: this.config.sessionEnvPassthrough,
+      agentDefs: this.config.agentDefs,
     }
 
     const handle = new SessionHandle(

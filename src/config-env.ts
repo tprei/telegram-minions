@@ -20,6 +20,22 @@ function optionalNumber(name: string, fallback: number): number {
   return n
 }
 
+function buildAgentDefs(): MinionConfig["agentDefs"] {
+  const agentsDir = process.env["AGENTS_DIR"]
+  const skillsDir = process.env["SKILLS_DIR"]
+  const goosehintsPath = process.env["GOOSEHINTS_PATH"]
+  const claudeMd = process.env["CLAUDE_MD_PATH"]
+
+  if (!agentsDir && !skillsDir && !goosehintsPath && !claudeMd) return undefined
+
+  return {
+    ...(agentsDir ? { agentsDir } : {}),
+    ...(skillsDir ? { skillsDir } : {}),
+    ...(goosehintsPath ? { goosehintsPath } : {}),
+    ...(claudeMd ? { claudeMd } : {}),
+  }
+}
+
 export function configFromEnv(overrides?: Partial<MinionConfig>): MinionConfig {
   const base: MinionConfig = {
     telegram: {
@@ -84,6 +100,7 @@ export function configFromEnv(overrides?: Partial<MinionConfig>): MinionConfig {
     sentry: {
       dsn: process.env["SENTRY_DSN"] ?? undefined,
     },
+    agentDefs: buildAgentDefs(),
     repos: {},
     sessionEnvPassthrough: process.env["SESSION_ENV_PASSTHROUGH"]
       ? process.env["SESSION_ENV_PASSTHROUGH"].split(",").map((s) => s.trim()).filter((s) => s.length > 0)

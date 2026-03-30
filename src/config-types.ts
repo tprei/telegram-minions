@@ -68,6 +68,8 @@ export interface SentryConfig {
 
 export interface AgentDefinitions {
   agentsDir?: string
+  skillsDir?: string
+  goosehintsPath?: string
   claudeMd?: string
   settingsJson?: object
 }
