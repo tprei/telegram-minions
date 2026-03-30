@@ -20,7 +20,7 @@ import { PrLink } from './PrLink'
 import { ContextMenu, useLongPress, useContextMenu } from './ContextMenu'
 import type { ContextMenuActions } from './ContextMenu'
 import { layoutUniverse } from './universe-layout'
-import type { UniverseNode, UniverseEdge } from './universe-layout'
+import type { UniverseEdge } from './universe-layout'
 import { useTelegram } from '../hooks'
 
 interface UniverseNodeData {

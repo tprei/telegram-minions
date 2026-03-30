@@ -12,22 +12,18 @@ const GRID_NODE_GAP_Y = NODE_HEIGHT + 40
 
 export type EdgeRelationship = 'dag-dependency' | 'parent-child' | 'ci-fix'
 
-export interface UniverseNode extends Node {
-  data: {
-    session?: MinionSession
-    dagNode?: DagNode
-    label: string
-    status: string
-    groupId: string
-    nodeType: 'dag' | 'parent-child' | 'standalone'
-  }
-}
+export type UniverseNode = Node<{
+  session?: MinionSession
+  dagNode?: DagNode
+  label: string
+  status: string
+  groupId: string
+  nodeType: 'dag' | 'parent-child' | 'standalone'
+}>
 
-export interface UniverseEdge extends Edge {
-  data?: {
-    relationship: EdgeRelationship
-  }
-}
+export type UniverseEdge = Edge<{
+  relationship: EdgeRelationship
+}>
 
 interface LayoutGroup {
   id: string
