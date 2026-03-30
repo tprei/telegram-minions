@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, cleanup } from '@testing-library/preact'
-import { SessionList, SessionCard, StatusBadge } from '../src/components/SessionList'
+import { SessionList, SessionCard } from '../src/components/SessionList'
+import { StatusBadge } from '../src/components/shared'
 import type { MinionSession } from '../src/types'
 
 const mockSession: MinionSession = {

@@ -18,7 +18,7 @@ import '@reactflow/controls/dist/style.css'
 import '@reactflow/minimap/dist/style.css'
 import dagre from 'dagre'
 import type { DagGraph, DagNode } from '../types'
-import { StatusBadge } from './SessionList'
+import { StatusBadge, getStatusColors } from './shared'
 import { PrLink } from './PrLink'
 import { useTelegram } from '../hooks'
 
@@ -69,27 +69,6 @@ function calculateDynamicHeight(nodeCount: number, graphDepth: number): number {
   const rows = Math.max(graphDepth, Math.ceil(nodeCount / 3))
   const calculated = Math.max(rows * minNodeHeight, minHeight)
   return Math.min(calculated, maxHeight)
-}
-
-type DagNodeStatus = DagNode['status']
-
-function getStatusColors(isDark: boolean): Record<DagNodeStatus, { bg: string; border: string; text: string }> {
-  if (isDark) {
-    return {
-      pending: { bg: '#374151', border: '#6b7280', text: '#e5e7eb' },
-      running: { bg: '#1e3a5f', border: '#3b82f6', text: '#93c5fd' },
-      completed: { bg: '#064e3b', border: '#22c55e', text: '#86efac' },
-      failed: { bg: '#7f1d1d', border: '#ef4444', text: '#fca5a5' },
-      skipped: { bg: '#292524', border: '#78716c', text: '#a8a29e' },
-    }
-  }
-  return {
-    pending: { bg: '#f3f4f6', border: '#9ca3af', text: '#374151' },
-    running: { bg: '#dbeafe', border: '#3b82f6', text: '#1e40af' },
-    completed: { bg: '#dcfce7', border: '#22c55e', text: '#166534' },
-    failed: { bg: '#fee2e2', border: '#ef4444', text: '#991b1b' },
-    skipped: { bg: '#f5f5f4', border: '#a8a29e', text: '#57534e' },
-  }
 }
 
 function getLayoutedElements(

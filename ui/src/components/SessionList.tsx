@@ -1,110 +1,11 @@
 import { useState, useCallback } from 'preact/hooks'
-import type { AttentionReason, MinionSession, QuickAction } from '../types'
+import type { MinionSession, QuickAction } from '../types'
 import { ConfirmDialog, ReplyDialog } from './ConfirmDialog'
 import { PrLink } from './PrLink'
 import { useTelegram, usePopup as useTelegramPopup } from '../hooks'
+import { StatusBadge, AttentionBadge, formatRelativeTime, getAttentionBorder } from './shared'
 
-type StatusType = MinionSession['status'] | 'skipped'
-
-interface StatusBadgeProps {
-  status: StatusType
-}
-
-const STATUS_CONFIG: Record<StatusType, { emoji: string; label: string; className: string; darkClassName: string }> = {
-  pending: {
-    emoji: '💬',
-    label: 'Idle',
-    className: 'bg-gray-100 text-gray-700',
-    darkClassName: 'bg-gray-700 text-gray-300',
-  },
-  running: {
-    emoji: '⚡',
-    label: 'Running',
-    className: 'bg-blue-100 text-blue-700',
-    darkClassName: 'bg-blue-900/50 text-blue-300',
-  },
-  completed: {
-    emoji: '✅',
-    label: 'Done',
-    className: 'bg-green-100 text-green-700',
-    darkClassName: 'bg-green-900/50 text-green-300',
-  },
-  failed: {
-    emoji: '❌',
-    label: 'Failed',
-    className: 'bg-red-100 text-red-700',
-    darkClassName: 'bg-red-900/50 text-red-300',
-  },
-  skipped: {
-    emoji: '⏭️',
-    label: 'Skipped',
-    className: 'bg-stone-100 text-stone-700',
-    darkClassName: 'bg-stone-800/50 text-stone-400',
-  },
-}
-
-export function StatusBadge({ status }: StatusBadgeProps) {
-  const tg = useTelegram()
-  const config = STATUS_CONFIG[status]
-  const className = tg.darkMode ? config.darkClassName : config.className
-
-  return (
-    <span class={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${className}`}>
-      <span>{config.emoji}</span>
-      <span>{config.label}</span>
-    </span>
-  )
-}
-
-const ATTENTION_CONFIG: Record<AttentionReason, { emoji: string; label: string; className: string; darkClassName: string }> = {
-  failed: {
-    emoji: '🔴',
-    label: 'Failed',
-    className: 'bg-red-100 text-red-700',
-    darkClassName: 'bg-red-900/50 text-red-300',
-  },
-  waiting_for_feedback: {
-    emoji: '💬',
-    label: 'Waiting for reply',
-    className: 'bg-yellow-100 text-yellow-700',
-    darkClassName: 'bg-yellow-900/50 text-yellow-300',
-  },
-  interrupted: {
-    emoji: '⚠️',
-    label: 'Interrupted',
-    className: 'bg-orange-100 text-orange-700',
-    darkClassName: 'bg-orange-900/50 text-orange-300',
-  },
-  ci_fix: {
-    emoji: '🔧',
-    label: 'CI fix in progress',
-    className: 'bg-purple-100 text-purple-700',
-    darkClassName: 'bg-purple-900/50 text-purple-300',
-  },
-  idle_long: {
-    emoji: '⏳',
-    label: 'Idle for a while',
-    className: 'bg-gray-100 text-gray-600',
-    darkClassName: 'bg-gray-700 text-gray-400',
-  },
-}
-
-interface AttentionBadgeProps {
-  reason: AttentionReason
-  darkMode: boolean
-}
-
-export function AttentionBadge({ reason, darkMode }: AttentionBadgeProps) {
-  const config = ATTENTION_CONFIG[reason]
-  const className = darkMode ? config.darkClassName : config.className
-
-  return (
-    <span class={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${className}`}>
-      <span>{config.emoji}</span>
-      <span>{config.label}</span>
-    </span>
-  )
-}
+export { StatusBadge, AttentionBadge }
 
 const QUICK_ACTION_STYLE: Record<QuickAction['type'], { emoji: string; className: string; darkClassName: string }> = {
   make_pr: {
@@ -163,21 +64,6 @@ interface SessionCardProps {
   onStopMinion?: (sessionId: string) => Promise<void>
   onCloseSession?: (sessionId: string) => Promise<void>
   isActionLoading?: boolean
-}
-
-function formatRelativeTime(dateString: string): string {
-  const date = new Date(dateString)
-  const now = new Date()
-  const diffMs = now.getTime() - date.getTime()
-  const diffMins = Math.floor(diffMs / 60000)
-  const diffHours = Math.floor(diffMs / 3600000)
-  const diffDays = Math.floor(diffMs / 86400000)
-
-  if (diffMins < 1) return 'just now'
-  if (diffMins < 60) return `${diffMins}m ago`
-  if (diffHours < 24) return `${diffHours}h ago`
-  if (diffDays < 7) return `${diffDays}d ago`
-  return date.toLocaleDateString()
 }
 
 export function SessionCard({
@@ -259,27 +145,19 @@ export function SessionCard({
   }, [session.id, onCloseSession])
 
   const handleSendReply = useCallback(
-    async (_sessionId: string, message: string) => {
+    async (sessionId: string, message: string) => {
       if (onSendReply) {
-        await onSendReply(session.id, message)
+        await onSendReply(sessionId, message)
         setShowReplyDialog(false)
       }
     },
-    [session.id, onSendReply]
+    [onSendReply]
   )
 
   const isActive = session.status === 'running' || session.status === 'pending'
   const isClickable = Boolean(session.threadId && session.chatId)
 
-  const attentionBorder = session.needsAttention
-    ? session.attentionReasons.includes('failed')
-      ? tg.darkMode ? 'ring-2 ring-red-500/60' : 'ring-2 ring-red-400/60'
-      : session.attentionReasons.includes('waiting_for_feedback')
-        ? tg.darkMode ? 'ring-2 ring-yellow-500/60' : 'ring-2 ring-yellow-400/60'
-        : session.attentionReasons.includes('interrupted')
-          ? tg.darkMode ? 'ring-2 ring-orange-500/60' : 'ring-2 ring-orange-400/60'
-          : ''
-    : ''
+  const attentionBorder = getAttentionBorder(session, tg.darkMode)
 
   return (
     <>
