@@ -1,10 +1,10 @@
 import fs from "node:fs"
 import path from "node:path"
 import { loggers } from "../logger.js"
-import { formatProfileList, formatConfigHelp } from "../format.js"
-import { escapeHtml, extractRepoName } from "../command-parser.js"
-import { dirSizeBytes } from "../session-manager.js"
-import type { DispatcherContext } from "../dispatcher-context.js"
+import { formatProfileList, formatConfigHelp } from "../telegram/format.js"
+import { escapeHtml, extractRepoName } from "../commands/command-parser.js"
+import { dirSizeBytes } from "../session/session-manager.js"
+import type { DispatcherContext } from "../orchestration/dispatcher-context.js"
 import type { TopicSession } from "../types.js"
 
 const log = loggers.dispatcher

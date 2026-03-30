@@ -8,16 +8,16 @@
  * owned by the Dispatcher core.
  */
 
-import type { TelegramClient } from "../telegram.js"
-import type { Observer } from "../observer.js"
+import type { TelegramClient } from "../telegram/telegram.js"
+import type { Observer } from "../telegram/observer.js"
 import type {
   TopicSession, TopicMessage,
   TelegramPhotoSize,
 } from "../types.js"
-import type { MinionConfig, McpConfig } from "../config-types.js"
-import type { DagGraph, DagNode, DagInput } from "../dag.js"
-import type { QualityReport } from "../quality-gates.js"
-import type { ActiveSession, MergeResult } from "../session-manager.js"
+import type { MinionConfig, McpConfig } from "../config/config-types.js"
+import type { DagGraph, DagNode, DagInput } from "../dag/dag.js"
+import type { QualityReport } from "../ci/quality-gates.js"
+import type { ActiveSession, MergeResult } from "../session/session-manager.js"
 import type { StatsTracker } from "../stats.js"
 import type { ProfileStore } from "../profile-store.js"
 import type { StateBroadcaster } from "../api-server.js"

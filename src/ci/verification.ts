@@ -1,5 +1,5 @@
 import { execSync } from "node:child_process"
-import type { CiConfig } from "../config-types.js"
+import type { CiConfig } from "../config/config-types.js"
 import type { QualityReport } from "./quality-gates.js"
 import { runQualityGates } from "./quality-gates.js"
 import { checkPRMergeability, waitForCI } from "./ci-babysit.js"

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { parseSplitItems, buildSplitChildPrompt, getClaudeConfigDir } from "../src/split.js"
+import { parseSplitItems, buildSplitChildPrompt, getClaudeConfigDir } from "../src/orchestration/split.js"
 import type { TopicMessage } from "../src/types.js"
 
 describe("parseSplitItems", () => {

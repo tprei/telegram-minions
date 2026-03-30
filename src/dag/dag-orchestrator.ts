@@ -1,10 +1,10 @@
 import { execFileSync } from "node:child_process"
 import crypto from "node:crypto"
-import type { DispatcherContext } from "../dispatcher-context.js"
+import type { DispatcherContext } from "../orchestration/dispatcher-context.js"
 import type { TopicSession } from "../types.js"
 import { generateSlug } from "../slugs.js"
-import { DEFAULT_RECOVERY_PROMPT } from "../prompts.js"
-import { findPRByBranch } from "../ci-babysit.js"
+import { DEFAULT_RECOVERY_PROMPT } from "../config/prompts.js"
+import { findPRByBranch } from "../ci/ci-babysit.js"
 import { captureException } from "../sentry.js"
 import {
   esc,
@@ -16,7 +16,7 @@ import {
   formatDagCIWaiting,
   formatDagCIFailed,
   formatDagForceAdvance,
-} from "../format.js"
+} from "../telegram/format.js"
 import { buildDagChildPrompt } from "./dag-extract.js"
 import {
   buildDag,

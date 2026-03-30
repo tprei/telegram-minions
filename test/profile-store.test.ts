@@ -3,7 +3,7 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { ProfileStore } from "../src/profile-store.js"
-import type { ProviderProfile } from "../src/config-types.js"
+import type { ProviderProfile } from "../src/config/config-types.js"
 
 const DEFAULT_PROFILE: ProviderProfile = {
   id: "claude-acp",

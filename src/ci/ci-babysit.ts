@@ -1,5 +1,5 @@
 import { execFile as execFileCb } from "node:child_process"
-import type { CiConfig } from "../config-types.js"
+import type { CiConfig } from "../config/config-types.js"
 import type { QualityReport } from "./quality-gates.js"
 import { loggers } from "../logger.js"
 

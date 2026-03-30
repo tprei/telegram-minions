@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest"
-import { configFromEnv } from "../src/config-env.js"
+import { configFromEnv } from "../src/config/config-env.js"
 import { ConfigError, ConfigFormatError } from "../src/errors.js"
 
 describe("configFromEnv", () => {

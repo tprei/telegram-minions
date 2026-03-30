@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest"
-import { parseDagItems, parseStackItems, buildDagChildPrompt, extractDagItems, extractStackItems } from "../src/dag-extract.js"
+import { parseDagItems, parseStackItems, buildDagChildPrompt, extractDagItems, extractStackItems } from "../src/dag/dag-extract.js"
 import type { TopicMessage } from "../src/types.js"
-import type { DagInput } from "../src/dag.js"
-import type { ProviderProfile } from "../src/config-types.js"
+import type { DagInput } from "../src/dag/dag.js"
+import type { ProviderProfile } from "../src/config/config-types.js"
 import type { ChildProcess } from "node:child_process"
 
 // Mock spawn to verify environment variables

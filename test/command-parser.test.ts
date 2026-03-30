@@ -30,7 +30,7 @@ import {
   LAND_CMD,
   RETRY_CMD,
   SHIP_PREFIX,
-} from "../src/command-parser.js"
+} from "../src/commands/command-parser.js"
 
 describe("command-parser constants", () => {
   it("exports all command prefixes", () => {

@@ -15,9 +15,9 @@ import {
   validateConfigOrThrow,
   assertValidConfig,
   ConfigValidationError,
-} from "../src/config-validator.js"
-import type { MinionConfig, TelegramConfig, WorkspaceConfig, ProviderProfile } from "../src/config-types.js"
-import { configFromEnv } from "../src/config-env.js"
+} from "../src/config/config-validator.js"
+import type { MinionConfig, TelegramConfig, WorkspaceConfig, ProviderProfile } from "../src/config/config-types.js"
+import { configFromEnv } from "../src/config/config-env.js"
 
 function createValidMinionConfig(): MinionConfig {
   return {

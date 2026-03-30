@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { translateClaudeEvent, translateClaudeEvents } from "../src/claude-stream.js"
+import { translateClaudeEvent, translateClaudeEvents } from "../src/session/claude-stream.js"
 
 describe("translateClaudeEvent", () => {
   it("translates a text delta stream event", () => {

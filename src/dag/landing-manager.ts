@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process"
 import { existsSync } from "node:fs"
-import type { DispatcherContext } from "../dispatcher-context.js"
+import type { DispatcherContext } from "../orchestration/dispatcher-context.js"
 import type { TopicSession } from "../types.js"
 import type { DagGraph, DagNode } from "./dag.js"
 import { topologicalSort, needsRestack, cleanupMergedBranch } from "./dag.js"
@@ -15,7 +15,7 @@ import {
   formatLandSummary,
   formatLandConflictResolution,
   formatLandRestacking,
-} from "../format.js"
+} from "../telegram/format.js"
 import { loggers } from "../logger.js"
 
 const log = loggers.dispatcher

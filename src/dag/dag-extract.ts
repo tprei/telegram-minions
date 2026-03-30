@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process"
 import type { TopicMessage } from "../types.js"
 import type { DagInput } from "./dag.js"
-import type { ProviderProfile } from "../config-types.js"
+import type { ProviderProfile } from "../config/config-types.js"
 import { loggers } from "../logger.js"
 
 const log = loggers.dagExtract

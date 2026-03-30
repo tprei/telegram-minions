@@ -1,15 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { ShipPipeline } from "../src/ship-pipeline.js"
-import type { DispatcherContext } from "../src/dispatcher-context.js"
+import { ShipPipeline } from "../src/orchestration/ship-pipeline.js"
+import type { DispatcherContext } from "../src/orchestration/dispatcher-context.js"
 import type { TopicSession, AutoAdvance } from "../src/types.js"
-import type { DagGraph, DagNode } from "../src/dag.js"
+import type { DagGraph, DagNode } from "../src/dag/dag.js"
 
-vi.mock("../src/verification.js", () => ({
+vi.mock("../src/ci/verification.js", () => ({
   buildCompletenessReviewPrompt: vi.fn().mockReturnValue("verify task prompt"),
   parseCompletenessResult: vi.fn().mockReturnValue({ passed: true, details: "ok" }),
 }))
 
-vi.mock("../src/dag-extract.js", () => ({
+vi.mock("../src/dag/dag-extract.js", () => ({
   extractDagItems: vi.fn().mockResolvedValue({
     items: [
       { id: "a", title: "Task A", description: "Do A", dependsOn: [] },
@@ -21,8 +21,8 @@ vi.mock("../src/sentry.js", () => ({
   captureException: vi.fn(),
 }))
 
-import { extractDagItems } from "../src/dag-extract.js"
-import { parseCompletenessResult } from "../src/verification.js"
+import { extractDagItems } from "../src/dag/dag-extract.js"
+import { parseCompletenessResult } from "../src/ci/verification.js"
 
 const mockExtractDagItems = vi.mocked(extractDagItems)
 const mockParseCompletenessResult = vi.mocked(parseCompletenessResult)

@@ -3,7 +3,7 @@ import {
   formatLandSkipped,
   formatLandSummary,
   formatLandConflictResolution,
-} from "../src/format.js"
+} from "../src/telegram/format.js"
 
 describe("formatLandSkipped", () => {
   it("formats a skipped PR with lowercase state", () => {

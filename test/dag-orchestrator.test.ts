@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { DagOrchestrator } from "../src/dag-orchestrator.js"
-import type { DispatcherContext } from "../src/dispatcher-context.js"
+import { DagOrchestrator } from "../src/dag/dag-orchestrator.js"
+import type { DispatcherContext } from "../src/orchestration/dispatcher-context.js"
 import type { TopicSession } from "../src/types.js"
-import type { DagGraph, DagNode } from "../src/dag.js"
+import type { DagGraph, DagNode } from "../src/dag/dag.js"
 
-vi.mock("../src/ci-babysit.js", () => ({
+vi.mock("../src/ci/ci-babysit.js", () => ({
   findPRByBranch: vi.fn(),
 }))
 
@@ -16,7 +16,7 @@ vi.mock("../src/slugs.js", () => ({
   generateSlug: vi.fn().mockReturnValue("test-slug"),
 }))
 
-import { findPRByBranch } from "../src/ci-babysit.js"
+import { findPRByBranch } from "../src/ci/ci-babysit.js"
 
 const mockFindPRByBranch = vi.mocked(findPRByBranch)
 

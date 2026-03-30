@@ -6,7 +6,7 @@ import {
   DAG_STATUS_START,
   DAG_STATUS_END,
   type DagInput,
-} from "../src/dag.js"
+} from "../src/dag/dag.js"
 
 describe("DAG PR description update flow", () => {
   const items: DagInput[] = [

@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from "vitest"
-import { Dispatcher } from "../src/dispatcher.js"
-import type { TelegramClient } from "../src/telegram.js"
-import { Observer } from "../src/observer.js"
-import type { MinionConfig } from "../src/config-types.js"
+import { Dispatcher } from "../src/orchestration/dispatcher.js"
+import type { TelegramClient } from "../src/telegram/telegram.js"
+import { Observer } from "../src/telegram/observer.js"
+import type { MinionConfig } from "../src/config/config-types.js"
 import type { TopicSession } from "../src/types.js"
 
 function makeMockTelegram(): TelegramClient {

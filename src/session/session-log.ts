@@ -1,7 +1,7 @@
 import fs from "node:fs"
 import path from "node:path"
 import type { TopicSession, SessionMeta } from "../types.js"
-import type { QualityReport } from "../quality-gates.js"
+import type { QualityReport } from "../ci/quality-gates.js"
 import { loggers } from "../logger.js"
 
 const log = loggers.sessionLog

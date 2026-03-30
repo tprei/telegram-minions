@@ -1,6 +1,6 @@
 import fs from "node:fs"
 import path from "node:path"
-import type { ProviderProfile } from "./config-types.js"
+import type { ProviderProfile } from "./config/config-types.js"
 import { captureException } from "./sentry.js"
 import { loggers } from "./logger.js"
 

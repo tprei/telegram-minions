@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { CIBabysitter } from "../src/ci/ci-babysitter.js"
-import type { DispatcherContext } from "../src/dispatcher-context.js"
+import type { DispatcherContext } from "../src/orchestration/dispatcher-context.js"
 import type { TopicSession } from "../src/types.js"
 
 // Mock external dependencies

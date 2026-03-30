@@ -11,7 +11,7 @@
 import fs from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
-import type { AgentDefinitions } from "../config-types.js"
+import type { AgentDefinitions } from "../config/config-types.js"
 import { loggers } from "../logger.js"
 
 const log = loggers.session

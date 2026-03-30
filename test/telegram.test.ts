@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { TelegramClient } from "../src/telegram.js"
+import { TelegramClient } from "../src/telegram/telegram.js"
 
 const TOKEN = "test-token"
 const CHAT_ID = "12345"

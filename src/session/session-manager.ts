@@ -11,7 +11,7 @@ import os from "node:os"
 import crypto from "node:crypto"
 import type { SessionHandle } from "./session.js"
 import type { AutoAdvance, SessionMeta, TopicSession } from "../types.js"
-import { extractRepoName } from "../command-parser.js"
+import { extractRepoName } from "../commands/command-parser.js"
 import { loggers } from "../logger.js"
 import { DefaultBranchError } from "../errors.js"
 

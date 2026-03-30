@@ -8,11 +8,11 @@ import {
   escapeHtml,
   extractRepoName,
   appendImageContext,
-} from "../src/command-parser.js"
+} from "../src/commands/command-parser.js"
 import {
   buildContextPrompt,
   buildExecutionPrompt,
-} from "../src/session-manager.js"
+} from "../src/session/session-manager.js"
 import type { TopicSession } from "../src/types.js"
 
 const testRepos = {

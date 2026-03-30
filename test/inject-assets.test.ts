@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest"
 import fs from "node:fs"
 import path from "node:path"
 import os from "node:os"
-import { injectAgentFiles, resolvePackageAssetsDir } from "../src/inject-assets.js"
+import { injectAgentFiles, resolvePackageAssetsDir } from "../src/session/inject-assets.js"
 
 function makeTmpDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "inject-assets-test-"))

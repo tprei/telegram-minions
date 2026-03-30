@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import fs from "node:fs"
-import { PinnedMessageManager } from "../src/pinned-message-manager.js"
+import { PinnedMessageManager } from "../src/telegram/pinned-message-manager.js"
 import type { TopicSession } from "../src/types.js"
-import type { DagGraph, DagNode } from "../src/dag.js"
+import type { DagGraph, DagNode } from "../src/dag/dag.js"
 
 vi.mock("node:fs")
 

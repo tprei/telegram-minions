@@ -1,14 +1,14 @@
 import type { DispatcherContext } from "./dispatcher-context.js"
 import type { TopicSession } from "../types.js"
 import { extractSplitItems } from "./split.js"
-import { extractStackItems } from "../dag-extract.js"
+import { extractStackItems } from "../dag/dag-extract.js"
 import {
   formatSplitAnalyzing,
   formatSplitStart,
   formatSplitChildComplete,
   formatSplitAllDone,
   formatStackAnalyzing,
-} from "../format.js"
+} from "../telegram/format.js"
 
 export class SplitOrchestrator {
   private readonly ctx: DispatcherContext

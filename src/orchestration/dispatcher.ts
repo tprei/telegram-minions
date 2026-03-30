@@ -2,14 +2,14 @@ import { execSync } from "node:child_process"
 import path from "node:path"
 import fs from "node:fs"
 import crypto from "node:crypto"
-import type { TelegramClient } from "../telegram.js"
+import type { TelegramClient } from "../telegram/telegram.js"
 import { captureException } from "../sentry.js"
-import { SessionHandle, type SessionConfig } from "../session.js"
-import { Observer } from "../observer.js"
+import { SessionHandle, type SessionConfig } from "../session/session.js"
+import { Observer } from "../telegram/observer.js"
 import type { TelegramUpdate, TelegramCallbackQuery, TelegramPhotoSize, SessionMeta, TopicSession, SessionMode, SessionState, TopicMessage, AutoAdvance } from "../types.js"
 import { generateSlug, taskToLabel } from "../slugs.js"
-import type { MinionConfig, McpConfig } from "../config-types.js"
-import { DEFAULT_PROMPTS } from "../prompts.js"
+import type { MinionConfig, McpConfig } from "../config/config-types.js"
+import { DEFAULT_PROMPTS } from "../config/prompts.js"
 import { SessionStore } from "../store.js"
 import { ProfileStore } from "../profile-store.js"
 import {
@@ -33,15 +33,15 @@ import {
   formatConfigHelp,
   formatDagAnalyzing,
   formatPinnedStatus,
-} from "../format.js"
-import { runQualityGates } from "../quality-gates.js"
+} from "../telegram/format.js"
+import { runQualityGates } from "../ci/quality-gates.js"
 import { StatsTracker } from "../stats.js"
 import { fetchClaudeUsage } from "../claude-usage.js"
-import { writeSessionLog } from "../session-log.js"
-import { extractPRUrl } from "../ci-babysit.js"
+import { writeSessionLog } from "../session/session-log.js"
+import { extractPRUrl } from "../ci/ci-babysit.js"
 import { buildConversationDigest } from "../conversation-digest.js"
 import { truncateConversation } from "../conversation-limits.js"
-import { DEFAULT_CI_FIX_PROMPT } from "../prompts.js"
+import { DEFAULT_CI_FIX_PROMPT } from "../config/prompts.js"
 import { StateBroadcaster, topicSessionToApi, dagToApi } from "../api-server.js"
 import { loggers } from "../logger.js"
 import { SessionNotFoundError } from "../errors.js"
@@ -49,24 +49,24 @@ import {
   parseTaskArgs, parseReviewArgs, buildReviewAllTask,
   buildRepoKeyboard, buildProfileKeyboard,
   escapeHtml, extractRepoName, appendImageContext,
-} from "../command-parser.js"
+} from "../commands/command-parser.js"
 import {
   type ActiveSession, type PendingTask,
   buildContextPrompt, buildExecutionPrompt,
   prepareWorkspace, removeWorkspace, cleanBuildArtifacts, dirSizeBytes,
   downloadPhotos, prepareFanInBranch, mergeUpstreamBranches,
-} from "../session-manager.js"
-import { extractDagItems } from "../dag-extract.js"
+} from "../session/session-manager.js"
+import { extractDagItems } from "../dag/dag-extract.js"
 import { buildSplitChildPrompt } from "./split.js"
-import type { DagGraph } from "../dag.js"
+import type { DagGraph } from "../dag/dag.js"
 import type { DispatcherContext } from "./dispatcher-context.js"
-import { CIBabysitter } from "../ci-babysitter.js"
-import { LandingManager } from "../landing-manager.js"
-import { DagOrchestrator } from "../dag-orchestrator.js"
+import { CIBabysitter } from "../ci/ci-babysitter.js"
+import { LandingManager } from "../dag/landing-manager.js"
+import { DagOrchestrator } from "../dag/dag-orchestrator.js"
 import { ShipPipeline } from "./ship-pipeline.js"
 import { SplitOrchestrator } from "./split-orchestrator.js"
-import { PinnedMessageManager } from "../pinned-message-manager.js"
-import { routeCommand } from "../command-router.js"
+import { PinnedMessageManager } from "../telegram/pinned-message-manager.js"
+import { routeCommand } from "../commands/command-router.js"
 
 const log = loggers.dispatcher
 

@@ -1,4 +1,4 @@
-import type { DispatcherContext } from "../dispatcher-context.js"
+import type { DispatcherContext } from "../orchestration/dispatcher-context.js"
 import type { TopicSession } from "../types.js"
 import type { QualityReport } from "./quality-gates.js"
 import { runQualityGates } from "./quality-gates.js"
@@ -19,7 +19,7 @@ import {
   formatCIConflicts,
   formatCIResolvingConflicts,
   formatCINoChecks,
-} from "../format.js"
+} from "../telegram/format.js"
 import { captureException } from "../sentry.js"
 import { loggers } from "../logger.js"
 

@@ -42,7 +42,7 @@ import {
   threadLink,
   formatPinnedSplitStatus,
   formatPinnedDagStatus,
-} from "../src/format.js"
+} from "../src/telegram/format.js"
 import type { ClaudeUsageResponse } from "../src/claude-usage.js"
 import type { AggregateStats, SessionRecord, ModeBreakdown } from "../src/stats.js"
 

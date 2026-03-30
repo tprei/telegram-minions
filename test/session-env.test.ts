@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest"
-import { SessionHandle, type SessionConfig } from "../src/session.js"
+import { SessionHandle, type SessionConfig } from "../src/session/session.js"
 import type { SessionMeta } from "../src/types.js"
 
 const baseConfig: SessionConfig = {

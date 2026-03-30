@@ -55,6 +55,7 @@ export const loggers = {
   verification: createLogger({ component: "verification" }),
   ship: createLogger({ component: "ship" }),
   conflictResolver: createLogger({ component: "conflict-resolver" }),
+  dagStore: createLogger({ component: "dag-store" }),
 } as const
 
 /**

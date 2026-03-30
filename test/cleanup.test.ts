@@ -5,7 +5,7 @@ import path from "node:path"
 
 import { execSync } from "node:child_process"
 import crypto from "node:crypto"
-import { cleanBuildArtifacts, dirSizeBytes, bootstrapDependencies } from "../src/session-manager.js"
+import { cleanBuildArtifacts, dirSizeBytes, bootstrapDependencies } from "../src/session/session-manager.js"
 
 let tmpDir: string
 

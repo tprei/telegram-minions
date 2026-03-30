@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest"
 import { spawn } from "node:child_process"
-import { SessionHandle, type SessionConfig } from "../src/session.js"
+import { SessionHandle, type SessionConfig } from "../src/session/session.js"
 import type { SessionMeta } from "../src/types.js"
 
 const stubConfig: SessionConfig = {

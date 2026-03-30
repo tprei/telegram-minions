@@ -25,7 +25,7 @@ import {
   parseCompletenessResult,
   rebaseOntoMain,
 } from "../src/ci/verification.js"
-import type { CiConfig } from "../src/config-types.js"
+import type { CiConfig } from "../src/config/config-types.js"
 
 const mockCheckPRMergeability = vi.mocked(checkPRMergeability)
 const mockWaitForCI = vi.mocked(waitForCI)

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest"
 import { extractPRUrl, findPRByBranch, buildCIFixPrompt, buildQualityGateFixPrompt, buildMergeConflictPrompt, checkPRMergeability, waitForCI } from "../src/ci/ci-babysit.js"
-import type { CiConfig } from "../src/config-types.js"
+import type { CiConfig } from "../src/config/config-types.js"
 
 vi.mock("node:child_process", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:child_process")>()

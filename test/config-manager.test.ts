@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import fs from "node:fs"
 import path from "node:path"
-import { ConfigManager } from "../src/config-manager.js"
-import type { DispatcherContext } from "../src/dispatcher-context.js"
+import { ConfigManager } from "../src/config/config-manager.js"
+import type { DispatcherContext } from "../src/orchestration/dispatcher-context.js"
 import type { TopicSession } from "../src/types.js"
 
 function createMockContext(overrides: Partial<DispatcherContext> = {}): DispatcherContext {

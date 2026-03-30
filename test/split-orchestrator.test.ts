@@ -1,17 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { SplitOrchestrator } from "../src/split-orchestrator.js"
-import type { DispatcherContext } from "../src/dispatcher-context.js"
+import { SplitOrchestrator } from "../src/orchestration/split-orchestrator.js"
+import type { DispatcherContext } from "../src/orchestration/dispatcher-context.js"
 import type { TopicSession } from "../src/types.js"
 
-vi.mock("../src/split.js", () => ({
+vi.mock("../src/orchestration/split.js", () => ({
   extractSplitItems: vi.fn(),
 }))
 
-vi.mock("../src/dag-extract.js", () => ({
+vi.mock("../src/dag/dag-extract.js", () => ({
   extractStackItems: vi.fn(),
 }))
 
-vi.mock("../src/format.js", () => ({
+vi.mock("../src/telegram/format.js", () => ({
   formatSplitAnalyzing: vi.fn((slug: string) => `analyzing ${slug}`),
   formatSplitStart: vi.fn(() => "split started"),
   formatSplitChildComplete: vi.fn(() => "child complete"),
@@ -19,9 +19,9 @@ vi.mock("../src/format.js", () => ({
   formatStackAnalyzing: vi.fn((slug: string) => `stack analyzing ${slug}`),
 }))
 
-import { extractSplitItems } from "../src/split.js"
-import { extractStackItems } from "../src/dag-extract.js"
-import { formatSplitChildComplete } from "../src/format.js"
+import { extractSplitItems } from "../src/orchestration/split.js"
+import { extractStackItems } from "../src/dag/dag-extract.js"
+import { formatSplitChildComplete } from "../src/telegram/format.js"
 
 const mockExtractSplitItems = vi.mocked(extractSplitItems)
 const mockExtractStackItems = vi.mocked(extractStackItems)
@@ -69,6 +69,7 @@ function makeContext(overrides: Partial<DispatcherContext> = {}): DispatcherCont
     pushToConversation: vi.fn(),
     extractPRFromConversation: vi.fn().mockReturnValue(null),
     persistTopicSessions: vi.fn().mockResolvedValue(undefined),
+    persistDags: vi.fn().mockResolvedValue(undefined),
     updatePinnedSummary: vi.fn(),
     updateTopicTitle: vi.fn().mockResolvedValue(undefined),
     pinThreadMessage: vi.fn().mockResolvedValue(undefined),

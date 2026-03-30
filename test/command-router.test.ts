@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { routeCommand } from "../src/command-router.js"
+import { routeCommand } from "../src/commands/command-router.js"
 
 describe("routeCommand", () => {
   describe("global commands (no thread)", () => {

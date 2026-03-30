@@ -4,7 +4,7 @@ import {
   buildExecutionPrompt,
   extractRepoName,
   escapeHtml,
-} from "../src/command-parser.js"
+} from "../src/commands/command-parser.js"
 import {
   buildContextPrompt as sessionBuildContextPrompt,
   buildExecutionPrompt as sessionBuildExecutionPrompt,
@@ -17,7 +17,7 @@ import {
   prepareFanInBranch,
   mergeUpstreamBranches,
   downloadPhotos,
-} from "../src/session-manager.js"
+} from "../src/session/session-manager.js"
 import type { TopicSession } from "../src/types.js"
 import fs from "node:fs"
 import path from "node:path"
