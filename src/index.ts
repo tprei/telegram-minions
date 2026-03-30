@@ -37,10 +37,10 @@ export {
 export type { ValidationResult } from "./config-validator.js"
 export { DEFAULT_PROMPTS, DEFAULT_TASK_PROMPT, DEFAULT_PLAN_PROMPT, DEFAULT_THINK_PROMPT, DEFAULT_REVIEW_PROMPT, DEFAULT_SHIP_PLAN_PROMPT, DEFAULT_SHIP_VERIFY_PROMPT } from "./prompts.js"
 export { TelegramClient } from "./telegram.js"
-export { Observer } from "./observer.js"
+export { Observer } from "./session/observer.js"
 export { Dispatcher } from "./dispatcher.js"
-export { SessionHandle } from "./session.js"
-export type { SessionConfig } from "./session.js"
+export { SessionHandle } from "./session/session.js"
+export type { SessionConfig } from "./session/session.js"
 export type {
   SessionMeta,
   TopicSession,

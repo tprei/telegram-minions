@@ -12,7 +12,7 @@ import {
 import {
   buildContextPrompt,
   buildExecutionPrompt,
-} from "../src/session-manager.js"
+} from "../src/session/session-manager.js"
 import type { TopicSession } from "../src/types.js"
 
 const testRepos = {

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest"
-import { LandingManager } from "../src/landing-manager.js"
+import { LandingManager } from "../src/session/landing-manager.js"
 import type { DispatcherContext } from "../src/dispatcher-context.js"
 import type { TopicSession } from "../src/types.js"
 import type { DagGraph, DagNode, DagInput } from "../src/dag.js"

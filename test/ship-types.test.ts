@@ -10,7 +10,7 @@ import type {
   VerificationCheckStatus,
   SessionMode,
 } from "../src/types.js"
-import type { PendingTask } from "../src/session-manager.js"
+import type { PendingTask } from "../src/session/session-manager.js"
 
 describe("ship session modes", () => {
   it("accepts ship-think as a valid SessionMode", () => {

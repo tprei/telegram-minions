@@ -9,7 +9,7 @@
  */
 
 import type { TelegramClient } from "./telegram.js"
-import type { Observer } from "./observer.js"
+import type { Observer } from "./session/observer.js"
 import type {
   TopicSession, TopicMessage,
   TelegramPhotoSize,
@@ -17,7 +17,7 @@ import type {
 import type { MinionConfig, McpConfig } from "./config-types.js"
 import type { DagGraph, DagNode, DagInput } from "./dag.js"
 import type { QualityReport } from "./quality-gates.js"
-import type { ActiveSession } from "./session-manager.js"
+import type { ActiveSession } from "./session/session-manager.js"
 import type { StatsTracker } from "./stats.js"
 import type { ProfileStore } from "./profile-store.js"
 import type { StateBroadcaster } from "./api-server.js"

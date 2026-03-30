@@ -17,7 +17,7 @@ import {
   prepareFanInBranch,
   mergeUpstreamBranches,
   downloadPhotos,
-} from "../src/session-manager.js"
+} from "../src/session/session-manager.js"
 import type { TopicSession } from "../src/types.js"
 import fs from "node:fs"
 import path from "node:path"

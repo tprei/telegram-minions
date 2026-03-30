@@ -10,10 +10,10 @@ import fs from "node:fs"
 import os from "node:os"
 import crypto from "node:crypto"
 import type { SessionHandle } from "./session.js"
-import type { AutoAdvance, SessionMeta, TopicSession } from "./types.js"
-import { extractRepoName } from "./command-parser.js"
-import { loggers } from "./logger.js"
-import { DefaultBranchError } from "./errors.js"
+import type { AutoAdvance, SessionMeta, TopicSession } from "../types.js"
+import { extractRepoName } from "../command-parser.js"
+import { loggers } from "../logger.js"
+import { DefaultBranchError } from "../errors.js"
 
 const log = loggers.session
 
@@ -480,7 +480,7 @@ export function dirSizeBytes(dirPath: string): number {
  */
 export async function downloadPhotos(
   photos:
-    | import("./types.js").TelegramPhotoSize[]
+    | import("../types.js").TelegramPhotoSize[]
     | undefined,
   telegramClient: {
     downloadFile: (fileId: string, destPath: string) => Promise<boolean>

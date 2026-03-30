@@ -1,9 +1,9 @@
 import { execSync } from "node:child_process"
-import type { DispatcherContext } from "./dispatcher-context.js"
-import type { TopicSession } from "./types.js"
-import type { DagGraph, DagNode } from "./dag.js"
-import { topologicalSort, needsRestack, cleanupMergedBranch } from "./dag.js"
-import { resolveConflictsWithAgent } from "./conflict-resolver.js"
+import type { DispatcherContext } from "../dispatcher-context.js"
+import type { TopicSession } from "../types.js"
+import type { DagGraph, DagNode } from "../dag.js"
+import { topologicalSort, needsRestack, cleanupMergedBranch } from "../dag.js"
+import { resolveConflictsWithAgent } from "../conflict-resolver.js"
 import {
   esc,
   formatLandStart,
@@ -14,8 +14,8 @@ import {
   formatLandSummary,
   formatLandConflictResolution,
   formatLandRestacking,
-} from "./format.js"
-import { loggers } from "./logger.js"
+} from "../format.js"
+import { loggers } from "../logger.js"
 
 const log = loggers.dispatcher
 
