@@ -9,7 +9,7 @@ vi.mock("../src/verification.js", () => ({
   parseCompletenessResult: vi.fn().mockReturnValue({ passed: true, details: "ok" }),
 }))
 
-vi.mock("../src/dag-extract.js", () => ({
+vi.mock("../src/dag/dag-extract.js", () => ({
   extractDagItems: vi.fn().mockResolvedValue({
     items: [
       { id: "a", title: "Task A", description: "Do A", dependsOn: [] },

@@ -7,7 +7,7 @@ vi.mock("../src/split.js", () => ({
   extractSplitItems: vi.fn(),
 }))
 
-vi.mock("../src/dag-extract.js", () => ({
+vi.mock("../src/dag/dag-extract.js", () => ({
   extractStackItems: vi.fn(),
 }))
 
