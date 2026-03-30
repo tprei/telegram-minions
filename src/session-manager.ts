@@ -576,8 +576,8 @@ export function mergeUpstreamBranches(
         cwd: workDir,
       })
       log.debug({ branch, workDir }, "merged branch into worktree")
-    } catch (err: any) {
-      if (err.status === 1) {
+    } catch (err) {
+      if (err instanceof Error && (err as NodeJS.ErrnoException & { status?: number }).status === 1) {
         try {
           const unmerged = execSync("git diff --name-only --diff-filter=U", {
             cwd: workDir,
