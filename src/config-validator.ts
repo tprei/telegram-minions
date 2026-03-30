@@ -261,6 +261,11 @@ export function validateCiConfig(config: unknown, path = "ci"): ValidationResult
   const pollTimeoutErr = validateNumber(c.pollTimeoutMs, `${path}.pollTimeoutMs`, { min: 60000 })
   if (pollTimeoutErr) errors.push(pollTimeoutErr)
 
+  if (c.noChecksGraceMs !== undefined) {
+    const graceErr = validateNumber(c.noChecksGraceMs, `${path}.noChecksGraceMs`, { min: 0 })
+    if (graceErr) errors.push(graceErr)
+  }
+
   const validPolicies = ["block", "warn", "skip"]
   if (c.dagCiPolicy !== undefined && !validPolicies.includes(c.dagCiPolicy)) {
     errors.push(error(`${path}.dagCiPolicy`, `expected one of ${validPolicies.join(", ")}, got "${c.dagCiPolicy}"`))

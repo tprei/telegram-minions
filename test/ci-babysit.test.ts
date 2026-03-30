@@ -420,6 +420,26 @@ describe("waitForCI", () => {
     expect(result.checks).toEqual([])
   })
 
+  it("treats 'no checks reported' as passed after grace period", async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockExecFile.mockImplementation((...allArgs: any[]) => {
+      const cb = allArgs[allArgs.length - 1] as (err: Error | null, stdout: string, stderr: string) => void
+      const err = Object.assign(
+        new Error("Command failed: gh pr checks ...\nno checks reported on the 'minion/near-fir' branch\n"),
+        { code: 1, stderr: "no checks reported on the 'minion/near-fir' branch\n" },
+      )
+      cb(err, "", err.stderr)
+      return undefined as any // eslint-disable-line @typescript-eslint/no-explicit-any
+    })
+
+    const noChecksConfig: CiConfig = { ...testConfig, noChecksGraceMs: 30 }
+    const result = await waitForCI("https://github.com/org/repo/pull/1", "/tmp", noChecksConfig)
+
+    expect(result.passed).toBe(true)
+    expect(result.timedOut).toBe(false)
+    expect(result.checks).toEqual([])
+  })
+
   it("aborts immediately on terminal error without retrying", async () => {
     let callCount = 0
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

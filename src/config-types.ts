@@ -36,6 +36,7 @@ export interface CiConfig {
   maxRetries: number
   pollIntervalMs: number
   pollTimeoutMs: number
+  noChecksGraceMs?: number
   dagCiPolicy: DagCiPolicy
 }
 
