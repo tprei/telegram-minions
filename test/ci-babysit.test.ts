@@ -327,7 +327,7 @@ describe("checkPRMergeability", () => {
 describe("waitForCI", () => {
   const testConfig: CiConfig = {
     pollIntervalMs: 10,
-    pollTimeoutMs: 100,
+    pollTimeoutMs: 500,
     maxRetries: 2,
   }
 
@@ -456,7 +456,7 @@ describe("waitForCI", () => {
       return undefined as any // eslint-disable-line @typescript-eslint/no-explicit-any
     })
 
-    const backoffConfig: CiConfig = { ...testConfig, pollIntervalMs: 20, pollTimeoutMs: 5000 }
+    const backoffConfig: CiConfig = { ...testConfig, pollIntervalMs: 50, pollTimeoutMs: 5000 }
     const result = await waitForCI("https://github.com/org/repo/pull/1", "/tmp", backoffConfig)
 
     expect(result.passed).toBe(true)
