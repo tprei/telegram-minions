@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { DagOrchestrator } from "../src/dag-orchestrator.js"
+import { DagOrchestrator } from "../src/dag/dag-orchestrator.js"
 import type { DispatcherContext } from "../src/dispatcher-context.js"
 import type { TopicSession } from "../src/types.js"
-import type { DagGraph, DagNode } from "../src/dag.js"
+import type { DagGraph, DagNode } from "../src/dag/dag.js"
 
 vi.mock("../src/ci-babysit.js", () => ({
   findPRByBranch: vi.fn(),

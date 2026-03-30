@@ -1,5 +1,5 @@
 import { execSync } from "node:child_process"
-import { DagCycleError, DagSelfDependencyError, UnknownNodeError } from "./errors.js"
+import { DagCycleError, DagSelfDependencyError, UnknownNodeError } from "../errors.js"
 
 export type DagNodeStatus = "pending" | "ready" | "running" | "done" | "failed" | "skipped" | "ci-pending" | "ci-failed" | "landed"
 

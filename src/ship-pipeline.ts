@@ -1,10 +1,10 @@
 import crypto from "node:crypto"
 import type { DispatcherContext } from "./dispatcher-context.js"
 import type { TopicSession, SessionMeta } from "./types.js"
-import type { DagGraph } from "./dag.js"
+import type { DagGraph } from "./dag/dag.js"
 import { SessionHandle, type SessionConfig } from "./session.js"
 import { buildCompletenessReviewPrompt, parseCompletenessResult } from "./verification.js"
-import { extractDagItems } from "./dag-extract.js"
+import { extractDagItems } from "./dag/dag-extract.js"
 import { esc, formatShipPhaseAdvance, formatShipComplete } from "./format.js"
 import { loggers } from "./logger.js"
 

@@ -1,7 +1,7 @@
 import type { DispatcherContext } from "./dispatcher-context.js"
 import type { TopicSession } from "./types.js"
 import { extractSplitItems } from "./split.js"
-import { extractStackItems } from "./dag-extract.js"
+import { extractStackItems } from "./dag/dag-extract.js"
 import {
   formatSplitAnalyzing,
   formatSplitStart,

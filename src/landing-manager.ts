@@ -1,8 +1,8 @@
 import { execSync } from "node:child_process"
 import type { DispatcherContext } from "./dispatcher-context.js"
 import type { TopicSession } from "./types.js"
-import type { DagGraph, DagNode } from "./dag.js"
-import { topologicalSort, needsRestack, cleanupMergedBranch } from "./dag.js"
+import type { DagGraph, DagNode } from "./dag/dag.js"
+import { topologicalSort, needsRestack, cleanupMergedBranch } from "./dag/dag.js"
 import { resolveConflictsWithAgent } from "./conflict-resolver.js"
 import {
   esc,

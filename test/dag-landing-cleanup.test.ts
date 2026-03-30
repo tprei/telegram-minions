@@ -6,7 +6,7 @@ vi.mock("node:child_process", async (importOriginal) => {
 })
 
 import { execSync } from "node:child_process"
-import { cleanupMergedBranch } from "../src/dag.js"
+import { cleanupMergedBranch } from "../src/dag/dag.js"
 
 const mockExecSync = vi.mocked(execSync)
 

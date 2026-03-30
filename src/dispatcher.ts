@@ -56,13 +56,13 @@ import {
   prepareWorkspace, removeWorkspace, cleanBuildArtifacts, dirSizeBytes,
   downloadPhotos, prepareFanInBranch, mergeUpstreamBranches,
 } from "./session-manager.js"
-import { extractDagItems } from "./dag-extract.js"
+import { extractDagItems } from "./dag/dag-extract.js"
 import { buildSplitChildPrompt } from "./split.js"
-import type { DagGraph } from "./dag.js"
+import type { DagGraph } from "./dag/dag.js"
 import type { DispatcherContext } from "./dispatcher-context.js"
 import { CIBabysitter } from "./ci-babysitter.js"
 import { LandingManager } from "./landing-manager.js"
-import { DagOrchestrator } from "./dag-orchestrator.js"
+import { DagOrchestrator } from "./dag/dag-orchestrator.js"
 import { ShipPipeline } from "./ship-pipeline.js"
 import { SplitOrchestrator } from "./split-orchestrator.js"
 import { PinnedMessageManager } from "./pinned-message-manager.js"

@@ -20,7 +20,7 @@ vi.mock("../src/format.js", () => ({
 }))
 
 import { extractSplitItems } from "../src/split.js"
-import { extractStackItems } from "../src/dag-extract.js"
+import { extractStackItems } from "../src/dag/dag-extract.js"
 
 const mockExtractSplitItems = vi.mocked(extractSplitItems)
 const mockExtractStackItems = vi.mocked(extractStackItems)

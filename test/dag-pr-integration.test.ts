@@ -12,7 +12,7 @@ import {
   DAG_STATUS_END,
   type DagGraph,
   type DagInput,
-} from "../src/dag.js"
+} from "../src/dag/dag.js"
 
 /**
  * Simulates what the dispatcher's updateDagPRDescriptions does:

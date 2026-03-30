@@ -4,7 +4,7 @@ import path from "node:path"
 import crypto from "node:crypto"
 import { EventEmitter } from "node:events"
 import type { TopicSession, SessionState } from "./types.js"
-import type { DagGraph } from "./dag.js"
+import type { DagGraph } from "./dag/dag.js"
 import { loggers } from "./logger.js"
 
 const log = loggers.apiServer

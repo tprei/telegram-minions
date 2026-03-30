@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { ShipPipeline } from "../src/ship-pipeline.js"
 import type { DispatcherContext } from "../src/dispatcher-context.js"
 import type { TopicSession, AutoAdvance } from "../src/types.js"
-import type { DagGraph, DagNode } from "../src/dag.js"
+import type { DagGraph, DagNode } from "../src/dag/dag.js"
 
 vi.mock("../src/verification.js", () => ({
   buildCompletenessReviewPrompt: vi.fn().mockReturnValue("verify task prompt"),
@@ -21,7 +21,7 @@ vi.mock("../src/sentry.js", () => ({
   captureException: vi.fn(),
 }))
 
-import { extractDagItems } from "../src/dag-extract.js"
+import { extractDagItems } from "../src/dag/dag-extract.js"
 import { parseCompletenessResult } from "../src/verification.js"
 
 const mockExtractDagItems = vi.mocked(extractDagItems)

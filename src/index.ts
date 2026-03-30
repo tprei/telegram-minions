@@ -55,6 +55,6 @@ export type {
   VerificationRound,
 } from "./types.js"
 export { SHIP_PREFIX } from "./command-parser.js"
-export { cleanupMergedBranch, type BranchCleanupResult } from "./dag.js"
+export { cleanupMergedBranch, type BranchCleanupResult } from "./dag/dag.js"
 export { resolveConflictsWithAgent, buildConflictResolutionPrompt } from "./conflict-resolver.js"
 export { formatLandSkipped, formatLandSummary, formatLandConflictResolution } from "./format.js"

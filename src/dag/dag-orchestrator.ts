@@ -1,11 +1,11 @@
 import { execSync } from "node:child_process"
 import crypto from "node:crypto"
-import type { DispatcherContext } from "./dispatcher-context.js"
-import type { TopicSession } from "./types.js"
-import { generateSlug } from "./slugs.js"
-import { DEFAULT_RECOVERY_PROMPT } from "./prompts.js"
-import { findPRByBranch } from "./ci-babysit.js"
-import { captureException } from "./sentry.js"
+import type { DispatcherContext } from "../dispatcher-context.js"
+import type { TopicSession } from "../types.js"
+import { generateSlug } from "../slugs.js"
+import { DEFAULT_RECOVERY_PROMPT } from "../prompts.js"
+import { findPRByBranch } from "../ci-babysit.js"
+import { captureException } from "../sentry.js"
 import {
   esc,
   formatDagStart,
@@ -16,7 +16,7 @@ import {
   formatDagCIWaiting,
   formatDagCIFailed,
   formatDagForceAdvance,
-} from "./format.js"
+} from "../format.js"
 import { buildDagChildPrompt } from "./dag-extract.js"
 import {
   buildDag,
@@ -34,7 +34,7 @@ import {
   type DagNode,
   type DagInput,
 } from "./dag.js"
-import { loggers } from "./logger.js"
+import { loggers } from "../logger.js"
 
 const log = loggers.dispatcher
 

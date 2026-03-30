@@ -21,7 +21,7 @@ import {
   DAG_STATUS_END,
   type DagGraph,
   type DagInput,
-} from "../src/dag.js"
+} from "../src/dag/dag.js"
 import { DagCycleError, DagSelfDependencyError, UnknownNodeError } from "../src/errors.js"
 
 describe("buildDag", () => {

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest"
 import type { DispatcherContext } from "../src/dispatcher-context.js"
 import type { TopicSession, TopicMessage, AutoAdvance } from "../src/types.js"
-import type { DagGraph, DagNode, DagInput } from "../src/dag.js"
+import type { DagGraph, DagNode, DagInput } from "../src/dag/dag.js"
 import type { QualityReport } from "../src/quality-gates.js"
 
 /**
