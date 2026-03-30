@@ -717,10 +717,12 @@ export function formatSplitStart(
   return lines.join("\n")
 }
 
-export function formatSplitChildComplete(slug: string, state: string, label: string, prUrl?: string): string {
+export function formatSplitChildComplete(slug: string, state: string, label: string, prUrl?: string, threadId?: number, chatId?: number | string): string {
   const emoji = state === "errored" ? "❌" : "✅"
   const prSuffix = prUrl ? ` — <a href="${esc(prUrl)}">PR</a>` : ""
-  return `${emoji} <b>${esc(slug)}</b> ${esc(state)}: ${esc(label)}${prSuffix}`
+  const link = threadLink(chatId, threadId)
+  const slugHtml = link ? `<a href="${link}">${esc(slug)}</a>` : `<b>${esc(slug)}</b>`
+  return `${emoji} ${slugHtml} ${esc(state)}: ${esc(label)}${prSuffix}`
 }
 
 export function formatSplitAllDone(succeeded: number, total: number): string {
@@ -762,8 +764,10 @@ export function formatDagStart(
   return lines.join("\n")
 }
 
-export function formatDagNodeStarting(nodeTitle: string, nodeId: string, slug: string): string {
-  return `⚡ <b>Starting</b>: ${esc(nodeTitle)} (<code>${esc(nodeId)}</code>)  ·  🏷 <code>${esc(slug)}</code>`
+export function formatDagNodeStarting(nodeTitle: string, nodeId: string, slug: string, threadId?: number, chatId?: number | string): string {
+  const link = threadLink(chatId, threadId)
+  const slugHtml = link ? `<a href="${link}">${esc(slug)}</a>` : `<code>${esc(slug)}</code>`
+  return `⚡ <b>Starting</b>: ${esc(nodeTitle)} (<code>${esc(nodeId)}</code>)  ·  🏷 ${slugHtml}`
 }
 
 export function formatDagNodeComplete(
@@ -772,6 +776,8 @@ export function formatDagNodeComplete(
   nodeTitle: string,
   prUrl?: string,
   progress?: { done: number; total: number; running: number },
+  threadId?: number,
+  chatId?: number | string,
 ): string {
   const emoji = (state === "errored" || state === "failed") ? "❌" : "✅"
   const prSuffix = prUrl ? ` — <a href="${esc(prUrl)}">PR</a>` : ""
@@ -779,7 +785,9 @@ export function formatDagNodeComplete(
     ? `\n📊 ${progress.done}/${progress.total} complete` +
       (progress.running > 0 ? `, ${progress.running} running` : "")
     : ""
-  return `${emoji} <b>${esc(slug)}</b> ${esc(state)}: ${esc(nodeTitle)}${prSuffix}${progressSuffix}`
+  const link = threadLink(chatId, threadId)
+  const slugHtml = link ? `<a href="${link}">${esc(slug)}</a>` : `<b>${esc(slug)}</b>`
+  return `${emoji} ${slugHtml} ${esc(state)}: ${esc(nodeTitle)}${prSuffix}${progressSuffix}`
 }
 
 export function formatDagNodeSkipped(nodeTitle: string, reason: string): string {

@@ -33,6 +33,7 @@ import {
   formatCINoChecks,
   formatUsage,
   formatDagNodeComplete,
+  formatDagNodeStarting,
   formatShipThinkStart,
   formatShipPlanStart,
   formatShipVerifyStart,
@@ -864,6 +865,65 @@ describe("formatDagNodeComplete", () => {
     const result = formatDagNodeComplete("my-slug", "completed", "My Task", undefined, { done: 3, total: 5, running: 1 })
     expect(result).toContain("3/5 complete")
     expect(result).toContain("1 running")
+  })
+
+  it("renders slug as clickable link when threadId and chatId provided", () => {
+    const result = formatDagNodeComplete("my-slug", "completed", "My Task", undefined, undefined, 42, -1001234567890)
+    expect(result).toContain('<a href="https://t.me/c/1234567890/42">my-slug</a>')
+    expect(result).not.toContain("<b>my-slug</b>")
+  })
+
+  it("falls back to bold slug when threadId missing", () => {
+    const result = formatDagNodeComplete("my-slug", "completed", "My Task", undefined, undefined, undefined, -1001234567890)
+    expect(result).toContain("<b>my-slug</b>")
+    expect(result).not.toContain("<a href=")
+  })
+
+  it("falls back to bold slug when chatId missing", () => {
+    const result = formatDagNodeComplete("my-slug", "completed", "My Task", undefined, undefined, 42)
+    expect(result).toContain("<b>my-slug</b>")
+    expect(result).not.toContain("<a href=")
+  })
+})
+
+describe("formatDagNodeStarting", () => {
+  it("renders basic output without link params", () => {
+    const result = formatDagNodeStarting("My Task", "node-1", "my-slug")
+    expect(result).toContain("Starting")
+    expect(result).toContain("My Task")
+    expect(result).toContain("node-1")
+    expect(result).toContain("<code>my-slug</code>")
+  })
+
+  it("renders slug as clickable link when threadId and chatId provided", () => {
+    const result = formatDagNodeStarting("My Task", "node-1", "my-slug", 42, -1001234567890)
+    expect(result).toContain('<a href="https://t.me/c/1234567890/42">my-slug</a>')
+    expect(result).not.toContain("<code>my-slug</code>")
+  })
+
+  it("falls back to code slug when only threadId provided", () => {
+    const result = formatDagNodeStarting("My Task", "node-1", "my-slug", 42)
+    expect(result).toContain("<code>my-slug</code>")
+  })
+})
+
+describe("formatSplitChildComplete with links", () => {
+  it("renders slug as clickable link when threadId and chatId provided", () => {
+    const result = formatSplitChildComplete("bold-arc", "completed", "Add auth", undefined, 42, -1001234567890)
+    expect(result).toContain('<a href="https://t.me/c/1234567890/42">bold-arc</a>')
+    expect(result).not.toContain("<b>bold-arc</b>")
+  })
+
+  it("falls back to bold slug when no link params", () => {
+    const result = formatSplitChildComplete("bold-arc", "completed", "Add auth")
+    expect(result).toContain("<b>bold-arc</b>")
+    expect(result).not.toContain("<a href=")
+  })
+
+  it("renders both topic link and PR link", () => {
+    const result = formatSplitChildComplete("bold-arc", "completed", "Add auth", "https://github.com/org/repo/pull/42", 99, -1001234567890)
+    expect(result).toContain('<a href="https://t.me/c/1234567890/99">bold-arc</a>')
+    expect(result).toContain('<a href="https://github.com/org/repo/pull/42">PR</a>')
   })
 })
 
