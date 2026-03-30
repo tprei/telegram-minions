@@ -1,7 +1,7 @@
-import { spawn } from "node:child_process"
 import fs from "node:fs"
 import path from "node:path"
 import type { TopicMessage } from "../types.js"
+import { retryClaudeExtraction, buildConversationText } from "../claude-extract.js"
 import { loggers } from "../logger.js"
 
 const log = loggers.split
@@ -37,9 +37,7 @@ const SPLIT_EXTRACTION_PROMPT = [
   "If you cannot identify discrete parallelizable items, output an empty array: []",
 ].join("\n")
 
-const MAX_RETRIES = 3
-const INITIAL_DELAY_MS = 2000
-const MAX_ASSISTANT_CHARS = 4000
+const EXTRACTION_TIMEOUT_MS = 60_000
 
 /**
  * Resolve the Claude config directory for CLI authentication.
@@ -63,166 +61,35 @@ export function getClaudeConfigDir(
 }
 
 /**
- * Log current resource usage for debugging
- */
-function logResourceUsage(label: string): void {
-  const mem = process.memoryUsage()
-  log.debug({
-    label,
-    heapUsedMb: Math.round(mem.heapUsed / 1024 / 1024),
-    heapTotalMb: Math.round(mem.heapTotal / 1024 / 1024),
-    rssMb: Math.round(mem.rss / 1024 / 1024),
-  }, "resource usage")
-}
-
-/**
- * Run claude CLI with async spawn, returning stdout or throwing on error
- */
-function runClaudeExtraction(task: string, timeoutMs: number): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const args = [
-      "--print",
-      "--output-format", "text",
-      "--model", "haiku",
-      "--no-session-persistence",
-      "--append-system-prompt", SPLIT_EXTRACTION_PROMPT,
-    ]
-
-    logResourceUsage("spawning claude CLI")
-
-    const claudeConfigDir = getClaudeConfigDir()
-    log.debug({ claudeConfigDir }, "using CLAUDE_CONFIG_DIR")
-
-    const child = spawn("claude", args, {
-      stdio: ["pipe", "pipe", "pipe"],
-      env: {
-        ...process.env,
-        CLAUDE_CONFIG_DIR: claudeConfigDir,
-      },
-    })
-
-    let stdout = ""
-    let stderr = ""
-
-    child.stdout.on("data", (data) => {
-      stdout += data.toString()
-    })
-
-    child.stderr.on("data", (data) => {
-      stderr += data.toString()
-    })
-
-    const timeout = setTimeout(() => {
-      child.kill("SIGKILL")
-      reject(new Error(`claude CLI timed out after ${timeoutMs}ms`))
-    }, timeoutMs)
-
-    child.on("error", (err) => {
-      clearTimeout(timeout)
-      reject(err)
-    })
-
-    child.on("close", (code) => {
-      clearTimeout(timeout)
-      if (code === 0) {
-        resolve(stdout.trim())
-      } else {
-        const err = new Error(`claude CLI exited with code ${code}: ${stderr.trim()}`)
-        ;(err as NodeJS.ErrnoException).code = code?.toString()
-        reject(err)
-      }
-    })
-
-    // Write the task to stdin
-    child.stdin.write(task)
-    child.stdin.end()
-  })
-}
-
-/**
- * Sleep for a given number of milliseconds
- */
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
-}
-
-/**
  * Extract parallelizable work items from a planning conversation.
- * Uses async spawn with retry logic to handle transient system resource issues.
+ * Uses the shared retry helper from claude-extract.
  */
 export async function extractSplitItems(
   conversation: TopicMessage[],
   directive?: string,
 ): Promise<ExtractResult> {
-  const lines: string[] = ["## Conversation\n"]
-
-  // Log what we're analyzing
+  const task = buildConversationText(conversation, directive)
   log.debug({ messageCount: conversation.length, directive: directive?.slice(0, 100) }, "analyzing conversation")
 
-  logResourceUsage("starting extraction")
+  const claudeConfigDir = getClaudeConfigDir()
+  log.debug({ claudeConfigDir }, "using CLAUDE_CONFIG_DIR")
 
-  for (const msg of conversation) {
-    const label = msg.role === "user" ? "**User**" : "**Agent**"
-    lines.push(`${label}:`)
-    if (msg.role === "assistant" && msg.text.length > MAX_ASSISTANT_CHARS) {
-      lines.push(`[earlier output truncated]\n…${msg.text.slice(-MAX_ASSISTANT_CHARS)}`)
-    } else {
-      lines.push(msg.text)
-    }
-    lines.push("")
+  const result = await retryClaudeExtraction(
+    task,
+    SPLIT_EXTRACTION_PROMPT,
+    (output) => parseSplitItems(output),
+    {
+      timeoutMs: EXTRACTION_TIMEOUT_MS,
+      envOverrides: { CLAUDE_CONFIG_DIR: claudeConfigDir },
+      log,
+    },
+  )
+
+  if (result.data) {
+    log.debug({ itemCount: result.data.length }, "extracted valid items")
+    return { items: result.data }
   }
-
-  if (directive) {
-    lines.push(`## Directive\n\n${directive}`)
-  }
-
-  const task = lines.join("\n")
-
-  let lastError: Error | undefined
-
-  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      log.debug({ attempt, maxRetries: MAX_RETRIES }, "attempt")
-
-      const output = await runClaudeExtraction(task, 60_000)
-
-      // Log raw output for debugging
-      log.debug({ outputLength: output.length }, "raw output")
-
-      const items = parseSplitItems(output)
-      log.debug({ itemCount: items.length }, "extracted valid items")
-
-      return { items }
-    } catch (err) {
-      lastError = err instanceof Error ? err : new Error(String(err))
-      const isSpawnError =
-        (err as NodeJS.ErrnoException).code === "ETIMEDOUT" ||
-        (err as NodeJS.ErrnoException).code === "ENOENT" ||
-        (err as NodeJS.ErrnoException).code === "EAGAIN" ||
-        err instanceof Error && err.message.includes("spawn")
-
-      if (isSpawnError && attempt < MAX_RETRIES) {
-        const delay = INITIAL_DELAY_MS * Math.pow(2, attempt - 1)
-        log.warn({ attempt, delay, err }, "spawn error, retrying")
-        logResourceUsage(`before retry ${attempt + 1}`)
-        await sleep(delay)
-      } else {
-        log.error({ err }, "extraction failed")
-        return {
-          items: [],
-          error: "system",
-          errorMessage: lastError.message,
-        }
-      }
-    }
-  }
-
-  // Should not reach here, but satisfy TypeScript
-  return {
-    items: [],
-    error: "system",
-    errorMessage: lastError?.message ?? "Unknown error",
-  }
+  return { items: [], error: result.error, errorMessage: result.errorMessage }
 }
 
 export function parseSplitItems(output: string): SplitItem[] {
@@ -251,7 +118,6 @@ export function parseSplitItems(output: string): SplitItem[] {
     return []
   }
 
-  // Log filtering decisions
   let filtered = 0
   const valid = parsed.filter((item: unknown): item is SplitItem => {
     if (typeof item !== "object" || item === null) {
