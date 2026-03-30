@@ -852,10 +852,12 @@ export function formatSplitStart(
   return lines.join("\n")
 }
 
-export function formatSplitChildComplete(slug: string, state: string, label: string, prUrl?: string): string {
+export function formatSplitChildComplete(slug: string, state: string, label: string, prUrl?: string, threadId?: number, chatId?: number | string): string {
   const emoji = state === "errored" ? "❌" : "✅"
   const prSuffix = prUrl ? ` — <a href="${esc(prUrl)}">PR</a>` : ""
-  return `${emoji} <b>${esc(slug)}</b> ${esc(state)}: ${esc(label)}${prSuffix}`
+  const link = threadLink(chatId, threadId)
+  const slugHtml = link ? `<a href="${link}">${esc(slug)}</a>` : `<b>${esc(slug)}</b>`
+  return `${emoji} ${slugHtml} ${esc(state)}: ${esc(label)}${prSuffix}`
 }
 
 export function formatSplitAllDone(succeeded: number, total: number): string {
@@ -897,8 +899,10 @@ export function formatDagStart(
   return lines.join("\n")
 }
 
-export function formatDagNodeStarting(nodeTitle: string, nodeId: string, slug: string): string {
-  return `⚡ <b>Starting</b>: ${esc(nodeTitle)} (<code>${esc(nodeId)}</code>)  ·  🏷 <code>${esc(slug)}</code>`
+export function formatDagNodeStarting(nodeTitle: string, nodeId: string, slug: string, threadId?: number, chatId?: number | string): string {
+  const link = threadLink(chatId, threadId)
+  const slugHtml = link ? `<a href="${link}">${esc(slug)}</a>` : `<code>${esc(slug)}</code>`
+  return `⚡ <b>Starting</b>: ${esc(nodeTitle)} (<code>${esc(nodeId)}</code>)  ·  🏷 ${slugHtml}`
 }
 
 export function formatDagNodeComplete(
@@ -907,6 +911,8 @@ export function formatDagNodeComplete(
   nodeTitle: string,
   prUrl?: string,
   progress?: { done: number; total: number; running: number },
+  threadId?: number,
+  chatId?: number | string,
 ): string {
   const emoji = (state === "errored" || state === "failed") ? "❌" : "✅"
   const prSuffix = prUrl ? ` — <a href="${esc(prUrl)}">PR</a>` : ""
@@ -914,7 +920,9 @@ export function formatDagNodeComplete(
     ? `\n📊 ${progress.done}/${progress.total} complete` +
       (progress.running > 0 ? `, ${progress.running} running` : "")
     : ""
-  return `${emoji} <b>${esc(slug)}</b> ${esc(state)}: ${esc(nodeTitle)}${prSuffix}${progressSuffix}`
+  const link = threadLink(chatId, threadId)
+  const slugHtml = link ? `<a href="${link}">${esc(slug)}</a>` : `<b>${esc(slug)}</b>`
+  return `${emoji} ${slugHtml} ${esc(state)}: ${esc(nodeTitle)}${prSuffix}${progressSuffix}`
 }
 
 export function formatDagNodeSkipped(nodeTitle: string, reason: string): string {
@@ -1025,10 +1033,22 @@ export function formatPinnedStatus(
   return lines.join("\n")
 }
 
+/**
+ * Build a Telegram forum topic deep-link URL.
+ * Chat IDs like -1001234567890 become 1234567890 in the t.me/c/ URL.
+ * Returns undefined if chatId or threadId is missing.
+ */
+export function threadLink(chatId: number | string | undefined, threadId: number | undefined): string | undefined {
+  if (chatId == null || threadId == null) return undefined
+  const raw = String(chatId).replace(/^-100/, "")
+  return `https://t.me/c/${raw}/${threadId}`
+}
+
 export function formatPinnedSplitStatus(
   parentSlug: string,
   repo: string,
-  children: { slug: string; label: string; prUrl?: string; status: "running" | "done" | "failed" }[],
+  children: { slug: string; label: string; prUrl?: string; threadId?: number; status: "running" | "done" | "failed" }[],
+  chatId?: number | string,
 ): string {
   const lines: string[] = [
     `🔀 <b>Split</b>  ·  🏷 <code>${esc(parentSlug)}</code>  ·  📦 ${esc(repo)}`,
@@ -1042,20 +1062,37 @@ export function formatPinnedSplitStatus(
   lines.push(`<b>Progress:</b> ${done}/${children.length} done${failed > 0 ? ` · ${failed} failed` : ""}${running > 0 ? ` · ${running} running` : ""}`)
   lines.push(``)
 
-  for (const child of children) {
+  for (let i = 0; i < children.length; i++) {
+    const child = children[i]
+    const isLast = i === children.length - 1
+    const branch = isLast ? "└── " : "├── "
     const icon = child.status === "done" ? "✅" : child.status === "failed" ? "❌" : "⚡"
+    const link = threadLink(chatId, child.threadId)
+    const slugPart = link
+      ? `<a href="${esc(link)}">${esc(child.slug)}</a>`
+      : `<code>${esc(child.slug)}</code>`
     const prPart = child.prUrl ? ` — <a href="${esc(child.prUrl)}">PR</a>` : ""
-    lines.push(`${icon} <code>${esc(child.slug)}</code>${prPart}`)
+    lines.push(`${branch}${icon} ${slugPart}${prPart}`)
   }
 
   return lines.join("\n")
 }
 
+export interface PinnedDagNode {
+  id: string
+  title: string
+  dependsOn: string[]
+  prUrl?: string
+  threadId?: number
+  status: "pending" | "ready" | "running" | "done" | "failed" | "skipped"
+}
+
 export function formatPinnedDagStatus(
   parentSlug: string,
   repo: string,
-  nodes: { id: string; title: string; prUrl?: string; status: "pending" | "ready" | "running" | "done" | "failed" | "skipped" }[],
+  nodes: PinnedDagNode[],
   isStack: boolean,
+  chatId?: number | string,
 ): string {
   const icon = isStack ? "📚" : "🔗"
   const label = isStack ? "Stack" : "DAG"
@@ -1073,17 +1110,117 @@ export function formatPinnedDagStatus(
   lines.push(`<b>Progress:</b> ${done}/${nodes.length} done${failed > 0 ? ` · ${failed} failed` : ""}${running > 0 ? ` · ${running} running` : ""}${pending > 0 ? ` · ${pending} pending` : ""}`)
   lines.push(``)
 
-  for (const node of nodes) {
-    const nodeIcon = node.status === "done" ? "✅" : node.status === "failed" ? "❌" : node.status === "running" ? "⚡" : node.status === "skipped" ? "⏭️" : "⏳"
-    const prPart = node.prUrl ? ` — <a href="${esc(node.prUrl)}">PR</a>` : ""
-    const title = esc(node.title)
-    const styledTitle = node.status === "done" || node.status === "skipped"
-      ? `<s>${title}</s>`
-      : node.status === "running" || node.status === "failed"
-        ? `<b>${title}</b>`
-        : title
-    lines.push(`${nodeIcon} <code>${esc(node.id)}</code>: ${styledTitle}${prPart}`)
+  if (isStack) {
+    renderStackTree(lines, nodes, chatId)
+  } else {
+    renderDagTree(lines, nodes, chatId)
   }
 
   return lines.join("\n")
+}
+
+function nodeStatusIcon(status: PinnedDagNode["status"]): string {
+  return status === "done" ? "✅" : status === "failed" ? "❌" : status === "running" ? "⚡" : status === "skipped" ? "⏭️" : "⏳"
+}
+
+function formatNodeLine(node: PinnedDagNode, chatId?: number | string): string {
+  const nodeIcon = nodeStatusIcon(node.status)
+  const link = threadLink(chatId, node.threadId)
+  const idPart = link
+    ? `<a href="${esc(link)}">${esc(node.id)}</a>`
+    : `<code>${esc(node.id)}</code>`
+  const prPart = node.prUrl ? ` — <a href="${esc(node.prUrl)}">PR</a>` : ""
+  const title = esc(node.title)
+  const styledTitle = node.status === "done" || node.status === "skipped"
+    ? `<s>${title}</s>`
+    : node.status === "running" || node.status === "failed"
+      ? `<b>${title}</b>`
+      : title
+  return `${nodeIcon} ${idPart}: ${styledTitle}${prPart}`
+}
+
+function renderStackTree(lines: string[], nodes: PinnedDagNode[], chatId?: number | string): void {
+  for (let i = 0; i < nodes.length; i++) {
+    const node = nodes[i]
+    const isLast = i === nodes.length - 1
+    const branch = isLast ? "└── " : "├── "
+    lines.push(`${branch}${formatNodeLine(node, chatId)}`)
+    if (!isLast) {
+      lines.push("│")
+    }
+  }
+}
+
+function renderDagTree(lines: string[], nodes: PinnedDagNode[], chatId?: number | string): void {
+  const nodeMap = new Map(nodes.map((n) => [n.id, n]))
+
+  // Topological sort via Kahn's algorithm
+  const inDegree = new Map<string, number>()
+  const children = new Map<string, string[]>()
+  for (const node of nodes) {
+    inDegree.set(node.id, node.dependsOn.length)
+    children.set(node.id, [])
+  }
+  for (const node of nodes) {
+    for (const dep of node.dependsOn) {
+      children.get(dep)?.push(node.id)
+    }
+  }
+  const sorted: string[] = []
+  const queue: string[] = []
+  for (const [id, deg] of inDegree) {
+    if (deg === 0) queue.push(id)
+  }
+  while (queue.length > 0) {
+    const id = queue.shift()!
+    sorted.push(id)
+    for (const child of children.get(id) ?? []) {
+      const newDeg = inDegree.get(child)! - 1
+      inDegree.set(child, newDeg)
+      if (newDeg === 0) queue.push(child)
+    }
+  }
+
+  // Build tree by depth
+  const depth = new Map<string, number>()
+  for (const id of sorted) {
+    const node = nodeMap.get(id)!
+    const maxDepDepth = node.dependsOn.length > 0
+      ? Math.max(...node.dependsOn.map((d) => depth.get(d) ?? 0))
+      : -1
+    depth.set(id, maxDepDepth + 1)
+  }
+
+  // Group by depth for rendering
+  const maxDepth = Math.max(0, ...depth.values())
+  const levels: string[][] = Array.from({ length: maxDepth + 1 }, () => [])
+  for (const id of sorted) {
+    levels[depth.get(id)!].push(id)
+  }
+
+  for (let d = 0; d <= maxDepth; d++) {
+    const levelNodes = levels[d]
+    for (let i = 0; i < levelNodes.length; i++) {
+      const id = levelNodes[i]
+      const node = nodeMap.get(id)!
+      const isLastAtLevel = i === levelNodes.length - 1
+      const isLastOverall = d === maxDepth && isLastAtLevel
+
+      const indent = "  ".repeat(d)
+      const branch = d === 0 && levelNodes.length === 1
+        ? isLastOverall ? "└── " : "├── "
+        : isLastAtLevel ? "└── " : "├── "
+
+      const depSuffix = node.dependsOn.length > 0
+        ? ` ← ${node.dependsOn.join(", ")}`
+        : ""
+      lines.push(`${indent}${branch}${formatNodeLine(node, chatId)}${depSuffix}`)
+    }
+
+    // Add connector between levels
+    if (d < maxDepth) {
+      const indent = "  ".repeat(d)
+      lines.push(`${indent}│`)
+    }
+  }
 }

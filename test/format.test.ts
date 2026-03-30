@@ -33,12 +33,15 @@ import {
   formatCINoChecks,
   formatUsage,
   formatDagNodeComplete,
+  formatDagNodeStarting,
   formatShipThinkStart,
   formatShipPlanStart,
   formatShipVerifyStart,
   formatShipPhaseAdvance,
   formatShipComplete,
   threadLink,
+  formatPinnedSplitStatus,
+  formatPinnedDagStatus,
 } from "../src/format.js"
 import type { ClaudeUsageResponse } from "../src/claude-usage.js"
 import type { AggregateStats, SessionRecord, ModeBreakdown } from "../src/stats.js"
@@ -1079,5 +1082,470 @@ describe("formatDagNodeComplete", () => {
     const result = formatDagNodeComplete("my-slug", "completed", "My Task", undefined, { done: 3, total: 5, running: 1 })
     expect(result).toContain("3/5 complete")
     expect(result).toContain("1 running")
+  })
+
+  it("renders slug as clickable link when threadId and chatId provided", () => {
+    const result = formatDagNodeComplete("my-slug", "completed", "My Task", undefined, undefined, 42, -1001234567890)
+    expect(result).toContain('<a href="https://t.me/c/1234567890/42">my-slug</a>')
+    expect(result).not.toContain("<b>my-slug</b>")
+  })
+
+  it("falls back to bold slug when threadId missing", () => {
+    const result = formatDagNodeComplete("my-slug", "completed", "My Task", undefined, undefined, undefined, -1001234567890)
+    expect(result).toContain("<b>my-slug</b>")
+    expect(result).not.toContain("<a href=")
+  })
+
+  it("falls back to bold slug when chatId missing", () => {
+    const result = formatDagNodeComplete("my-slug", "completed", "My Task", undefined, undefined, 42)
+    expect(result).toContain("<b>my-slug</b>")
+    expect(result).not.toContain("<a href=")
+  })
+})
+
+describe("formatDagNodeStarting", () => {
+  it("renders basic output without link params", () => {
+    const result = formatDagNodeStarting("My Task", "node-1", "my-slug")
+    expect(result).toContain("Starting")
+    expect(result).toContain("My Task")
+    expect(result).toContain("node-1")
+    expect(result).toContain("<code>my-slug</code>")
+  })
+
+  it("renders slug as clickable link when threadId and chatId provided", () => {
+    const result = formatDagNodeStarting("My Task", "node-1", "my-slug", 42, -1001234567890)
+    expect(result).toContain('<a href="https://t.me/c/1234567890/42">my-slug</a>')
+    expect(result).not.toContain("<code>my-slug</code>")
+  })
+
+  it("falls back to code slug when only threadId provided", () => {
+    const result = formatDagNodeStarting("My Task", "node-1", "my-slug", 42)
+    expect(result).toContain("<code>my-slug</code>")
+  })
+})
+
+describe("formatSplitChildComplete with links", () => {
+  it("renders slug as clickable link when threadId and chatId provided", () => {
+    const result = formatSplitChildComplete("bold-arc", "completed", "Add auth", undefined, 42, -1001234567890)
+    expect(result).toContain('<a href="https://t.me/c/1234567890/42">bold-arc</a>')
+    expect(result).not.toContain("<b>bold-arc</b>")
+  })
+
+  it("falls back to bold slug when no link params", () => {
+    const result = formatSplitChildComplete("bold-arc", "completed", "Add auth")
+    expect(result).toContain("<b>bold-arc</b>")
+    expect(result).not.toContain("<a href=")
+  })
+
+  it("renders both topic link and PR link", () => {
+    const result = formatSplitChildComplete("bold-arc", "completed", "Add auth", "https://github.com/org/repo/pull/42", 99, -1001234567890)
+    expect(result).toContain('<a href="https://t.me/c/1234567890/99">bold-arc</a>')
+    expect(result).toContain('<a href="https://github.com/org/repo/pull/42">PR</a>')
+  })
+})
+
+describe("threadLink", () => {
+  it("builds a t.me/c/ URL from numeric chatId and threadId", () => {
+    expect(threadLink(-1001234567890, 42)).toBe("https://t.me/c/1234567890/42")
+  })
+
+  it("strips -100 prefix from string chatId", () => {
+    expect(threadLink("-1001234567890", 99)).toBe("https://t.me/c/1234567890/99")
+  })
+
+  it("works with chatId that has no -100 prefix", () => {
+    expect(threadLink("1234567890", 7)).toBe("https://t.me/c/1234567890/7")
+  })
+
+  it("returns undefined when chatId is undefined", () => {
+    expect(threadLink(undefined, 42)).toBeUndefined()
+  })
+
+  it("returns undefined when threadId is undefined", () => {
+    expect(threadLink(-1001234567890, undefined)).toBeUndefined()
+  })
+
+  it("returns undefined when both args are undefined", () => {
+    expect(threadLink(undefined, undefined)).toBeUndefined()
+  })
+
+  it("handles negative chatId without -100 prefix", () => {
+    expect(threadLink(-5, 42)).toBe("https://t.me/c/-5/42")
+  })
+
+  it("handles numeric chatId with exact -100 value", () => {
+    expect(threadLink(-100, 1)).toBe("https://t.me/c//1")
+  })
+})
+
+describe("formatPinnedSplitStatus", () => {
+  const children = [
+    { slug: "bold-fox", label: "Fix auth", status: "done" as const, prUrl: "https://github.com/org/repo/pull/1", threadId: 10 },
+    { slug: "calm-owl", label: "Add tests", status: "running" as const, threadId: 20 },
+    { slug: "dark-elk", label: "Update docs", status: "failed" as const, threadId: 30 },
+  ]
+
+  it("uses tree branch characters (├── and └──)", () => {
+    const result = formatPinnedSplitStatus("parent-slug", "my-repo", children)
+    expect(result).toContain("├── ")
+    expect(result).toContain("└── ")
+  })
+
+  it("uses └── only for the last child", () => {
+    const lines = formatPinnedSplitStatus("parent-slug", "my-repo", children).split("\n")
+    const branchLines = lines.filter((l) => l.includes("├── ") || l.includes("└── "))
+    expect(branchLines).toHaveLength(3)
+    expect(branchLines[0]).toContain("├── ")
+    expect(branchLines[1]).toContain("├── ")
+    expect(branchLines[2]).toContain("└── ")
+  })
+
+  it("includes status icons", () => {
+    const result = formatPinnedSplitStatus("parent-slug", "my-repo", children)
+    expect(result).toContain("✅")
+    expect(result).toContain("⚡")
+    expect(result).toContain("❌")
+  })
+
+  it("adds thread hyperlinks when chatId is provided", () => {
+    const result = formatPinnedSplitStatus("parent-slug", "my-repo", children, -1001234567890)
+    expect(result).toContain('<a href="https://t.me/c/1234567890/10">bold-fox</a>')
+    expect(result).toContain('<a href="https://t.me/c/1234567890/20">calm-owl</a>')
+    expect(result).toContain('<a href="https://t.me/c/1234567890/30">dark-elk</a>')
+  })
+
+  it("falls back to code tags when chatId is not provided", () => {
+    const result = formatPinnedSplitStatus("parent-slug", "my-repo", children)
+    expect(result).toContain("<code>bold-fox</code>")
+    expect(result).toContain("<code>calm-owl</code>")
+  })
+
+  it("falls back to code tags when child has no threadId", () => {
+    const noThreadChildren = [
+      { slug: "bold-fox", label: "Fix auth", status: "done" as const },
+    ]
+    const result = formatPinnedSplitStatus("parent-slug", "my-repo", noThreadChildren, -1001234567890)
+    expect(result).toContain("<code>bold-fox</code>")
+    expect(result).not.toContain("t.me")
+  })
+
+  it("includes PR links for completed children", () => {
+    const result = formatPinnedSplitStatus("parent-slug", "my-repo", children)
+    expect(result).toContain('<a href="https://github.com/org/repo/pull/1">PR</a>')
+  })
+
+  it("shows progress summary", () => {
+    const result = formatPinnedSplitStatus("parent-slug", "my-repo", children)
+    expect(result).toContain("1/3 done")
+    expect(result).toContain("1 failed")
+    expect(result).toContain("1 running")
+  })
+
+  it("handles empty children array", () => {
+    const result = formatPinnedSplitStatus("parent-slug", "my-repo", [])
+    expect(result).toContain("0/0 done")
+    expect(result).not.toContain("├── ")
+    expect(result).not.toContain("└── ")
+  })
+
+  it("single child uses └── only", () => {
+    const single = [{ slug: "only-fox", label: "Solo task", status: "running" as const, threadId: 5 }]
+    const result = formatPinnedSplitStatus("parent-slug", "repo", single)
+    expect(result).toContain("└── ")
+    expect(result).not.toContain("├── ")
+  })
+
+  it("escapes HTML in repo and slug names", () => {
+    const result = formatPinnedSplitStatus("slug<xss>", "repo&name", [
+      { slug: "child<evil>", label: "test", status: "running" as const },
+    ])
+    expect(result).toContain("slug&lt;xss&gt;")
+    expect(result).toContain("repo&amp;name")
+    expect(result).toContain("child&lt;evil&gt;")
+  })
+
+  it("shows header with split icon and repo", () => {
+    const result = formatPinnedSplitStatus("my-slug", "my-repo", children)
+    expect(result).toContain("🔀")
+    expect(result).toContain("Split")
+    expect(result).toContain("my-repo")
+    expect(result).toContain("my-slug")
+  })
+
+  it("hides failed/running counts when zero", () => {
+    const allDone = [
+      { slug: "a", label: "A", status: "done" as const },
+      { slug: "b", label: "B", status: "done" as const },
+    ]
+    const result = formatPinnedSplitStatus("slug", "repo", allDone)
+    expect(result).toContain("2/2 done")
+    expect(result).not.toContain("failed")
+    expect(result).not.toContain("running")
+  })
+})
+
+describe("formatPinnedDagStatus", () => {
+  const stackNodes = [
+    { id: "step-0", title: "Set up auth", dependsOn: [], status: "done" as const, threadId: 10, prUrl: "https://github.com/org/repo/pull/1" },
+    { id: "step-1", title: "Add middleware", dependsOn: ["step-0"], status: "running" as const, threadId: 20 },
+    { id: "step-2", title: "Write tests", dependsOn: ["step-1"], status: "pending" as const },
+  ]
+
+  const dagNodes = [
+    { id: "auth", title: "Auth service", dependsOn: [], status: "done" as const, threadId: 10, prUrl: "https://github.com/org/repo/pull/1" },
+    { id: "api", title: "API layer", dependsOn: ["auth"], status: "running" as const, threadId: 20 },
+    { id: "ui", title: "UI components", dependsOn: ["auth"], status: "pending" as const, threadId: 30 },
+    { id: "integration", title: "Integration tests", dependsOn: ["api", "ui"], status: "pending" as const },
+  ]
+
+  describe("stack mode (isStack=true)", () => {
+    it("uses tree branch characters (├── and └──)", () => {
+      const result = formatPinnedDagStatus("parent-slug", "my-repo", stackNodes, true)
+      expect(result).toContain("├── ")
+      expect(result).toContain("└── ")
+    })
+
+    it("uses └── only for the last node", () => {
+      const result = formatPinnedDagStatus("parent-slug", "my-repo", stackNodes, true)
+      const lines = result.split("\n").filter((l) => l.includes("├── ") || l.includes("└── "))
+      expect(lines).toHaveLength(3)
+      expect(lines[0]).toContain("├── ")
+      expect(lines[1]).toContain("├── ")
+      expect(lines[2]).toContain("└── ")
+    })
+
+    it("adds │ connectors between stack nodes", () => {
+      const result = formatPinnedDagStatus("parent-slug", "my-repo", stackNodes, true)
+      const lines = result.split("\n")
+      const connectors = lines.filter((l) => l.trim() === "│")
+      expect(connectors.length).toBeGreaterThan(0)
+    })
+
+    it("shows status icons", () => {
+      const result = formatPinnedDagStatus("parent-slug", "my-repo", stackNodes, true)
+      expect(result).toContain("✅")
+      expect(result).toContain("⚡")
+      expect(result).toContain("⏳")
+    })
+
+    it("includes thread hyperlinks when chatId is provided", () => {
+      const result = formatPinnedDagStatus("parent-slug", "my-repo", stackNodes, true, -1001234567890)
+      expect(result).toContain('<a href="https://t.me/c/1234567890/10">step-0</a>')
+      expect(result).toContain('<a href="https://t.me/c/1234567890/20">step-1</a>')
+    })
+
+    it("falls back to code tags when chatId is not provided", () => {
+      const result = formatPinnedDagStatus("parent-slug", "my-repo", stackNodes, true)
+      expect(result).toContain("<code>step-0</code>")
+      expect(result).toContain("<code>step-1</code>")
+    })
+
+    it("falls back to code tags when threadId is missing", () => {
+      const result = formatPinnedDagStatus("parent-slug", "my-repo", stackNodes, true, -1001234567890)
+      expect(result).toContain("<code>step-2</code>")
+      expect(result).not.toContain("t.me/c/1234567890/undefined")
+    })
+
+    it("includes PR links", () => {
+      const result = formatPinnedDagStatus("parent-slug", "my-repo", stackNodes, true)
+      expect(result).toContain('<a href="https://github.com/org/repo/pull/1">PR</a>')
+    })
+
+    it("shows header with 📚 Stack label", () => {
+      const result = formatPinnedDagStatus("parent-slug", "my-repo", stackNodes, true)
+      expect(result).toContain("📚")
+      expect(result).toContain("Stack")
+    })
+
+    it("shows progress summary", () => {
+      const result = formatPinnedDagStatus("parent-slug", "my-repo", stackNodes, true)
+      expect(result).toContain("1/3 done")
+      expect(result).toContain("1 running")
+      expect(result).toContain("1 pending")
+    })
+
+    it("strikethrough for done nodes", () => {
+      const result = formatPinnedDagStatus("parent-slug", "my-repo", stackNodes, true)
+      expect(result).toContain("<s>Set up auth</s>")
+    })
+
+    it("bold for running nodes", () => {
+      const result = formatPinnedDagStatus("parent-slug", "my-repo", stackNodes, true)
+      expect(result).toContain("<b>Add middleware</b>")
+    })
+  })
+
+  describe("DAG mode (isStack=false)", () => {
+    it("shows header with 🔗 DAG label", () => {
+      const result = formatPinnedDagStatus("parent-slug", "my-repo", dagNodes, false)
+      expect(result).toContain("🔗")
+      expect(result).toContain("DAG")
+    })
+
+    it("shows dependency notation (← dep) for nodes with dependencies", () => {
+      const result = formatPinnedDagStatus("parent-slug", "my-repo", dagNodes, false)
+      expect(result).toContain("← auth")
+      expect(result).toContain("← api, ui")
+    })
+
+    it("uses tree branch characters", () => {
+      const result = formatPinnedDagStatus("parent-slug", "my-repo", dagNodes, false)
+      expect(result).toContain("├── ")
+      expect(result).toContain("└── ")
+    })
+
+    it("includes thread hyperlinks when chatId is provided", () => {
+      const result = formatPinnedDagStatus("parent-slug", "my-repo", dagNodes, false, -1001234567890)
+      expect(result).toContain('<a href="https://t.me/c/1234567890/10">auth</a>')
+      expect(result).toContain('<a href="https://t.me/c/1234567890/20">api</a>')
+      expect(result).toContain('<a href="https://t.me/c/1234567890/30">ui</a>')
+    })
+
+    it("falls back to code tags when threadId is missing", () => {
+      const result = formatPinnedDagStatus("parent-slug", "my-repo", dagNodes, false, -1001234567890)
+      expect(result).toContain("<code>integration</code>")
+    })
+
+    it("shows progress summary", () => {
+      const result = formatPinnedDagStatus("parent-slug", "my-repo", dagNodes, false)
+      expect(result).toContain("1/4 done")
+      expect(result).toContain("1 running")
+      expect(result).toContain("2 pending")
+    })
+
+    it("includes PR links for nodes that have them", () => {
+      const result = formatPinnedDagStatus("parent-slug", "my-repo", dagNodes, false)
+      expect(result).toContain('<a href="https://github.com/org/repo/pull/1">PR</a>')
+    })
+
+    it("renders root nodes at depth 0 and dependents indented", () => {
+      const result = formatPinnedDagStatus("parent-slug", "my-repo", dagNodes, false)
+      const lines = result.split("\n")
+      const authLine = lines.find((l) => l.includes("Auth service"))
+      const integrationLine = lines.find((l) => l.includes("Integration tests"))
+      expect(authLine).toBeDefined()
+      expect(integrationLine).toBeDefined()
+      expect(integrationLine!.search(/\S/)).toBeGreaterThan(authLine!.search(/\S/))
+    })
+  })
+
+  describe("edge cases", () => {
+    it("handles single node", () => {
+      const single = [{ id: "only", title: "Only task", dependsOn: [], status: "running" as const }]
+      const result = formatPinnedDagStatus("slug", "repo", single, true)
+      expect(result).toContain("└── ")
+      expect(result).toContain("⚡")
+      expect(result).toContain("Only task")
+    })
+
+    it("handles empty nodes array", () => {
+      const result = formatPinnedDagStatus("slug", "repo", [], false)
+      expect(result).toContain("0/0 done")
+    })
+
+    it("handles skipped status", () => {
+      const nodes = [
+        { id: "a", title: "Task A", dependsOn: [], status: "failed" as const },
+        { id: "b", title: "Task B", dependsOn: ["a"], status: "skipped" as const },
+      ]
+      const result = formatPinnedDagStatus("slug", "repo", nodes, false)
+      expect(result).toContain("❌")
+      expect(result).toContain("⏭️")
+      expect(result).toContain("<s>Task B</s>")
+    })
+
+    it("handles ready status as pending icon", () => {
+      const nodes = [
+        { id: "a", title: "Task A", dependsOn: [], status: "ready" as const },
+      ]
+      const result = formatPinnedDagStatus("slug", "repo", nodes, false)
+      expect(result).toContain("⏳")
+      expect(result).toContain("Task A")
+    })
+
+    it("counts ready status as pending in progress summary", () => {
+      const nodes = [
+        { id: "a", title: "Task A", dependsOn: [], status: "done" as const },
+        { id: "b", title: "Task B", dependsOn: ["a"], status: "ready" as const },
+      ]
+      const result = formatPinnedDagStatus("slug", "repo", nodes, false)
+      expect(result).toContain("1/2 done")
+      expect(result).toContain("1 pending")
+    })
+
+    it("escapes HTML in node titles", () => {
+      const nodes = [
+        { id: "a", title: "Fix <script>alert</script>", dependsOn: [], status: "running" as const },
+      ]
+      const result = formatPinnedDagStatus("slug", "repo", nodes, false)
+      expect(result).toContain("&lt;script&gt;")
+      expect(result).not.toContain("<script>")
+    })
+
+    it("renders diamond DAG (fan-out then fan-in) correctly", () => {
+      const diamond = [
+        { id: "root", title: "Root", dependsOn: [], status: "done" as const, threadId: 1 },
+        { id: "left", title: "Left", dependsOn: ["root"], status: "done" as const, threadId: 2 },
+        { id: "right", title: "Right", dependsOn: ["root"], status: "running" as const, threadId: 3 },
+        { id: "merge", title: "Merge", dependsOn: ["left", "right"], status: "pending" as const },
+      ]
+      const result = formatPinnedDagStatus("slug", "repo", diamond, false, -1001234567890)
+      // Root at depth 0
+      expect(result).toContain("Root")
+      // Left and Right at depth 1
+      expect(result).toContain("Left")
+      expect(result).toContain("Right")
+      // Merge at depth 2 with dependency notation
+      expect(result).toContain("← left, right")
+      // All thread links for nodes that have them
+      expect(result).toContain('href="https://t.me/c/1234567890/1"')
+      expect(result).toContain('href="https://t.me/c/1234567890/2"')
+      expect(result).toContain('href="https://t.me/c/1234567890/3"')
+      // Merge has no threadId → code tag
+      expect(result).toContain("<code>merge</code>")
+    })
+
+    it("renders multiple independent roots in DAG", () => {
+      const nodes = [
+        { id: "a", title: "Independent A", dependsOn: [], status: "running" as const },
+        { id: "b", title: "Independent B", dependsOn: [], status: "running" as const },
+      ]
+      const result = formatPinnedDagStatus("slug", "repo", nodes, false)
+      expect(result).toContain("Independent A")
+      expect(result).toContain("Independent B")
+      // Both at depth 0, so ├── and └──
+      expect(result).toContain("├── ")
+      expect(result).toContain("└── ")
+    })
+
+    it("DAG level connectors separate depth levels", () => {
+      const nodes = [
+        { id: "a", title: "Root", dependsOn: [], status: "done" as const },
+        { id: "b", title: "Child", dependsOn: ["a"], status: "pending" as const },
+      ]
+      const result = formatPinnedDagStatus("slug", "repo", nodes, false)
+      const lines = result.split("\n")
+      // Should have a │ connector between depth 0 and depth 1
+      const connectorLines = lines.filter((l) => l.trim() === "│")
+      expect(connectorLines.length).toBeGreaterThan(0)
+    })
+
+    it("plain text for pending nodes (no bold, no strikethrough)", () => {
+      const nodes = [
+        { id: "a", title: "Waiting", dependsOn: [], status: "pending" as const },
+      ]
+      const result = formatPinnedDagStatus("slug", "repo", nodes, false)
+      expect(result).toContain("Waiting")
+      expect(result).not.toContain("<s>Waiting</s>")
+      expect(result).not.toContain("<b>Waiting</b>")
+    })
+
+    it("bold for failed nodes", () => {
+      const nodes = [
+        { id: "a", title: "Broken", dependsOn: [], status: "failed" as const },
+      ]
+      const result = formatPinnedDagStatus("slug", "repo", nodes, false)
+      expect(result).toContain("<b>Broken</b>")
+    })
   })
 })

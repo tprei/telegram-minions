@@ -29,6 +29,13 @@ Telegram-controlled Goose coding agents on fly.io. The Dispatcher polls Telegram
 | `src/dag.ts` | DAG data model, topological sort, scheduling, status rendering |
 | `src/dag-extract.ts` | DAG/stack item extraction from conversations, child prompt building |
 | `goose/config.yaml` | Goose agent configuration (mode, extensions, limits) |
+| `src/inject-assets.ts` | Injects agents, skills, and goosehints into session workspaces |
+| `src/config-types.ts` | TypeScript types including `AgentDefinitions` |
+| `assets/agents/` | Claude agent definitions injected into workspaces |
+| `assets/.claude/skills/` | Claude Code skill definitions injected into workspaces |
+| `assets/.goose/skills/` | Goose skill definitions for session workspaces |
+| `assets/.goosehints` | Goose project guidance injected into workspaces |
+| `assets/settings.json` | Claude Code settings injected into workspaces |
 | `.claude/agents/post-task-router.md` | Haiku classifier — routes completed work to the right action |
 | `.claude/agents/ci-fix.md` | CI fix specialist — diagnoses and fixes CI failures |
 | `.claude/agents/git-commit-specialist.md` | Git workflow — commits, pushes, opens PRs |
@@ -125,6 +132,80 @@ npm run build            # compile to dist/
 1. Merges completed PRs in topological order (bottom-up for stacks)
 2. Uses squash merge with branch deletion
 3. GitHub auto-retargets downstream PRs after each merge
+
+## Agent file injection
+
+When a session starts, `injectAgentFiles()` copies bundled agents, skills, and guidance files into the session workspace. Existing files are never overwritten — the target repo's own config takes precedence.
+
+### What gets injected
+
+| Source | Destination | Contents |
+|---|---|---|
+| `assets/agents/` | `.claude/agents/` | Claude agent definitions (post-task-router, explorer, planner, etc.) |
+| `assets/.claude/skills/` | `.claude/skills/` | Claude Code skills (commit, explore, review-pr, update-config) |
+| `assets/templates/.claude/CLAUDE.md` | `.claude/CLAUDE.md` | Default workspace guidance |
+| `assets/.goosehints` | `.goosehints` | Goose project hints (structure, commands, conventions) |
+| `assets/settings.json` | `.claude/settings.json` | Claude Code environment settings (token limits, permissions) |
+
+### Customizing via environment variables
+
+| Env var | Purpose |
+|---|---|
+| `AGENTS_DIR` | Custom path to Claude agent `.md` files |
+| `SKILLS_DIR` | Custom path to Claude skill `.md` files |
+| `GOOSEHINTS_PATH` | Custom path to `.goosehints` file |
+| `CLAUDE_MD_PATH` | Custom path to `CLAUDE.md` guidance file |
+
+### Customizing as a library user
+
+```typescript
+import { createMinion, configFromEnv } from 'telegram-minions'
+
+const config = configFromEnv({
+  agentDefs: {
+    agentsDir: './my-agents',
+    skillsDir: './my-skills',
+    goosehintsPath: './my-goosehints',
+    claudeMd: './my-guidance.md',
+    settingsJson: { env: { CLAUDE_CODE_MAX_OUTPUT_TOKENS: '16000' } },
+  }
+})
+
+createMinion(config).start()
+```
+
+## Claude Code skills
+
+Skills are slash-command shortcuts available to Claude Code sessions. They live in `assets/.claude/skills/` and are injected into `.claude/skills/` at session start.
+
+| Skill | Purpose |
+|---|---|
+| `/commit` | Run quality checks, generate a session summary, and route to git specialist |
+| `/explore` | Deep codebase exploration — architecture, call chains, data flow |
+| `/review-pr` | Review a PR for bugs, security issues, and correctness (max 5 findings) |
+| `/update-config` | Safely update config files (`.env.example`, CI, build settings) |
+
+## Goose skills and goosehints
+
+Goose skills live in `assets/.goose/skills/` and provide structured guidance for Goose sessions. The `.goosehints` file provides project-level context.
+
+### Goose skills
+
+| Skill | Purpose |
+|---|---|
+| `code-exploration` | Efficient code navigation — search patterns, architecture discovery |
+| `pr-workflow` | Git branching, conventional commits, PR creation via `gh` |
+| `testing` | Test discovery, execution order (typecheck → lint → test) |
+| `ci-diagnosis` | CI failure analysis — classify, diagnose, fix root cause |
+| `secure-coding` | Security best practices — secrets, input validation, shell safety |
+
+### Goosehints
+
+The `.goosehints` file injected into workspaces contains:
+- Project structure overview (src/, test/, assets/)
+- Development commands (typecheck, lint, test, build)
+- Key conventions (ESM imports, conventional commits)
+- Dependency and environment guidance
 
 ## Goose stream-json event schema
 

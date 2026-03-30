@@ -110,6 +110,80 @@ describe("configFromEnv", () => {
     })
   })
 
+  describe("agentDefs from env vars", () => {
+    beforeEach(() => {
+      for (const key of ["AGENTS_DIR", "SKILLS_DIR", "GOOSEHINTS_PATH", "CLAUDE_MD_PATH"]) {
+        originalEnv[key] = process.env[key]
+        delete process.env[key]
+      }
+    })
+
+    afterEach(() => {
+      for (const key of ["AGENTS_DIR", "SKILLS_DIR", "GOOSEHINTS_PATH", "CLAUDE_MD_PATH"]) {
+        if (originalEnv[key] === undefined) {
+          delete process.env[key]
+        } else {
+          process.env[key] = originalEnv[key]
+        }
+      }
+    })
+
+    it("returns undefined agentDefs when no env vars set", () => {
+      const config = configFromEnv()
+      expect(config.agentDefs).toBeUndefined()
+    })
+
+    it("parses AGENTS_DIR env var", () => {
+      process.env["AGENTS_DIR"] = "/custom/agents"
+      const config = configFromEnv()
+      expect(config.agentDefs).toBeDefined()
+      expect(config.agentDefs!.agentsDir).toBe("/custom/agents")
+    })
+
+    it("parses SKILLS_DIR env var", () => {
+      process.env["SKILLS_DIR"] = "/custom/skills"
+      const config = configFromEnv()
+      expect(config.agentDefs).toBeDefined()
+      expect(config.agentDefs!.skillsDir).toBe("/custom/skills")
+    })
+
+    it("parses GOOSEHINTS_PATH env var", () => {
+      process.env["GOOSEHINTS_PATH"] = "/custom/goosehints"
+      const config = configFromEnv()
+      expect(config.agentDefs).toBeDefined()
+      expect(config.agentDefs!.goosehintsPath).toBe("/custom/goosehints")
+    })
+
+    it("parses CLAUDE_MD_PATH env var", () => {
+      process.env["CLAUDE_MD_PATH"] = "/custom/CLAUDE.md"
+      const config = configFromEnv()
+      expect(config.agentDefs).toBeDefined()
+      expect(config.agentDefs!.claudeMd).toBe("/custom/CLAUDE.md")
+    })
+
+    it("combines multiple env vars into agentDefs", () => {
+      process.env["AGENTS_DIR"] = "/a"
+      process.env["SKILLS_DIR"] = "/s"
+      process.env["GOOSEHINTS_PATH"] = "/g"
+      process.env["CLAUDE_MD_PATH"] = "/c"
+      const config = configFromEnv()
+      expect(config.agentDefs).toEqual({
+        agentsDir: "/a",
+        skillsDir: "/s",
+        goosehintsPath: "/g",
+        claudeMd: "/c",
+      })
+    })
+
+    it("allows overrides to replace env-derived agentDefs", () => {
+      process.env["AGENTS_DIR"] = "/from-env"
+      const config = configFromEnv({
+        agentDefs: { agentsDir: "/from-override" },
+      })
+      expect(config.agentDefs!.agentsDir).toBe("/from-override")
+    })
+  })
+
   describe("claude config", () => {
     it("defaults reviewModel to opus", () => {
       const config = configFromEnv()

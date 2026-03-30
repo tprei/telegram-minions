@@ -440,6 +440,55 @@ describe("validateAgentDefinitions", () => {
     })
     expect(result.valid).toBe(false)
   })
+
+  it("validates skillsDir as optional string", () => {
+    const result = validateAgentDefinitions({
+      skillsDir: "/path/to/skills",
+    })
+    expect(result.valid).toBe(true)
+  })
+
+  it("rejects non-string skillsDir", () => {
+    const result = validateAgentDefinitions({
+      skillsDir: 42 as unknown as string,
+    })
+    expect(result.valid).toBe(false)
+    expect(result.errors.some((e) => e.path.includes("skillsDir"))).toBe(true)
+  })
+
+  it("validates goosehintsPath as optional string", () => {
+    const result = validateAgentDefinitions({
+      goosehintsPath: "/path/to/goosehints",
+    })
+    expect(result.valid).toBe(true)
+  })
+
+  it("rejects non-string goosehintsPath", () => {
+    const result = validateAgentDefinitions({
+      goosehintsPath: true as unknown as string,
+    })
+    expect(result.valid).toBe(false)
+    expect(result.errors.some((e) => e.path.includes("goosehintsPath"))).toBe(true)
+  })
+
+  it("validates all fields together", () => {
+    const result = validateAgentDefinitions({
+      agentsDir: "/agents",
+      skillsDir: "/skills",
+      goosehintsPath: "/hints",
+      claudeMd: "/claude.md",
+      settingsJson: { allow: [] },
+    })
+    expect(result.valid).toBe(true)
+  })
+
+  it("rejects array as settingsJson", () => {
+    const result = validateAgentDefinitions({
+      settingsJson: [1, 2, 3] as unknown as object,
+    })
+    expect(result.valid).toBe(false)
+    expect(result.errors.some((e) => e.path.includes("settingsJson"))).toBe(true)
+  })
 })
 
 describe("validateApiServerConfig", () => {

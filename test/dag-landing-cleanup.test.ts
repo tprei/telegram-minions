@@ -2,53 +2,56 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 
 vi.mock("node:child_process", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:child_process")>()
-  return { ...actual, execSync: vi.fn(actual.execSync) }
+  return { ...actual, execFileSync: vi.fn(actual.execFileSync) }
 })
 
-import { execSync } from "node:child_process"
+import { execFileSync } from "node:child_process"
 import { cleanupMergedBranch } from "../src/dag.js"
 
-const mockExecSync = vi.mocked(execSync)
+const mockExecFileSync = vi.mocked(execFileSync)
 
 beforeEach(() => {
-  mockExecSync.mockReset()
+  mockExecFileSync.mockReset()
 })
 
 describe("cleanupMergedBranch", () => {
   it("removes worktree and deletes remote branch", () => {
-    mockExecSync.mockReturnValue(Buffer.from(""))
+    mockExecFileSync.mockReturnValue("")
 
     const result = cleanupMergedBranch("minion/test-branch", "/workspace/test-worktree", "/workspace/repo")
 
     expect(result).toEqual({ worktreeRemoved: true, remoteBranchDeleted: true })
-    expect(mockExecSync).toHaveBeenCalledTimes(2)
-    expect(mockExecSync).toHaveBeenCalledWith(
-      'git worktree remove --force "/workspace/test-worktree"',
+    expect(mockExecFileSync).toHaveBeenCalledTimes(2)
+    expect(mockExecFileSync).toHaveBeenCalledWith(
+      "git",
+      ["worktree", "remove", "--force", "/workspace/test-worktree"],
       expect.objectContaining({ cwd: "/workspace/repo" }),
     )
-    expect(mockExecSync).toHaveBeenCalledWith(
-      'git push origin --delete "minion/test-branch"',
+    expect(mockExecFileSync).toHaveBeenCalledWith(
+      "git",
+      ["push", "origin", "--delete", "minion/test-branch"],
       expect.objectContaining({ cwd: "/workspace/repo" }),
     )
   })
 
   it("skips worktree removal when no worktree path provided", () => {
-    mockExecSync.mockReturnValue(Buffer.from(""))
+    mockExecFileSync.mockReturnValue("")
 
     const result = cleanupMergedBranch("minion/test-branch", undefined, "/workspace/repo")
 
     expect(result).toEqual({ worktreeRemoved: false, remoteBranchDeleted: true })
-    expect(mockExecSync).toHaveBeenCalledTimes(1)
-    expect(mockExecSync).toHaveBeenCalledWith(
-      'git push origin --delete "minion/test-branch"',
+    expect(mockExecFileSync).toHaveBeenCalledTimes(1)
+    expect(mockExecFileSync).toHaveBeenCalledWith(
+      "git",
+      ["push", "origin", "--delete", "minion/test-branch"],
       expect.objectContaining({ cwd: "/workspace/repo" }),
     )
   })
 
   it("swallows worktree removal errors", () => {
-    mockExecSync
+    mockExecFileSync
       .mockImplementationOnce(() => { throw new Error("not a working tree") })
-      .mockReturnValueOnce(Buffer.from(""))
+      .mockReturnValueOnce("")
 
     const result = cleanupMergedBranch("minion/test-branch", "/workspace/gone", "/workspace/repo")
 
@@ -56,8 +59,8 @@ describe("cleanupMergedBranch", () => {
   })
 
   it("swallows remote branch delete errors", () => {
-    mockExecSync
-      .mockReturnValueOnce(Buffer.from(""))
+    mockExecFileSync
+      .mockReturnValueOnce("")
       .mockImplementationOnce(() => { throw new Error("remote ref does not exist") })
 
     const result = cleanupMergedBranch("minion/test-branch", "/workspace/wt", "/workspace/repo")
@@ -66,7 +69,7 @@ describe("cleanupMergedBranch", () => {
   })
 
   it("swallows both errors without throwing", () => {
-    mockExecSync.mockImplementation(() => { throw new Error("everything fails") })
+    mockExecFileSync.mockImplementation(() => { throw new Error("everything fails") })
 
     const result = cleanupMergedBranch("minion/test-branch", "/workspace/wt", "/workspace/repo")
 
@@ -74,12 +77,13 @@ describe("cleanupMergedBranch", () => {
   })
 
   it("passes custom timeout", () => {
-    mockExecSync.mockReturnValue(Buffer.from(""))
+    mockExecFileSync.mockReturnValue("")
 
     cleanupMergedBranch("minion/test-branch", undefined, "/workspace/repo", { timeout: 30_000 })
 
-    expect(mockExecSync).toHaveBeenCalledWith(
-      expect.any(String),
+    expect(mockExecFileSync).toHaveBeenCalledWith(
+      "git",
+      expect.any(Array),
       expect.objectContaining({ timeout: 30_000 }),
     )
   })

@@ -10,7 +10,7 @@ import fs from "node:fs"
 import os from "node:os"
 import crypto from "node:crypto"
 import type { SessionHandle } from "./session.js"
-import type { SessionMeta, TopicSession } from "./types.js"
+import type { AutoAdvance, SessionMeta, TopicSession } from "./types.js"
 import { extractRepoName } from "./command-parser.js"
 import { loggers } from "./logger.js"
 import { DefaultBranchError } from "./errors.js"
@@ -31,6 +31,7 @@ export interface PendingTask {
   repoSlug?: string
   repoUrl?: string
   mode: "task" | "plan" | "think" | "review" | "ship-think"
+  autoAdvance?: AutoAdvance
 }
 
 /**
@@ -343,6 +344,7 @@ function bootstrapOnePackage(
         stdio, timeout: 30_000,
       })
       log.debug({ label }, "hardlinked node_modules")
+      makeNodeModulesReadOnly(path.join(pkgDir, "node_modules"), label)
       return
     } catch (err) {
       log.warn({ err, label }, "hardlink copy failed, falling back to npm ci")
@@ -364,8 +366,26 @@ function bootstrapOnePackage(
       fs.writeFileSync(cacheLockHash, currentHash)
     }
     log.debug({ label }, "cached node_modules")
+    makeNodeModulesReadOnly(path.join(pkgDir, "node_modules"), label)
   } catch (err) {
     log.warn({ err, label }, "dependency bootstrap failed (non-fatal)")
+  }
+}
+
+/**
+ * Make node_modules read-only to prevent agents from running `npm install`
+ * and breaking the hardlink cache. Uses `chmod -R a-w` so npm fails fast
+ * instead of silently duplicating everything.
+ */
+function makeNodeModulesReadOnly(nmDir: string, label: string): void {
+  try {
+    execSync(`chmod -R a-w ${JSON.stringify(nmDir)}`, {
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 30_000,
+    })
+    log.debug({ label }, "made node_modules read-only")
+  } catch (err) {
+    log.warn({ err, label }, "failed to make node_modules read-only (non-fatal)")
   }
 }
 
@@ -397,6 +417,13 @@ export function cleanBuildArtifacts(cwd: string): void {
     const target = path.join(cwd, name)
     try {
       if (fs.existsSync(target)) {
+        // Restore write permissions before removal (node_modules may be read-only)
+        try {
+          execSync(`chmod -R u+w ${JSON.stringify(target)}`, {
+            stdio: ["ignore", "pipe", "pipe"],
+            timeout: 30_000,
+          })
+        } catch { /* best-effort */ }
         fs.rmSync(target, { recursive: true, force: true })
         log.debug({ name, cwd }, "cleaned artifact")
       }
@@ -410,6 +437,12 @@ export function cleanBuildArtifacts(cwd: string): void {
       if (!entry.isDirectory() || entry.name === "node_modules" || entry.name.startsWith(".")) continue
       const nested = path.join(cwd, entry.name, "node_modules")
       if (fs.existsSync(nested)) {
+        try {
+          execSync(`chmod -R u+w ${JSON.stringify(nested)}`, {
+            stdio: ["ignore", "pipe", "pipe"],
+            timeout: 30_000,
+          })
+        } catch { /* best-effort */ }
         fs.rmSync(nested, { recursive: true, force: true })
         log.debug({ name: `${entry.name}/node_modules`, cwd }, "cleaned nested artifact")
       }

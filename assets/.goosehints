@@ -1,0 +1,33 @@
+This is a TypeScript project that runs as a Telegram bot controlling autonomous coding agents.
+
+## Project structure
+
+- `src/` — main source code (TypeScript, ESM)
+- `test/` — vitest tests
+- `assets/` — bundled files for npm package consumers
+- `.claude/agents/` — Claude agent definitions for Docker deployment
+- `goose/config.yaml` — reference Goose configuration
+
+## Development commands
+
+- Type check: `npx tsc --noEmit`
+- Lint: `npx eslint src/`
+- Test: `npx vitest run`
+- Build: `npm run build`
+
+## Key conventions
+
+- ESM imports with `.js` extensions (e.g., `import { foo } from "./bar.js"`)
+- No `eslint-disable`, `@ts-ignore`, or `@ts-expect-error` comments
+- Remove unused variables instead of prefixing with `_`
+- Use conventional commits: `feat:`, `fix:`, `refactor:`, `docs:`, `test:`, `chore:`
+- Stage specific files, never `git add .`
+
+## Dependencies
+
+Dependencies are pre-installed and read-only. Do NOT run `npm install` or `npm ci`.
+
+## Environment
+
+- Never read, log, or commit `.env` files or secret values
+- Use `.env.example` for reference on expected environment variables

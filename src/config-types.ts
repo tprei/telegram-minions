@@ -36,6 +36,7 @@ export interface CiConfig {
   maxRetries: number
   pollIntervalMs: number
   pollTimeoutMs: number
+  noChecksGraceMs?: number
   dagCiPolicy: DagCiPolicy
 }
 
@@ -67,6 +68,8 @@ export interface SentryConfig {
 
 export interface AgentDefinitions {
   agentsDir?: string
+  skillsDir?: string
+  goosehintsPath?: string
   claudeMd?: string
   settingsJson?: object
 }

@@ -90,7 +90,9 @@ export async function findPRByBranch(branch: string, cwd: string): Promise<strin
 export async function waitForCI(prUrl: string, cwd: string, ciConfig: CiConfig): Promise<CIWaitResult> {
   const intervalMs = ciConfig.pollIntervalMs
   const timeoutMs = ciConfig.pollTimeoutMs
+  const noChecksGraceMs = ciConfig.noChecksGraceMs ?? 120_000
   const startedAt = Date.now()
+  let emptyChecksSince: number | null = null
 
   while (Date.now() - startedAt < timeoutMs) {
     const result = await getCheckStatus(prUrl, cwd)
@@ -101,10 +103,19 @@ export async function waitForCI(prUrl: string, cwd: string, ciConfig: CiConfig):
     }
 
     if (result !== null) {
-      const pending = result.checks.filter((c) => c.bucket === "pending")
-      if (pending.length === 0 && result.checks.length > 0) {
-        const failed = result.checks.filter((c) => c.bucket === "fail")
-        return { passed: failed.length === 0, checks: result.checks, timedOut: false }
+      if (result.checks.length === 0) {
+        emptyChecksSince ??= Date.now()
+        if (Date.now() - emptyChecksSince >= noChecksGraceMs) {
+          log.info({ prUrl, graceMs: noChecksGraceMs }, "no checks appeared after grace period, treating as passed")
+          return { passed: true, checks: [], timedOut: false }
+        }
+      } else {
+        emptyChecksSince = null
+        const pending = result.checks.filter((c) => c.bucket === "pending")
+        if (pending.length === 0) {
+          const failed = result.checks.filter((c) => c.bucket === "fail")
+          return { passed: failed.length === 0, checks: result.checks, timedOut: false }
+        }
       }
     }
 
@@ -138,6 +149,11 @@ async function getCheckStatus(prUrl: string, cwd: string): Promise<CheckStatusRe
     if (err instanceof TerminalGhError) {
       log.error({ err, prUrl }, "gh pr checks failed with terminal error")
       return { checks: [], terminal: true }
+    }
+    const errMsg = String((err as Error).message ?? "")
+    if (errMsg.includes("no checks reported")) {
+      log.debug({ prUrl }, "no checks reported on branch")
+      return { checks: [], terminal: false }
     }
     log.error({ err, prUrl }, "gh pr checks failed")
     return null

@@ -44,6 +44,10 @@ jobs:
       - name: Bump version and tag
         run: |
           NEW_VERSION=$(npm version ${{ steps.bump.outputs.type }} --no-git-tag-version)
+          if git rev-parse "${NEW_VERSION}" >/dev/null 2>&1; then
+            echo "Tag ${NEW_VERSION} already exists — skipping"
+            exit 0
+          fi
           git add package.json package-lock.json
           git commit -m "chore: bump version to ${NEW_VERSION}"
           git tag "${NEW_VERSION}"

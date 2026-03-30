@@ -1,4 +1,4 @@
-import { spawn, execSync } from "node:child_process"
+import { spawn, execFileSync } from "node:child_process"
 import { loggers } from "./logger.js"
 
 const log = loggers.conflictResolver
@@ -35,7 +35,7 @@ export async function resolveConflictsWithAgent(
 ): Promise<boolean> {
   let conflictFiles: string[]
   try {
-    const raw = execSync("git diff --name-only --diff-filter=U", { cwd, encoding: "utf-8" }).trim()
+    const raw = execFileSync("git", ["diff", "--name-only", "--diff-filter=U"], { cwd, encoding: "utf-8" }).trim()
     conflictFiles = raw.split("\n").filter(Boolean)
   } catch {
     return false
@@ -82,7 +82,7 @@ export async function resolveConflictsWithAgent(
   }
 
   try {
-    const remaining = execSync("git diff --name-only --diff-filter=U", { cwd, encoding: "utf-8" }).trim()
+    const remaining = execFileSync("git", ["diff", "--name-only", "--diff-filter=U"], { cwd, encoding: "utf-8" }).trim()
     const resolved = remaining.length === 0
     log.info({ resolved, remaining: remaining || "(none)" }, "conflict resolution result")
     return resolved

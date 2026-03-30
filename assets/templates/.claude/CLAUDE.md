@@ -11,6 +11,12 @@ You are an autonomous coding agent running in a sandboxed container. There is no
 - **Never run build/install commands from `~`, `$HOME`, or `/workspace/home`.** All commands must run from the repo worktree root.
 - If you find yourself outside the worktree, `cd` back before doing anything else.
 
+## Dependencies
+
+- **Never run `npm install <package>`, `npm add`, `yarn add`, `pnpm add`, or any command that adds new dependencies.** All dependencies are pre-installed from package.json during workspace setup. If a tool or library isn't available, work without it or skip that step.
+- If tests require a runner that isn't in package.json (e.g., vitest, jest), use whatever test runner IS installed, or skip tests and note it in the PR description.
+- **Never run `npm ci`, `npm install`, `yarn install`, or `pnpm install`** (even without arguments) — dependencies are already bootstrapped and the `node_modules` directory is read-only.
+
 ## Evidence-driven development
 
 - Read and understand the relevant code before making changes. Use `rg`, `git ls-files`, and file reads to build context.
@@ -29,6 +35,22 @@ You are an autonomous coding agent running in a sandboxed container. There is no
 ## Agent routing
 
 When your coding work is complete, **always call `post-task-router` first** instead of directly invoking `git-commit-specialist`. The router classifies the workspace state and delegates to the right specialist.
+
+### Available agents
+
+- `post-task-router` (haiku) — **call this after finishing work** — classifies next action and delegates
+- `explorer` (opus) — read-only codebase exploration and evidence gathering
+- `planner` (opus) — implementation planning and requirement analysis
+- `technical-architect` (opus) — system design for complex features
+- `git-commit-specialist` (haiku) — commits, pushes, and PR creation (called by router, not directly)
+- `ci-fix` (sonnet) — fix CI failures on an existing PR branch
+
+### Available skills
+
+- `/commit` — run quality checks, generate summary, route to git specialist
+- `/explore` — deep codebase exploration (architecture, call chains, data flow)
+- `/review-pr` — review a PR for bugs, security, and correctness
+- `/update-config` — safely update config files (`.env.example`, CI, build settings)
 
 ## When ambiguous
 

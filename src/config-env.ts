@@ -20,6 +20,22 @@ function optionalNumber(name: string, fallback: number): number {
   return n
 }
 
+function buildAgentDefs(): MinionConfig["agentDefs"] {
+  const agentsDir = process.env["AGENTS_DIR"]
+  const skillsDir = process.env["SKILLS_DIR"]
+  const goosehintsPath = process.env["GOOSEHINTS_PATH"]
+  const claudeMd = process.env["CLAUDE_MD_PATH"]
+
+  if (!agentsDir && !skillsDir && !goosehintsPath && !claudeMd) return undefined
+
+  return {
+    ...(agentsDir ? { agentsDir } : {}),
+    ...(skillsDir ? { skillsDir } : {}),
+    ...(goosehintsPath ? { goosehintsPath } : {}),
+    ...(claudeMd ? { claudeMd } : {}),
+  }
+}
+
 export function configFromEnv(overrides?: Partial<MinionConfig>): MinionConfig {
   const base: MinionConfig = {
     telegram: {
@@ -59,6 +75,7 @@ export function configFromEnv(overrides?: Partial<MinionConfig>): MinionConfig {
       maxRetries: optionalNumber("CI_BABYSIT_MAX_RETRIES", 2),
       pollIntervalMs: optionalNumber("CI_POLL_INTERVAL_MS", 30_000),
       pollTimeoutMs: optionalNumber("CI_POLL_TIMEOUT_MS", 600_000),
+      noChecksGraceMs: optionalNumber("CI_NO_CHECKS_GRACE_MS", 120_000),
       dagCiPolicy: (optional("DAG_CI_POLICY", "warn") as "block" | "warn" | "skip"),
     },
     mcp: {
@@ -83,6 +100,7 @@ export function configFromEnv(overrides?: Partial<MinionConfig>): MinionConfig {
     sentry: {
       dsn: process.env["SENTRY_DSN"] ?? undefined,
     },
+    agentDefs: buildAgentDefs(),
     repos: {},
     sessionEnvPassthrough: process.env["SESSION_ENV_PASSTHROUGH"]
       ? process.env["SESSION_ENV_PASSTHROUGH"].split(",").map((s) => s.trim()).filter((s) => s.length > 0)

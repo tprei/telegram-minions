@@ -14,22 +14,15 @@ import {
   actionState,
   clearActionError,
 } from './store'
-import { SessionList } from './components/SessionList'
-import { DagList } from './components/DagView'
+import { UniverseCanvas } from './components/UniverseCanvas'
 import { useTelegram, useMainButton } from './hooks'
 import { openTelegramLink } from './telegram'
-import type { MinionSession, DagNode } from './types'
+import type { MinionSession } from './types'
 
-function handleThreadClick(session: MinionSession) {
+function handleOpenThread(session: MinionSession) {
   if (session.threadId && session.chatId) {
     const threadUrl = `https://t.me/c/${String(session.chatId).replace(/^-100/, '')}/${session.threadId}`
     openTelegramLink(threadUrl)
-  }
-}
-
-function handleDagNodeClick(node: DagNode) {
-  if (node.session) {
-    handleThreadClick(node.session)
   }
 }
 
@@ -140,7 +133,6 @@ export default function App() {
     window.addEventListener('beforeunload', stopSse)
   }
 
-  const headingColor = tg.darkMode ? 'text-white' : 'text-gray-900'
   return (
     <div class={`min-h-screen p-4 ${tg.darkMode ? 'bg-gray-900' : 'bg-white'}`}>
       <MainButtonHandler />
@@ -149,23 +141,15 @@ export default function App() {
       <ErrorMessage />
       <ActionError />
 
-      <section>
-        <h2 class={`text-lg font-semibold mb-3 ${headingColor}`}>Sessions</h2>
-        <SessionList
-          sessions={sessions.value}
-          isLoading={isLoading.value}
-          onThreadClick={handleThreadClick}
-          onSendReply={sendReply}
-          onStopMinion={stopMinion}
-          onCloseSession={closeSession}
-          isActionLoading={actionState.value.isLoading}
-        />
-      </section>
-
-      <DagList
+      <UniverseCanvas
+        sessions={sessions.value}
         dags={dags.value}
         isLoading={isLoading.value}
-        onNodeClick={handleDagNodeClick}
+        onSendReply={sendReply}
+        onStopMinion={stopMinion}
+        onCloseSession={closeSession}
+        onOpenThread={handleOpenThread}
+        isActionLoading={actionState.value.isLoading}
       />
     </div>
   )

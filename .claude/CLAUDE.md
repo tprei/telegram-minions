@@ -39,6 +39,15 @@ When your coding work is complete, **always call `post-task-router` first** inst
 - `git-commit-specialist` (haiku) — commits, pushes, and PR creation (called by router, not directly)
 - `ci-fix` (sonnet) — fix CI failures on an existing PR branch
 
+### Available skills
+
+Skills are slash-command shortcuts for common workflows:
+
+- `/commit` — run quality checks, generate summary, route to git specialist
+- `/explore` — deep codebase exploration (architecture, call chains, data flow)
+- `/review-pr` — review a PR for bugs, security, and correctness
+- `/update-config` — safely update config files (`.env.example`, CI, build settings)
+
 ## CI awareness
 
 After a task session opens a PR, the dispatcher automatically watches CI checks via `gh pr checks`. If checks fail, the `ci-fix` agent is spawned to fix the failures and push updates to the same branch. This repeats up to `CI_BABYSIT_MAX_RETRIES` times (default: 2).

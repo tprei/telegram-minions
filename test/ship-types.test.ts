@@ -10,6 +10,7 @@ import type {
   VerificationCheckStatus,
   SessionMode,
 } from "../src/types.js"
+import type { PendingTask } from "../src/session-manager.js"
 
 describe("ship session modes", () => {
   it("accepts ship-think as a valid SessionMode", () => {
@@ -83,6 +84,33 @@ describe("TopicSession.autoAdvance", () => {
     expect(session.autoAdvance).toBeDefined()
     expect(session.autoAdvance!.phase).toBe("dag")
     expect(session.autoAdvance!.autoLand).toBe(true)
+  })
+})
+
+describe("PendingTask.autoAdvance", () => {
+  it("carries autoAdvance through profile/repo selection", () => {
+    const autoAdvance: AutoAdvance = {
+      phase: "think",
+      featureDescription: "add SSO login",
+      autoLand: false,
+    }
+    const pending: PendingTask = {
+      task: "add SSO login",
+      mode: "ship-think",
+      repoUrl: "https://github.com/org/repo",
+      autoAdvance,
+    }
+    expect(pending.autoAdvance).toBeDefined()
+    expect(pending.autoAdvance!.phase).toBe("think")
+    expect(pending.autoAdvance!.featureDescription).toBe("add SSO login")
+  })
+
+  it("is optional and defaults to undefined for non-ship modes", () => {
+    const pending: PendingTask = {
+      task: "fix bug",
+      mode: "task",
+    }
+    expect(pending.autoAdvance).toBeUndefined()
   })
 })
 

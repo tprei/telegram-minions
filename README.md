@@ -123,6 +123,53 @@ npm run dev
 npm run build
 ```
 
+## Agent Skills and Guidance
+
+Each minion session gets injected with bundled agent definitions, skills, and project guidance. Existing files in the target workspace are never overwritten.
+
+### Claude Code skills
+
+| Skill | Purpose |
+|---|---|
+| `/commit` | Run quality checks, generate summary, route to git specialist |
+| `/explore` | Deep codebase exploration — architecture, call chains, data flow |
+| `/review-pr` | Review a PR for bugs, security, and correctness (max 5 findings) |
+| `/update-config` | Safely update config files (`.env.example`, CI, build settings) |
+
+### Claude agents
+
+| Agent | Model | Purpose |
+|---|---|---|
+| `post-task-router` | haiku | Classifies workspace state and routes to the right specialist |
+| `explorer` | opus | Read-only codebase exploration and evidence gathering |
+| `planner` | opus | Implementation planning and requirement analysis |
+| `technical-architect` | opus | System design for complex features |
+| `git-commit-specialist` | haiku | Commits, pushes branches, and opens PRs |
+| `ci-fix` | sonnet | Diagnoses and fixes CI failures on existing PR branches |
+
+### Goose skills
+
+| Skill | Purpose |
+|---|---|
+| `code-exploration` | Efficient code navigation and architecture discovery |
+| `pr-workflow` | Git branching, conventional commits, PR creation via `gh` |
+| `testing` | Test discovery and execution (typecheck → lint → test) |
+| `ci-diagnosis` | CI failure analysis — classify, diagnose, fix root cause |
+| `secure-coding` | Security best practices — secrets, input validation, shell safety |
+
+A `.goosehints` file is also injected with project structure, dev commands, and coding conventions.
+
+### Customizing injected files
+
+Override defaults via environment variables:
+
+| Env var | Purpose |
+|---|---|
+| `AGENTS_DIR` | Custom path to Claude agent `.md` files |
+| `SKILLS_DIR` | Custom path to Claude skill directories |
+| `GOOSEHINTS_PATH` | Custom path to `.goosehints` file |
+| `CLAUDE_MD_PATH` | Custom path to `CLAUDE.md` guidance file |
+
 ## Integrating as a Library
 
 The core logic is published as a package and can be imported directly if you want to define custom system prompts, custom agent profiles, or repository aliases in code.
@@ -139,6 +186,29 @@ const minion = createMinion({
 })
 
 await minion.start()
+```
+
+### Custom agent definitions
+
+Override the bundled agents, skills, and guidance when using the library:
+
+```typescript
+import { createMinion, configFromEnv } from "@tprei/telegram-minions"
+
+const config = configFromEnv({
+  agentDefs: {
+    agentsDir: './my-agents',
+    skillsDir: './my-skills',
+    goosehintsPath: './my-goosehints',
+    claudeMd: './my-guidance.md',
+    settingsJson: {
+      env: { CLAUDE_CODE_MAX_OUTPUT_TOKENS: '16000' },
+      permissions: { allow: ['Bash(*)', 'Read(*)', 'Write(*)'] },
+    },
+  }
+})
+
+createMinion(config).start()
 ```
 
 ## Quick Setup Wizard

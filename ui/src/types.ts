@@ -44,7 +44,7 @@ export interface MinionSession {
 export interface DagNode {
   id: string
   slug: string
-  status: 'pending' | 'running' | 'completed' | 'failed' | 'skipped'
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'skipped' | 'ci-pending' | 'ci-failed' | 'landed'
   dependencies: string[]
   dependents: string[]
   session?: MinionSession

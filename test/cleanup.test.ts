@@ -3,6 +3,7 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
+import { execSync } from "node:child_process"
 import crypto from "node:crypto"
 import { cleanBuildArtifacts, dirSizeBytes, bootstrapDependencies } from "../src/session-manager.js"
 
@@ -13,6 +14,10 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  // Restore write permissions before cleanup (bootstrapDependencies makes node_modules read-only)
+  try {
+    execSync(`chmod -R u+w ${JSON.stringify(tmpDir)}`, { stdio: "ignore" })
+  } catch { /* best-effort */ }
   fs.rmSync(tmpDir, { recursive: true, force: true })
 })
 
@@ -213,6 +218,10 @@ describe("bootstrapDependencies", () => {
 
     bootstrapDependencies(child1, reposDir, "test-repo")
     bootstrapDependencies(child2, reposDir, "test-repo")
+
+    // Unlock node_modules for this test (testing hardlink isolation, not write protection)
+    execSync(`chmod -R u+w ${JSON.stringify(path.join(child1, "node_modules"))}`, { stdio: "ignore" })
+    execSync(`chmod -R u+w ${JSON.stringify(path.join(child2, "node_modules"))}`, { stdio: "ignore" })
 
     // Child 1 adds a new package (new file creation doesn't affect siblings)
     fs.mkdirSync(path.join(child1, "node_modules", "new-pkg"), { recursive: true })

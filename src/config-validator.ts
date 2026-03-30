@@ -261,6 +261,11 @@ export function validateCiConfig(config: unknown, path = "ci"): ValidationResult
   const pollTimeoutErr = validateNumber(c.pollTimeoutMs, `${path}.pollTimeoutMs`, { min: 60000 })
   if (pollTimeoutErr) errors.push(pollTimeoutErr)
 
+  if (c.noChecksGraceMs !== undefined) {
+    const graceErr = validateNumber(c.noChecksGraceMs, `${path}.noChecksGraceMs`, { min: 0 })
+    if (graceErr) errors.push(graceErr)
+  }
+
   const validPolicies = ["block", "warn", "skip"]
   if (c.dagCiPolicy !== undefined && !validPolicies.includes(c.dagCiPolicy)) {
     errors.push(error(`${path}.dagCiPolicy`, `expected one of ${validPolicies.join(", ")}, got "${c.dagCiPolicy}"`))
@@ -363,6 +368,12 @@ export function validateAgentDefinitions(config: unknown, path = "agentDefs"): V
 
   const agentsDirErr = validateOptionalString(c.agentsDir, `${path}.agentsDir`)
   if (agentsDirErr) errors.push(agentsDirErr)
+
+  const skillsDirErr = validateOptionalString(c.skillsDir, `${path}.skillsDir`)
+  if (skillsDirErr) errors.push(skillsDirErr)
+
+  const goosehintsErr = validateOptionalString(c.goosehintsPath, `${path}.goosehintsPath`)
+  if (goosehintsErr) errors.push(goosehintsErr)
 
   const claudeMdErr = validateOptionalString(c.claudeMd, `${path}.claudeMd`)
   if (claudeMdErr) errors.push(claudeMdErr)
