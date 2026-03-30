@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest"
 import fs from "node:fs"
 import path from "node:path"
 import os from "node:os"
-import { runQualityGates } from "../src/quality-gates.js"
+import { runQualityGates } from "../src/ci/quality-gates.js"
 
 describe("runQualityGates", { timeout: 30000 }, () => {
   let tmpDir: string

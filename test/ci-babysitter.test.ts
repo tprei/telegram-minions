@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { CIBabysitter } from "../src/ci-babysitter.js"
+import { CIBabysitter } from "../src/ci/ci-babysitter.js"
 import type { DispatcherContext } from "../src/dispatcher-context.js"
 import type { TopicSession } from "../src/types.js"
 
 // Mock external dependencies
-vi.mock("../src/ci-babysit.js", () => ({
+vi.mock("../src/ci/ci-babysit.js", () => ({
   waitForCI: vi.fn(),
   getFailedCheckLogs: vi.fn(),
   buildCIFixPrompt: vi.fn(),
@@ -13,7 +13,7 @@ vi.mock("../src/ci-babysit.js", () => ({
   checkPRMergeability: vi.fn(),
 }))
 
-vi.mock("../src/quality-gates.js", () => ({
+vi.mock("../src/ci/quality-gates.js", () => ({
   runQualityGates: vi.fn(),
 }))
 
@@ -21,8 +21,8 @@ vi.mock("../src/sentry.js", () => ({
   captureException: vi.fn(),
 }))
 
-import { waitForCI, getFailedCheckLogs, buildCIFixPrompt, checkPRMergeability, buildMergeConflictPrompt, buildQualityGateFixPrompt } from "../src/ci-babysit.js"
-import { runQualityGates } from "../src/quality-gates.js"
+import { waitForCI, getFailedCheckLogs, buildCIFixPrompt, checkPRMergeability, buildMergeConflictPrompt, buildQualityGateFixPrompt } from "../src/ci/ci-babysit.js"
+import { runQualityGates } from "../src/ci/quality-gates.js"
 
 const mockWaitForCI = vi.mocked(waitForCI)
 const mockCheckPRMergeability = vi.mocked(checkPRMergeability)

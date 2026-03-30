@@ -1,11 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 
-vi.mock("../src/ci-babysit.js", () => ({
+vi.mock("../src/ci/ci-babysit.js", () => ({
   checkPRMergeability: vi.fn(),
   waitForCI: vi.fn(),
 }))
 
-vi.mock("../src/quality-gates.js", () => ({
+vi.mock("../src/ci/quality-gates.js", () => ({
   runQualityGates: vi.fn(),
 }))
 
@@ -15,8 +15,8 @@ vi.mock("node:child_process", async (importOriginal) => {
 })
 
 import { execSync } from "node:child_process"
-import { checkPRMergeability, waitForCI } from "../src/ci-babysit.js"
-import { runQualityGates } from "../src/quality-gates.js"
+import { checkPRMergeability, waitForCI } from "../src/ci/ci-babysit.js"
+import { runQualityGates } from "../src/ci/quality-gates.js"
 import {
   checkMergeConflicts,
   checkCI,
@@ -24,7 +24,7 @@ import {
   buildCompletenessReviewPrompt,
   parseCompletenessResult,
   rebaseOntoMain,
-} from "../src/verification.js"
+} from "../src/ci/verification.js"
 import type { CiConfig } from "../src/config-types.js"
 
 const mockCheckPRMergeability = vi.mocked(checkPRMergeability)

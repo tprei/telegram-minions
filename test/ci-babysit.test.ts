@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest"
-import { extractPRUrl, findPRByBranch, buildCIFixPrompt, buildQualityGateFixPrompt, buildMergeConflictPrompt, checkPRMergeability, waitForCI } from "../src/ci-babysit.js"
+import { extractPRUrl, findPRByBranch, buildCIFixPrompt, buildQualityGateFixPrompt, buildMergeConflictPrompt, checkPRMergeability, waitForCI } from "../src/ci/ci-babysit.js"
 import type { CiConfig } from "../src/config-types.js"
 
 vi.mock("node:child_process", async (importOriginal) => {
