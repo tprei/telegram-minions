@@ -326,6 +326,7 @@ export function buildDagChildPrompt(
   allNodes: DagInput[],
   upstreamBranches: string[],
   isStack: boolean,
+  conflictFiles: string[] = [],
 ): string {
   const originalRequest = parentConversation[0]?.text ?? ""
 
@@ -364,6 +365,25 @@ export function buildDagChildPrompt(
   lines.push("")
   lines.push(node.description)
   lines.push("")
+
+  if (conflictFiles.length > 0) {
+    lines.push("## ⚠️ Merge conflicts to resolve first")
+    lines.push("")
+    lines.push("Your working tree has merge conflicts from combining upstream branches.")
+    lines.push("**Before starting your task**, resolve all conflicts:")
+    lines.push("")
+    for (const f of conflictFiles) {
+      lines.push(`- \`${f}\``)
+    }
+    lines.push("")
+    lines.push("Steps:")
+    lines.push("1. Open each conflicted file and resolve the `<<<<<<<` / `=======` / `>>>>>>>` markers")
+    lines.push("2. Keep the intent of both sides — do not discard upstream work")
+    lines.push("3. `git add` each resolved file")
+    lines.push("4. `git commit --no-edit` to finalize the merge")
+    lines.push("5. Then proceed with your assigned task below")
+    lines.push("")
+  }
 
   if (node.dependsOn.length > 0) {
     lines.push("## Upstream context")

@@ -318,8 +318,8 @@ describe("prepareFanInBranch", () => {
 })
 
 describe("mergeUpstreamBranches", () => {
-  it("returns true when no additional branches", () => {
+  it("returns ok with no conflicts when no additional branches", () => {
     const result = mergeUpstreamBranches("/workspace/test", [])
-    expect(result).toBe(true)
+    expect(result).toEqual({ ok: true, conflictFiles: [] })
   })
 })

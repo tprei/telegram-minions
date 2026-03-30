@@ -1741,7 +1741,7 @@ export class Dispatcher {
     return downloadPhotos(photos, this.telegram)
   }
 
-  private mergeUpstreamBranches(workDir: string, additionalBranches: string[]): boolean {
+  private mergeUpstreamBranches(workDir: string, additionalBranches: string[]) {
     return mergeUpstreamBranches(workDir, additionalBranches)
   }
 

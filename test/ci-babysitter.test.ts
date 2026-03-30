@@ -67,7 +67,7 @@ function makeContext(overrides: Partial<DispatcherContext> = {}): DispatcherCont
     removeWorkspace: vi.fn().mockResolvedValue(undefined),
     cleanBuildArtifacts: vi.fn(),
     prepareFanInBranch: vi.fn().mockResolvedValue(null),
-    mergeUpstreamBranches: vi.fn().mockReturnValue(true),
+    mergeUpstreamBranches: vi.fn().mockReturnValue({ ok: true, conflictFiles: [] }),
     downloadPhotos: vi.fn().mockResolvedValue([]),
     pushToConversation: vi.fn(),
     extractPRFromConversation: vi.fn().mockReturnValue(null),

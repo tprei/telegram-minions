@@ -503,7 +503,8 @@ export async function downloadPhotos(
 
 /**
  * Prepare a merge branch for fan-in DAG nodes.
- * Checks for merge conflicts before creating a real merge.
+ * Runs an advisory conflict check — conflicts are resolved by the agent,
+ * not treated as fatal errors.
  */
 export function prepareFanInBranch(
   slug: string,
@@ -523,10 +524,14 @@ export function prepareFanInBranch(
 
   try {
     fetchBareRepo(bareDir, gitOpts)
+  } catch (err) {
+    log.warn({ err, slug }, "failed to fetch bare repo for fan-in check")
+    return null
+  }
 
-    // Use git merge-tree to check for conflicts before creating a real merge
-    const baseBranch = upstreamBranches[0]
-    for (let i = 1; i < upstreamBranches.length; i++) {
+  const baseBranch = upstreamBranches[0]
+  for (let i = 1; i < upstreamBranches.length; i++) {
+    try {
       const result = execSync(
         `git merge-tree --write-tree ${baseBranch} ${upstreamBranches[i]}`,
         { ...gitOpts, cwd: bareDir },
@@ -534,29 +539,35 @@ export function prepareFanInBranch(
         .toString()
         .trim()
 
-      // If merge-tree reports conflicts, the exit code is non-zero (caught by try/catch)
       log.debug({ baseBranch, branch: upstreamBranches[i], result: result.slice(0, 40) }, "merge-tree check OK")
+    } catch {
+      log.warn({ slug, baseBranch, branch: upstreamBranches[i] }, "fan-in merge conflict detected — agent will resolve")
     }
-
-    // No conflicts detected — return first branch, actual merge happens in prepareWorkspace + post-checkout merge
-    return upstreamBranches[0]
-  } catch (err) {
-    log.warn({ err, slug }, "fan-in merge conflict detected")
-    return null
   }
+
+  return upstreamBranches[0]
+}
+
+export interface MergeResult {
+  ok: boolean
+  conflictFiles: string[]
 }
 
 /**
  * Merge additional upstream branches into a worktree.
  * Used for fan-in DAG nodes with multiple dependencies.
+ * On merge conflicts, leaves conflict markers for the agent to resolve
+ * instead of aborting.
  */
 export function mergeUpstreamBranches(
   workDir: string,
   additionalBranches: string[],
-): boolean {
+): MergeResult {
   const gitEnv = { ...process.env, GIT_TERMINAL_PROMPT: "0" }
   const stdio: import("node:child_process").StdioOptions = ["ignore", "pipe", "pipe"]
   const gitOpts = { stdio, timeout: 120_000, env: gitEnv }
+
+  const conflictFiles: string[] = []
 
   for (const branch of additionalBranches) {
     try {
@@ -565,17 +576,32 @@ export function mergeUpstreamBranches(
         cwd: workDir,
       })
       log.debug({ branch, workDir }, "merged branch into worktree")
-    } catch (err) {
-      log.error({ err, branch, workDir }, "merge of branch into worktree failed")
-      // Abort the merge
-      try {
-        execSync(`git merge --abort`, { ...gitOpts, cwd: workDir })
-      } catch {
-        /* best effort */
+    } catch (err: any) {
+      if (err.status === 1) {
+        try {
+          const unmerged = execSync("git diff --name-only --diff-filter=U", {
+            cwd: workDir,
+            encoding: "utf-8",
+            timeout: 10_000,
+          }).trim()
+          if (unmerged) {
+            conflictFiles.push(...unmerged.split("\n"))
+          }
+        } catch {
+          conflictFiles.push("(unknown files)")
+        }
+        log.warn({ branch, workDir, conflictFiles }, "merge conflict — leaving for agent to resolve")
+      } else {
+        log.error({ err, branch, workDir }, "merge of branch into worktree failed (non-conflict)")
+        try {
+          execSync("git merge --abort", { ...gitOpts, cwd: workDir })
+        } catch {
+          /* best effort */
+        }
+        return { ok: false, conflictFiles: [] }
       }
-      return false
     }
   }
 
-  return true
+  return { ok: conflictFiles.length === 0, conflictFiles }
 }

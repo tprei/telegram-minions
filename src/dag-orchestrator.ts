@@ -188,18 +188,26 @@ export class DagOrchestrator {
       return null
     }
 
+    let conflictFiles: string[] = []
     if (upstreamBranches.length > 1 && startBranch) {
       const additionalBranches = upstreamBranches.filter((b) => b !== startBranch)
       if (additionalBranches.length > 0) {
-        const mergeOk = this.ctx.mergeUpstreamBranches(cwd, additionalBranches)
-        if (!mergeOk) {
+        const mergeResult = this.ctx.mergeUpstreamBranches(cwd, additionalBranches)
+        if (!mergeResult.ok && mergeResult.conflictFiles.length === 0) {
           await this.ctx.telegram.sendMessage(
-            `❌ Merge conflict when combining upstream branches for <b>${node.title}</b>.`,
+            `❌ Failed to merge upstream branches for <b>${node.title}</b>.`,
             threadId,
           )
           await this.ctx.telegram.deleteForumTopic(threadId)
           await this.ctx.removeWorkspace({ cwd, repoUrl: parent.repoUrl } as TopicSession).catch(() => {})
           return null
+        }
+        conflictFiles = mergeResult.conflictFiles
+        if (conflictFiles.length > 0) {
+          await this.ctx.telegram.sendMessage(
+            `⚠️ Merge conflicts in ${conflictFiles.length} file(s) for <b>${esc(node.title)}</b> — agent will resolve.`,
+            threadId,
+          )
         }
       }
     }
@@ -219,6 +227,7 @@ export class DagOrchestrator {
       graph.nodes.map((n) => ({ id: n.id, title: n.title, description: n.description, dependsOn: n.dependsOn })),
       upstreamBranches,
       isStack,
+      conflictFiles,
     )
 
     const childSession: TopicSession = {

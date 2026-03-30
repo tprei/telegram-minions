@@ -186,6 +186,32 @@ describe("buildDagChildPrompt", () => {
     const prompt = buildDagChildPrompt(longConversation, node, [node], [], false)
     expect(prompt).toContain("[output truncated]")
   })
+
+  it("includes conflict resolution instructions when conflictFiles are provided", () => {
+    const node: DagInput = {
+      id: "c",
+      title: "Combine",
+      description: "Combine upstream work",
+      dependsOn: ["a", "b"],
+    }
+    const allNodes: DagInput[] = [
+      { id: "a", title: "A", description: "Do A", dependsOn: [] },
+      { id: "b", title: "B", description: "Do B", dependsOn: [] },
+      node,
+    ]
+    const prompt = buildDagChildPrompt(conversation, node, allNodes, ["minion/a", "minion/b"], false, ["test/format.test.ts", "src/format.ts"])
+    expect(prompt).toContain("Merge conflicts to resolve first")
+    expect(prompt).toContain("`test/format.test.ts`")
+    expect(prompt).toContain("`src/format.ts`")
+    expect(prompt).toContain("git add")
+    expect(prompt).toContain("git commit --no-edit")
+  })
+
+  it("omits conflict section when conflictFiles is empty", () => {
+    const node: DagInput = { id: "a", title: "A", description: "Do A", dependsOn: [] }
+    const prompt = buildDagChildPrompt(conversation, node, [node], [], false, [])
+    expect(prompt).not.toContain("Merge conflicts to resolve first")
+  })
 })
 
 describe("extractDagItems profile environment", () => {
