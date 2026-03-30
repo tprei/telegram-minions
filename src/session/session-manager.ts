@@ -135,6 +135,33 @@ export function buildExecutionPrompt(
 
 type GitOpts = { stdio: import("node:child_process").StdioOptions; timeout: number; env: NodeJS.ProcessEnv }
 
+let askpassPath: string | null = null
+
+function ensureGitAskpass(): string {
+  if (askpassPath && fs.existsSync(askpassPath)) return askpassPath
+
+  const script = [
+    "#!/bin/sh",
+    'case "$1" in',
+    '  Username*) echo "x-access-token" ;;',
+    '  Password*) echo "$GITHUB_TOKEN" ;;',
+    "esac",
+  ].join("\n")
+
+  const p = path.join(os.tmpdir(), "minion-git-askpass.sh")
+  fs.writeFileSync(p, script, { mode: 0o755 })
+  askpassPath = p
+  return p
+}
+
+function buildGitEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env, GIT_TERMINAL_PROMPT: "0" }
+  if (process.env.GITHUB_TOKEN) {
+    env.GIT_ASKPASS = ensureGitAskpass()
+  }
+  return env
+}
+
 function fetchBareRepo(bareDir: string, gitOpts: GitOpts): void {
   const excludeRefs: string[] = []
   try {
@@ -172,13 +199,12 @@ export function prepareWorkspace(
 
       const repoName = extractRepoName(repoUrl)
       const bareDir = path.join(reposDir, `${repoName}.git`)
-      const gitEnv = { ...process.env, GIT_TERMINAL_PROMPT: "0" }
       const stdio: import("node:child_process").StdioOptions = [
         "ignore",
         "pipe",
         "pipe",
       ]
-      const gitOpts = { stdio, timeout: 120_000, env: gitEnv }
+      const gitOpts = { stdio, timeout: 120_000, env: buildGitEnv() }
 
       if (fs.existsSync(bareDir)) {
         log.debug({ repoUrl, bareDir }, "fetching repo")
@@ -518,9 +544,8 @@ export function prepareFanInBranch(
 
   const repoName = extractRepoName(repoUrl)
   const bareDir = path.join(workspaceRoot, ".repos", `${repoName}.git`)
-  const gitEnv = { ...process.env, GIT_TERMINAL_PROMPT: "0" }
   const stdio: import("node:child_process").StdioOptions = ["ignore", "pipe", "pipe"]
-  const gitOpts = { stdio, timeout: 120_000, env: gitEnv }
+  const gitOpts = { stdio, timeout: 120_000, env: buildGitEnv() }
 
   try {
     fetchBareRepo(bareDir, gitOpts)
@@ -563,9 +588,8 @@ export function mergeUpstreamBranches(
   workDir: string,
   additionalBranches: string[],
 ): MergeResult {
-  const gitEnv = { ...process.env, GIT_TERMINAL_PROMPT: "0" }
   const stdio: import("node:child_process").StdioOptions = ["ignore", "pipe", "pipe"]
-  const gitOpts = { stdio, timeout: 120_000, env: gitEnv }
+  const gitOpts = { stdio, timeout: 120_000, env: buildGitEnv() }
 
   const conflictFiles: string[] = []
 
