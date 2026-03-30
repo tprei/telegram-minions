@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process"
 import { createInterface } from "node:readline"
+import { fileURLToPath } from "node:url"
 import fs from "node:fs"
 import path from "node:path"
 import type { GooseConfig, ClaudeConfig, McpConfig, ProviderProfile, AgentDefinitions } from "../config/config-types.js"
@@ -296,6 +297,11 @@ export class SessionHandle {
       NODE_PATH: process.env["NODE_PATH"] ?? "",
       GITHUB_TOKEN: process.env["GITHUB_TOKEN"] ?? "",
       GIT_TERMINAL_PROMPT: "0",
+      GIT_ASKPASS: process.env["GIT_ASKPASS"] ?? path.join(
+        path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../.."),
+        "scripts", "git-askpass.sh",
+      ),
+      GIT_CONFIG_GLOBAL: path.join(parentHome, ".gitconfig"),
       TMPDIR: sessionTmp,
       XDG_CONFIG_HOME: sessionConfig,
       XDG_CACHE_HOME: sessionCache,
