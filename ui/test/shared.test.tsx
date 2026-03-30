@@ -128,9 +128,9 @@ describe('getStatusColors', () => {
     expect(colors.skipped.border).toBe('#78716c')
   })
 
-  it('covers all five statuses', () => {
+  it('covers all statuses', () => {
     const colors = getStatusColors(false)
-    expect(Object.keys(colors)).toEqual(['pending', 'running', 'completed', 'failed', 'skipped'])
+    expect(Object.keys(colors)).toEqual(['pending', 'running', 'completed', 'failed', 'skipped', 'ci-pending', 'ci-failed', 'landed'])
   })
 
   it('each status has bg, border, and text', () => {

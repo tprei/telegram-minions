@@ -1,7 +1,7 @@
-import type { AttentionReason, MinionSession, DagNode } from '../types'
+import type { AttentionReason, DagNode, MinionSession } from '../types'
 import { useTelegram } from '../hooks'
 
-export type StatusType = MinionSession['status'] | 'skipped'
+export type StatusType = MinionSession['status'] | DagNode['status']
 
 export const STATUS_CONFIG: Record<StatusType, { emoji: string; label: string; className: string; darkClassName: string }> = {
   pending: {
@@ -34,6 +34,24 @@ export const STATUS_CONFIG: Record<StatusType, { emoji: string; label: string; c
     className: 'bg-stone-100 text-stone-700',
     darkClassName: 'bg-stone-800/50 text-stone-400',
   },
+  'ci-pending': {
+    emoji: '🔄',
+    label: 'CI Pending',
+    className: 'bg-yellow-100 text-yellow-700',
+    darkClassName: 'bg-yellow-900/50 text-yellow-300',
+  },
+  'ci-failed': {
+    emoji: '🔧',
+    label: 'CI Failed',
+    className: 'bg-orange-100 text-orange-700',
+    darkClassName: 'bg-orange-900/50 text-orange-300',
+  },
+  landed: {
+    emoji: '🏁',
+    label: 'Landed',
+    className: 'bg-emerald-100 text-emerald-700',
+    darkClassName: 'bg-emerald-900/50 text-emerald-300',
+  },
 }
 
 interface StatusBadgeProps {
@@ -42,7 +60,7 @@ interface StatusBadgeProps {
 
 export function StatusBadge({ status }: StatusBadgeProps) {
   const tg = useTelegram()
-  const config = STATUS_CONFIG[status]
+  const config = STATUS_CONFIG[status] || STATUS_CONFIG.pending
   const className = tg.darkMode ? config.darkClassName : config.className
 
   return (
@@ -92,7 +110,7 @@ interface AttentionBadgeProps {
 }
 
 export function AttentionBadge({ reason, darkMode }: AttentionBadgeProps) {
-  const config = ATTENTION_CONFIG[reason]
+  const config = ATTENTION_CONFIG[reason] || ATTENTION_CONFIG.idle_long
   const className = darkMode ? config.darkClassName : config.className
 
   return (
@@ -113,6 +131,9 @@ export function getStatusColors(isDark: boolean): Record<DagNodeStatus, { bg: st
       completed: { bg: '#064e3b', border: '#22c55e', text: '#86efac' },
       failed: { bg: '#7f1d1d', border: '#ef4444', text: '#fca5a5' },
       skipped: { bg: '#292524', border: '#78716c', text: '#a8a29e' },
+      'ci-pending': { bg: '#422006', border: '#f59e0b', text: '#fcd34d' },
+      'ci-failed': { bg: '#431407', border: '#f97316', text: '#fdba74' },
+      landed: { bg: '#022c22', border: '#059669', text: '#6ee7b7' },
     }
   }
   return {
@@ -121,6 +142,9 @@ export function getStatusColors(isDark: boolean): Record<DagNodeStatus, { bg: st
     completed: { bg: '#dcfce7', border: '#22c55e', text: '#166534' },
     failed: { bg: '#fee2e2', border: '#ef4444', text: '#991b1b' },
     skipped: { bg: '#f5f5f4', border: '#a8a29e', text: '#57534e' },
+    'ci-pending': { bg: '#fef3c7', border: '#f59e0b', text: '#92400e' },
+    'ci-failed': { bg: '#fff7ed', border: '#f97316', text: '#9a3412' },
+    landed: { bg: '#d1fae5', border: '#059669', text: '#065f46' },
   }
 }
 

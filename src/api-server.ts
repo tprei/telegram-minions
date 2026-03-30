@@ -58,7 +58,7 @@ export interface ApiSession {
 export interface ApiDagNode {
   id: string
   slug: string
-  status: "pending" | "running" | "completed" | "failed" | "skipped" | "ci-pending" | "ci-failed"
+  status: "pending" | "running" | "completed" | "failed" | "skipped" | "ci-pending" | "ci-failed" | "landed"
   dependencies: string[]
   dependents: string[]
   session?: ApiSession
