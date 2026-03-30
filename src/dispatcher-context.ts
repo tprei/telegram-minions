@@ -17,7 +17,7 @@ import type {
 import type { MinionConfig, McpConfig } from "./config-types.js"
 import type { DagGraph, DagNode, DagInput } from "./dag.js"
 import type { QualityReport } from "./quality-gates.js"
-import type { ActiveSession } from "./session-manager.js"
+import type { ActiveSession, MergeResult } from "./session-manager.js"
 import type { StatsTracker } from "./stats.js"
 import type { ProfileStore } from "./profile-store.js"
 import type { StateBroadcaster } from "./api-server.js"
@@ -71,7 +71,7 @@ export interface DispatcherContext {
   prepareFanInBranch(slug: string, repoUrl: string, upstreamBranches: string[]): Promise<string | null>
 
   /** Merge additional upstream branches into a worktree. */
-  mergeUpstreamBranches(workDir: string, additionalBranches: string[]): boolean
+  mergeUpstreamBranches(workDir: string, additionalBranches: string[]): MergeResult
 
   /** Download photos from Telegram. */
   downloadPhotos(photos: TelegramPhotoSize[] | undefined, cwd: string): Promise<string[]>

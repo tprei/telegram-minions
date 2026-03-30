@@ -67,7 +67,7 @@ function createMockContext(overrides: Partial<DispatcherContext> = {}): Dispatch
     removeWorkspace: async () => {},
     cleanBuildArtifacts: () => {},
     prepareFanInBranch: async () => null,
-    mergeUpstreamBranches: () => true,
+    mergeUpstreamBranches: () => ({ ok: true, conflictFiles: [] }),
     downloadPhotos: async () => [],
     pushToConversation: () => {},
     extractPRFromConversation: () => null,
@@ -159,7 +159,7 @@ describe("DispatcherContext", () => {
     expect(cwd).toBe("/tmp/test/workspace")
 
     await expect(ctx.removeWorkspace({} as TopicSession)).resolves.toBeUndefined()
-    expect(ctx.mergeUpstreamBranches("/tmp", ["branch-1"])).toBe(true)
+    expect(ctx.mergeUpstreamBranches("/tmp", ["branch-1"])).toEqual({ ok: true, conflictFiles: [] })
   })
 
   it("extractPRFromConversation returns null by default", () => {

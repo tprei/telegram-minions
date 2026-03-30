@@ -60,7 +60,7 @@ function makeContext(overrides: Partial<DispatcherContext> = {}): DispatcherCont
     removeWorkspace: vi.fn().mockResolvedValue(undefined),
     cleanBuildArtifacts: vi.fn(),
     prepareFanInBranch: vi.fn().mockResolvedValue(null),
-    mergeUpstreamBranches: vi.fn().mockReturnValue(true),
+    mergeUpstreamBranches: vi.fn().mockReturnValue({ ok: true, conflictFiles: [] }),
     downloadPhotos: vi.fn().mockResolvedValue([]),
     pushToConversation: vi.fn(),
     extractPRFromConversation: vi.fn().mockReturnValue(null),
@@ -309,7 +309,7 @@ describe("DagOrchestrator", () => {
       expect(ctx.mergeUpstreamBranches).toHaveBeenCalled()
     })
 
-    it("returns null when fan-in merge fails", async () => {
+    it("returns null when fan-in pre-flight fails (fetch error)", async () => {
       const parent = makeSession()
       const graph: DagGraph = {
         id: "dag-test",
@@ -323,6 +323,50 @@ describe("DagOrchestrator", () => {
       } as DagGraph
 
       vi.mocked(ctx.prepareFanInBranch).mockResolvedValue(null)
+
+      const threadId = await orchestrator.spawnDagChild(parent, graph, graph.nodes[2], false)
+      expect(threadId).toBeNull()
+    })
+
+    it("proceeds with conflict files when merge has conflicts", async () => {
+      const parent = makeSession()
+      const graph: DagGraph = {
+        id: "dag-test",
+        parentThreadId: 100,
+        repo: "org/repo",
+        nodes: [
+          { id: "a", title: "A", description: "", dependsOn: [], status: "done", branch: "minion/a", prUrl: "https://github.com/org/repo/pull/1" },
+          { id: "b", title: "B", description: "", dependsOn: [], status: "done", branch: "minion/b", prUrl: "https://github.com/org/repo/pull/2" },
+          { id: "c", title: "C", description: "", dependsOn: ["a", "b"], status: "running" },
+        ],
+      } as DagGraph
+
+      vi.mocked(ctx.prepareFanInBranch).mockResolvedValue("minion/a")
+      vi.mocked(ctx.mergeUpstreamBranches).mockReturnValue({ ok: false, conflictFiles: ["test/format.test.ts"] })
+
+      const threadId = await orchestrator.spawnDagChild(parent, graph, graph.nodes[2], false)
+      expect(threadId).toBe(200)
+      expect(ctx.spawnTopicAgent).toHaveBeenCalled()
+      const taskPrompt = vi.mocked(ctx.spawnTopicAgent).mock.calls[0][1]
+      expect(taskPrompt).toContain("Merge conflicts to resolve first")
+      expect(taskPrompt).toContain("test/format.test.ts")
+    })
+
+    it("returns null when merge fails with non-conflict error", async () => {
+      const parent = makeSession()
+      const graph: DagGraph = {
+        id: "dag-test",
+        parentThreadId: 100,
+        repo: "org/repo",
+        nodes: [
+          { id: "a", title: "A", description: "", dependsOn: [], status: "done", branch: "minion/a", prUrl: "https://github.com/org/repo/pull/1" },
+          { id: "b", title: "B", description: "", dependsOn: [], status: "done", branch: "minion/b", prUrl: "https://github.com/org/repo/pull/2" },
+          { id: "c", title: "C", description: "", dependsOn: ["a", "b"], status: "running" },
+        ],
+      } as DagGraph
+
+      vi.mocked(ctx.prepareFanInBranch).mockResolvedValue("minion/a")
+      vi.mocked(ctx.mergeUpstreamBranches).mockReturnValue({ ok: false, conflictFiles: [] })
 
       const threadId = await orchestrator.spawnDagChild(parent, graph, graph.nodes[2], false)
       expect(threadId).toBeNull()
