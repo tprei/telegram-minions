@@ -39,6 +39,7 @@ function makeSession(overrides: Partial<TopicSession> = {}): TopicSession {
 function makeContext(overrides: Partial<DispatcherContext> = {}): DispatcherContext {
   return {
     config: {
+      telegram: { chatId: "-1001234567890" },
       ci: { babysitEnabled: false, maxRetries: 2, pollIntervalMs: 100, pollTimeoutMs: 1000, dagCiPolicy: "skip" },
       workspace: { maxDagConcurrency: 3, maxConcurrentSessions: 5 },
     } as any,
@@ -263,6 +264,21 @@ describe("DagOrchestrator", () => {
       expect(childSession.dagId).toBe("dag-test")
       expect(childSession.dagNodeId).toBe("a")
       expect(childSession.mode).toBe("task")
+    })
+
+    it("sends starting message with clickable topic link", async () => {
+      const parent = makeSession()
+      const graph = makeGraph()
+      const node = graph.nodes[0]
+
+      await orchestrator.spawnDagChild(parent, graph, node, false)
+
+      const sendMsg = vi.mocked(ctx.telegram.sendMessage)
+      const startingCall = sendMsg.mock.calls.find(
+        c => typeof c[0] === "string" && c[0].includes("Starting"),
+      )
+      expect(startingCall).toBeDefined()
+      expect(startingCall![0]).toContain("https://t.me/c/1234567890/200")
     })
 
     it("returns null when topic creation fails", async () => {
@@ -522,6 +538,20 @@ describe("DagOrchestrator", () => {
       await orchestrator.onDagChildComplete(child, "completed")
 
       expect(ctx.telegram.sendMessage).not.toHaveBeenCalled()
+    })
+
+    it("sends completion message with clickable topic link", async () => {
+      const { child, graph } = setupDag()
+      vi.mocked(ctx.extractPRFromConversation).mockReturnValue("https://github.com/org/repo/pull/42")
+
+      await orchestrator.onDagChildComplete(child, "completed")
+
+      const sendMsg = vi.mocked(ctx.telegram.sendMessage)
+      const completeCall = sendMsg.mock.calls.find(
+        c => typeof c[0] === "string" && c[0].includes("child-slug") && c[0].includes("complete"),
+      )
+      expect(completeCall).toBeDefined()
+      expect(completeCall![0]).toContain("https://t.me/c/1234567890/200")
     })
 
     it("clears child conversation to free memory", async () => {

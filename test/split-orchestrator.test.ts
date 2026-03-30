@@ -21,6 +21,7 @@ vi.mock("../src/format.js", () => ({
 
 import { extractSplitItems } from "../src/split.js"
 import { extractStackItems } from "../src/dag-extract.js"
+import { formatSplitChildComplete } from "../src/format.js"
 
 const mockExtractSplitItems = vi.mocked(extractSplitItems)
 const mockExtractStackItems = vi.mocked(extractStackItems)
@@ -43,6 +44,7 @@ function makeSession(overrides: Partial<TopicSession> = {}): TopicSession {
 function makeContext(overrides: Partial<DispatcherContext> = {}): DispatcherContext {
   return {
     config: {
+      telegram: { chatId: "-1001234567890" },
       workspace: { maxSplitItems: 10, maxConcurrentSessions: 5 },
       ci: { babysitEnabled: true, maxRetries: 2, pollIntervalMs: 100, pollTimeoutMs: 1000, dagCiPolicy: "skip" },
     } as any,
@@ -226,6 +228,7 @@ describe("SplitOrchestrator", () => {
     it("truncates items exceeding maxSplitItems", async () => {
       ctx = makeContext({
         config: {
+          telegram: { chatId: "-1001234567890" },
           workspace: { maxSplitItems: 2, maxConcurrentSessions: 10 },
           ci: { babysitEnabled: true, maxRetries: 2, pollIntervalMs: 100, pollTimeoutMs: 1000, dagCiPolicy: "skip" },
         } as any,
@@ -369,6 +372,26 @@ describe("SplitOrchestrator", () => {
       expect(child.conversation).toEqual([])
       expect(child.prUrl).toBe("https://github.com/org/repo/pull/42")
       expect(ctx.updatePinnedSplitStatus).toHaveBeenCalledWith(parent)
+    })
+
+    it("passes threadId and chatId to formatSplitChildComplete", async () => {
+      const parent = makeSession({ threadId: 1, childThreadIds: [100] })
+      const child = makeSession({ threadId: 100, parentThreadId: 1, splitLabel: "Auth fix" })
+      ctx.topicSessions.set(1, parent)
+      ctx.topicSessions.set(100, child)
+
+      vi.mocked(ctx.extractPRFromConversation).mockReturnValue("https://github.com/org/repo/pull/42")
+
+      await orchestrator.notifyParentOfChildComplete(child, "completed")
+
+      expect(vi.mocked(formatSplitChildComplete)).toHaveBeenCalledWith(
+        "test-slug",
+        "completed",
+        "Auth fix",
+        "https://github.com/org/repo/pull/42",
+        100,
+        "-1001234567890",
+      )
     })
 
     it("spawns next queued item when a child completes", async () => {

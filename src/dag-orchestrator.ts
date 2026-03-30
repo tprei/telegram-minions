@@ -243,7 +243,7 @@ export class DagOrchestrator {
     this.ctx.broadcastSession(childSession, "session_created")
 
     await this.ctx.telegram.sendMessage(
-      formatDagNodeStarting(node.title, node.id, slug),
+      formatDagNodeStarting(node.title, node.id, slug, threadId, this.ctx.config.telegram.chatId),
       parent.threadId,
     )
 
@@ -282,7 +282,7 @@ export class DagOrchestrator {
             done: progress.done,
             total: progress.total,
             running: progress.running,
-          }),
+          }, childSession.threadId, this.ctx.config.telegram.chatId),
           parent.threadId,
         )
 
@@ -330,7 +330,7 @@ export class DagOrchestrator {
               done: progress.done,
               total: progress.total,
               running: progress.running,
-            }),
+            }, childSession.threadId, this.ctx.config.telegram.chatId),
             parent.threadId,
           )
 
@@ -354,7 +354,7 @@ export class DagOrchestrator {
                 done: progress.done,
                 total: progress.total,
                 running: progress.running,
-              }),
+              }, childSession.threadId, this.ctx.config.telegram.chatId),
               parent.threadId,
             )
 
@@ -390,7 +390,7 @@ export class DagOrchestrator {
                 done: progress.done,
                 total: progress.total,
                 running: progress.running,
-              }),
+              }, childSession.threadId, this.ctx.config.telegram.chatId),
               parent.threadId,
             )
           }

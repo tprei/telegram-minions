@@ -186,7 +186,7 @@ export class SplitOrchestrator {
     childSession.conversation = []
 
     await this.ctx.telegram.sendMessage(
-      formatSplitChildComplete(childSession.slug, state, label, prUrl),
+      formatSplitChildComplete(childSession.slug, state, label, prUrl, childSession.threadId, this.ctx.config.telegram.chatId),
       parent.threadId,
     )
 
