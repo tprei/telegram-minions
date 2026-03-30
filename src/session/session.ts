@@ -26,10 +26,15 @@ export interface SessionConfig {
   agentDefs?: AgentDefinitions
 }
 
-const PLAN_DISALLOWED_TOOLS = ["Edit", "Write", "NotebookEdit"]
-const THINK_DISALLOWED_TOOLS = ["Edit", "Write", "NotebookEdit"]
-const REVIEW_DISALLOWED_TOOLS = ["Edit", "Write", "NotebookEdit"]
-const SHIP_PLAN_DISALLOWED_TOOLS = ["Edit", "Write", "NotebookEdit"]
+const READONLY_DISALLOWED_TOOLS = ["Edit", "Write", "NotebookEdit"]
+
+interface SpawnClaudeOpts {
+  task: string
+  systemPrompt: string
+  model: string
+  disallowedTools?: string[]
+  detached?: boolean
+}
 
 type McpServerConfig = {
   command: string
@@ -63,6 +68,43 @@ export class SessionHandle {
     this.log = createSessionLogger(this.meta.topicName, this.meta.threadId, this.meta.sessionId)
   }
 
+  private static readonly claudeModeConfigs: Record<string, (cfg: SessionConfig) => Omit<SpawnClaudeOpts, "task">> = {
+    plan: (cfg) => ({
+      systemPrompt: DEFAULT_PLAN_PROMPT,
+      model: cfg.claude.planModel,
+      disallowedTools: READONLY_DISALLOWED_TOOLS,
+      detached: true,
+    }),
+    think: (cfg) => ({
+      systemPrompt: DEFAULT_THINK_PROMPT,
+      model: cfg.claude.thinkModel,
+      disallowedTools: READONLY_DISALLOWED_TOOLS,
+      detached: true,
+    }),
+    "ship-think": (cfg) => ({
+      systemPrompt: DEFAULT_THINK_PROMPT,
+      model: cfg.claude.thinkModel,
+      disallowedTools: READONLY_DISALLOWED_TOOLS,
+      detached: true,
+    }),
+    review: (cfg) => ({
+      systemPrompt: DEFAULT_REVIEW_PROMPT,
+      model: cfg.claude.reviewModel,
+      disallowedTools: READONLY_DISALLOWED_TOOLS,
+    }),
+    "ship-plan": (cfg) => ({
+      systemPrompt: DEFAULT_SHIP_PLAN_PROMPT,
+      model: cfg.claude.planModel,
+      disallowedTools: READONLY_DISALLOWED_TOOLS,
+      detached: true,
+    }),
+    "ship-verify": (cfg) => ({
+      systemPrompt: DEFAULT_SHIP_VERIFY_PROMPT,
+      model: cfg.claude.reviewModel,
+      detached: true,
+    }),
+  }
+
   start(task: string, systemPrompt?: string): void {
     setContext("session", {
       sessionId: this.meta.sessionId,
@@ -77,16 +119,9 @@ export class SessionHandle {
       data: { repo: this.meta.repo, sessionId: this.meta.sessionId },
     })
 
-    if ((this.meta.mode === "think" || this.meta.mode === "ship-think") && !systemPrompt) {
-      this.startClaudeThink(task)
-    } else if (this.meta.mode === "plan" && !systemPrompt) {
-      this.startClaude(task)
-    } else if (this.meta.mode === "ship-plan" && !systemPrompt) {
-      this.startClaudeShipPlan(task)
-    } else if (this.meta.mode === "ship-verify" && !systemPrompt) {
-      this.startClaudeShipVerify(task)
-    } else if (this.meta.mode === "review" && !systemPrompt) {
-      this.startClaudeReview(task)
+    const modeConfig = !systemPrompt ? SessionHandle.claudeModeConfigs[this.meta.mode] : undefined
+    if (modeConfig) {
+      this.spawnClaude({ task, ...modeConfig(this.sessionConfig) })
     } else {
       this.startGoose(task, systemPrompt)
     }
@@ -349,145 +384,29 @@ export class SessionHandle {
     this.attachProcessHandlers(this.parseGooseLine.bind(this))
   }
 
-  private startClaude(task: string): void {
+  private spawnClaude(opts: SpawnClaudeOpts): void {
     const env = this.buildIsolatedEnv()
 
-    this.process = spawn(
-      "claude",
-      [
-        "--print",
-        "--output-format", "stream-json",
-        "--verbose",
-        "--include-partial-messages",
-        "--dangerously-skip-permissions",
-        "--no-session-persistence",
-        "--disallowed-tools", ...PLAN_DISALLOWED_TOOLS,
-        ...this.buildClaudeMcpConfigArgs(),
-        "--append-system-prompt", DEFAULT_PLAN_PROMPT,
-        "--model", this.sessionConfig.claude.planModel,
-        task,
-      ],
-      {
-        cwd: this.meta.cwd,
-        env,
-        stdio: ["ignore", "pipe", "pipe"],
-        detached: true,
-      },
-    )
+    const args = [
+      "--print",
+      "--output-format", "stream-json",
+      "--verbose",
+      "--include-partial-messages",
+      "--dangerously-skip-permissions",
+      "--no-session-persistence",
+      ...(opts.disallowedTools ? ["--disallowed-tools", ...opts.disallowedTools] : []),
+      ...this.buildClaudeMcpConfigArgs(),
+      "--append-system-prompt", opts.systemPrompt,
+      "--model", opts.model,
+      opts.task,
+    ]
 
-    this.attachProcessHandlers(this.parseClaudeLine.bind(this))
-  }
-
-  private startClaudeThink(task: string): void {
-    const env = this.buildIsolatedEnv()
-
-    this.process = spawn(
-      "claude",
-      [
-        "--print",
-        "--output-format", "stream-json",
-        "--verbose",
-        "--include-partial-messages",
-        "--dangerously-skip-permissions",
-        "--no-session-persistence",
-        "--disallowed-tools", ...THINK_DISALLOWED_TOOLS,
-        ...this.buildClaudeMcpConfigArgs(),
-        "--append-system-prompt", DEFAULT_THINK_PROMPT,
-        "--model", this.sessionConfig.claude.thinkModel,
-        task,
-      ],
-      {
-        cwd: this.meta.cwd,
-        env,
-        stdio: ["ignore", "pipe", "pipe"],
-        detached: true,
-      },
-    )
-
-    this.attachProcessHandlers(this.parseClaudeLine.bind(this))
-  }
-
-  private startClaudeReview(task: string): void {
-    const env = this.buildIsolatedEnv()
-
-    this.process = spawn(
-      "claude",
-      [
-        "--print",
-        "--output-format", "stream-json",
-        "--verbose",
-        "--include-partial-messages",
-        "--dangerously-skip-permissions",
-        "--no-session-persistence",
-        "--disallowed-tools", ...REVIEW_DISALLOWED_TOOLS,
-        ...this.buildClaudeMcpConfigArgs(),
-        "--append-system-prompt", DEFAULT_REVIEW_PROMPT,
-        "--model", this.sessionConfig.claude.reviewModel,
-        task,
-      ],
-      {
-        cwd: this.meta.cwd,
-        env,
-        stdio: ["ignore", "pipe", "pipe"],
-      },
-    )
-
-    this.attachProcessHandlers(this.parseClaudeLine.bind(this))
-  }
-
-  private startClaudeShipPlan(task: string): void {
-    const env = this.buildIsolatedEnv()
-
-    this.process = spawn(
-      "claude",
-      [
-        "--print",
-        "--output-format", "stream-json",
-        "--verbose",
-        "--include-partial-messages",
-        "--dangerously-skip-permissions",
-        "--no-session-persistence",
-        "--disallowed-tools", ...SHIP_PLAN_DISALLOWED_TOOLS,
-        ...this.buildClaudeMcpConfigArgs(),
-        "--append-system-prompt", DEFAULT_SHIP_PLAN_PROMPT,
-        "--model", this.sessionConfig.claude.planModel,
-        task,
-      ],
-      {
-        cwd: this.meta.cwd,
-        env,
-        stdio: ["ignore", "pipe", "pipe"],
-        detached: true,
-      },
-    )
-
-    this.attachProcessHandlers(this.parseClaudeLine.bind(this))
-  }
-
-  private startClaudeShipVerify(task: string): void {
-    const env = this.buildIsolatedEnv()
-
-    this.process = spawn(
-      "claude",
-      [
-        "--print",
-        "--output-format", "stream-json",
-        "--verbose",
-        "--include-partial-messages",
-        "--dangerously-skip-permissions",
-        "--no-session-persistence",
-        ...this.buildClaudeMcpConfigArgs(),
-        "--append-system-prompt", DEFAULT_SHIP_VERIFY_PROMPT,
-        "--model", this.sessionConfig.claude.reviewModel,
-        task,
-      ],
-      {
-        cwd: this.meta.cwd,
-        env,
-        stdio: ["ignore", "pipe", "pipe"],
-        detached: true,
-      },
-    )
+    this.process = spawn("claude", args, {
+      cwd: this.meta.cwd,
+      env,
+      stdio: ["ignore", "pipe", "pipe"],
+      ...(opts.detached ? { detached: true } : {}),
+    })
 
     this.attachProcessHandlers(this.parseClaudeLine.bind(this))
   }
