@@ -55,19 +55,21 @@ export class CIBabysitter {
   }
 
   /**
-   * Run all deferred babysit entries for a parent session sequentially.
+   * Run all deferred babysit entries for a parent session in parallel.
    */
   async runDeferredBabysit(parentThreadId: number): Promise<void> {
     const entries = this.pendingBabysitPRs.get(parentThreadId)
     if (!entries || entries.length === 0) return
     this.pendingBabysitPRs.delete(parentThreadId)
 
-    for (const { childSession, prUrl, qualityReport } of entries) {
-      await this.babysitPR(childSession, prUrl, qualityReport).catch((err) => {
-        log.error({ err, prUrl }, "deferred babysitPR error")
-        captureException(err, { operation: "deferredBabysitPR", prUrl })
-      })
-    }
+    await Promise.allSettled(
+      entries.map(({ childSession, prUrl, qualityReport }) =>
+        this.babysitPR(childSession, prUrl, qualityReport).catch((err) => {
+          log.error({ err, prUrl }, "deferred babysitPR error")
+          captureException(err, { operation: "deferredBabysitPR", prUrl })
+        }),
+      ),
+    )
   }
 
   /**

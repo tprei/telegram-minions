@@ -440,6 +440,34 @@ describe("waitForCI", () => {
     expect(result.checks).toEqual([])
   })
 
+  it("uses exponential backoff between polls", async () => {
+    const pollTimes: number[] = []
+    let callCount = 0
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockExecFile.mockImplementation((...allArgs: any[]) => {
+      callCount++
+      pollTimes.push(Date.now())
+      const cb = allArgs[allArgs.length - 1] as (err: Error | null, stdout: string, stderr: string) => void
+      if (callCount < 4) {
+        cb(null, JSON.stringify([{ name: "test", state: "pending", bucket: "pending" }]), "")
+      } else {
+        cb(null, JSON.stringify([{ name: "test", state: "success", bucket: "pass" }]), "")
+      }
+      return undefined as any // eslint-disable-line @typescript-eslint/no-explicit-any
+    })
+
+    const backoffConfig: CiConfig = { ...testConfig, pollIntervalMs: 20, pollTimeoutMs: 5000 }
+    const result = await waitForCI("https://github.com/org/repo/pull/1", "/tmp", backoffConfig)
+
+    expect(result.passed).toBe(true)
+    expect(callCount).toBe(4)
+
+    // Verify delays grow: gap between poll 2-3 should be >= gap between poll 1-2
+    const gap1 = pollTimes[1] - pollTimes[0]
+    const gap2 = pollTimes[2] - pollTimes[1]
+    expect(gap2).toBeGreaterThanOrEqual(gap1)
+  })
+
   it("aborts immediately on terminal error without retrying", async () => {
     let callCount = 0
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

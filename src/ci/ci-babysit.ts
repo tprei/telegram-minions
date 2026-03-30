@@ -88,11 +88,13 @@ export async function findPRByBranch(branch: string, cwd: string): Promise<strin
 }
 
 export async function waitForCI(prUrl: string, cwd: string, ciConfig: CiConfig): Promise<CIWaitResult> {
-  const intervalMs = ciConfig.pollIntervalMs
+  const baseIntervalMs = ciConfig.pollIntervalMs
+  const maxIntervalMs = Math.max(baseIntervalMs, 30_000)
   const timeoutMs = ciConfig.pollTimeoutMs
   const noChecksGraceMs = ciConfig.noChecksGraceMs ?? 120_000
   const startedAt = Date.now()
   let emptyChecksSince: number | null = null
+  let pollCount = 0
 
   while (Date.now() - startedAt < timeoutMs) {
     const result = await getCheckStatus(prUrl, cwd)
@@ -119,7 +121,9 @@ export async function waitForCI(prUrl: string, cwd: string, ciConfig: CiConfig):
       }
     }
 
-    await sleep(intervalMs)
+    const delay = Math.min(baseIntervalMs * 2 ** pollCount, maxIntervalMs)
+    pollCount++
+    await sleep(delay)
   }
 
   const finalResult = await getCheckStatus(prUrl, cwd)

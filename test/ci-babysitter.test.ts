@@ -164,6 +164,45 @@ describe("CIBabysitter", () => {
       // Queue should be cleared regardless
       expect(babysitter.pendingBabysitPRs.has(1)).toBe(false)
     })
+
+    it("runs entries in parallel, not sequentially", async () => {
+      const session1 = makeSession({ threadId: 100 })
+      const session2 = makeSession({ threadId: 200 })
+      mockCheckPRMergeability.mockResolvedValue("MERGEABLE")
+
+      const callOrder: number[] = []
+      let resolveFirst: () => void
+      let resolveSecond: () => void
+      const firstBlock = new Promise<void>((r) => { resolveFirst = r })
+      const secondBlock = new Promise<void>((r) => { resolveSecond = r })
+
+      mockWaitForCI
+        .mockImplementationOnce(async () => {
+          callOrder.push(1)
+          await firstBlock
+          return { passed: true, checks: [], timedOut: false }
+        })
+        .mockImplementationOnce(async () => {
+          callOrder.push(2)
+          await secondBlock
+          return { passed: true, checks: [], timedOut: false }
+        })
+
+      babysitter.queueDeferredBabysit(1, { childSession: session1, prUrl: "https://github.com/org/repo/pull/1" })
+      babysitter.queueDeferredBabysit(1, { childSession: session2, prUrl: "https://github.com/org/repo/pull/2" })
+
+      const promise = babysitter.runDeferredBabysit(1)
+
+      // Wait a tick for both to start
+      await new Promise((r) => setTimeout(r, 10))
+
+      // Both should have started (parallel), not just the first (sequential)
+      expect(callOrder).toEqual([1, 2])
+
+      resolveFirst!()
+      resolveSecond!()
+      await promise
+    })
   })
 
   describe("babysitPR", () => {
