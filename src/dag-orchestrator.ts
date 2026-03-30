@@ -1,4 +1,4 @@
-import { execSync } from "node:child_process"
+import { execFileSync } from "node:child_process"
 import crypto from "node:crypto"
 import type { DispatcherContext } from "./dispatcher-context.js"
 import type { TopicSession } from "./types.js"
@@ -208,7 +208,7 @@ export class DagOrchestrator {
     node.branch = branch
 
     try {
-      node.mergeBase = execSync("git rev-parse HEAD", { cwd, encoding: "utf-8", timeout: 10_000 }).trim()
+      node.mergeBase = execFileSync("git", ["rev-parse", "HEAD"], { cwd, encoding: "utf-8", timeout: 10_000 }).trim()
     } catch {
       log.warn({ dagId: graph.id, nodeId: node.id }, "failed to record mergeBase")
     }
@@ -271,61 +271,14 @@ export class DagOrchestrator {
 
     childSession.conversation = []
 
-    if (state === "errored" || state === "failed") {
-      const skipped = failNode(graph, node.id)
-      node.error = "Session errored"
-
-      const progress = dagProgress(graph)
-      await this.ctx.telegram.sendMessage(
-        formatDagNodeComplete(childSession.slug, state, node.title, prUrl, {
-          done: progress.done,
-          total: progress.total,
-          running: progress.running,
-        }),
-        parent.threadId,
-      )
-
-      for (const skippedId of skipped) {
-        const skippedNode = graph.nodes.find((n) => n.id === skippedId)!
-        await this.ctx.telegram.sendMessage(
-          formatDagNodeSkipped(skippedNode.title, `upstream "${node.id}" failed`),
-          parent.threadId,
-        )
-      }
-    } else {
-      let resolvedPrUrl = prUrl
-      if (!resolvedPrUrl && node.branch) {
-        resolvedPrUrl = (await findPRByBranch(node.branch, childSession.cwd)) ?? undefined
-      }
-
-      if (!resolvedPrUrl && !node.recoveryAttempted) {
-        node.recoveryAttempted = true
-
-        await this.ctx.telegram.sendMessage(
-          `⚠️ <b>${esc(childSession.slug)}</b> completed without a PR — spawning recovery session…`,
-          parent.threadId,
-        )
-
-        const recoveryTask = [
-          `## Recovery task`,
-          `The previous session was assigned: "${node.title}"`,
-          node.description ? `\nDescription: ${node.description}` : "",
-          `\nIt completed without opening a pull request. Check the workspace, fix any issues, and create a PR.`,
-        ].join("\n")
-
-        childSession.conversation = [{ role: "user", text: recoveryTask }]
-        await this.ctx.spawnTopicAgent(childSession, recoveryTask, undefined, DEFAULT_RECOVERY_PROMPT)
-        await this.ctx.persistTopicSessions()
-        return
-      }
-
-      if (!resolvedPrUrl) {
+    try {
+      if (state === "errored" || state === "failed") {
         const skipped = failNode(graph, node.id)
-        node.error = "Completed without opening a PR"
+        node.error = "Session errored"
 
         const progress = dagProgress(graph)
         await this.ctx.telegram.sendMessage(
-          formatDagNodeComplete(childSession.slug, "failed", node.title, undefined, {
+          formatDagNodeComplete(childSession.slug, state, node.title, prUrl, {
             done: progress.done,
             total: progress.total,
             running: progress.running,
@@ -336,20 +289,44 @@ export class DagOrchestrator {
         for (const skippedId of skipped) {
           const skippedNode = graph.nodes.find((n) => n.id === skippedId)!
           await this.ctx.telegram.sendMessage(
-            formatDagNodeSkipped(skippedNode.title, `upstream "${node.id}" completed without PR`),
+            formatDagNodeSkipped(skippedNode.title, `upstream "${node.id}" failed`),
             parent.threadId,
           )
         }
       } else {
-        node.prUrl = resolvedPrUrl
+        let resolvedPrUrl = prUrl
+        if (!resolvedPrUrl && node.branch) {
+          resolvedPrUrl = (await findPRByBranch(node.branch, childSession.cwd)) ?? undefined
+        }
 
-        const ciPolicy = this.ctx.config.ci.dagCiPolicy
-        if (ciPolicy !== "skip" && this.ctx.config.ci.babysitEnabled && resolvedPrUrl) {
-          node.status = "ci-pending"
+        if (!resolvedPrUrl && !node.recoveryAttempted) {
+          node.recoveryAttempted = true
+
+          await this.ctx.telegram.sendMessage(
+            `⚠️ <b>${esc(childSession.slug)}</b> completed without a PR — spawning recovery session…`,
+            parent.threadId,
+          )
+
+          const recoveryTask = [
+            `## Recovery task`,
+            `The previous session was assigned: "${node.title}"`,
+            node.description ? `\nDescription: ${node.description}` : "",
+            `\nIt completed without opening a pull request. Check the workspace, fix any issues, and create a PR.`,
+          ].join("\n")
+
+          childSession.conversation = [{ role: "user", text: recoveryTask }]
+          await this.ctx.spawnTopicAgent(childSession, recoveryTask, undefined, DEFAULT_RECOVERY_PROMPT)
+          await this.ctx.persistTopicSessions()
+          return
+        }
+
+        if (!resolvedPrUrl) {
+          const skipped = failNode(graph, node.id)
+          node.error = "Completed without opening a PR"
 
           const progress = dagProgress(graph)
           await this.ctx.telegram.sendMessage(
-            formatDagNodeComplete(childSession.slug, state, node.title, resolvedPrUrl, {
+            formatDagNodeComplete(childSession.slug, "failed", node.title, undefined, {
               done: progress.done,
               total: progress.total,
               running: progress.running,
@@ -357,90 +334,136 @@ export class DagOrchestrator {
             parent.threadId,
           )
 
-          await this.ctx.telegram.sendMessage(
-            formatDagCIWaiting(childSession.slug, node.title, resolvedPrUrl),
-            parent.threadId,
-          )
-
-          const ciBabysitResult = await this.ctx.babysitDagChildCI(childSession, resolvedPrUrl)
-
-          if (ciBabysitResult) {
-            node.status = "done"
-          } else if (ciPolicy === "warn") {
-            node.status = "done"
+          for (const skippedId of skipped) {
+            const skippedNode = graph.nodes.find((n) => n.id === skippedId)!
             await this.ctx.telegram.sendMessage(
-              formatDagCIFailed(childSession.slug, node.title, resolvedPrUrl, ciPolicy),
-              parent.threadId,
-            )
-          } else {
-            node.status = "ci-failed"
-            node.error = "CI checks failed"
-            await this.ctx.telegram.sendMessage(
-              formatDagCIFailed(childSession.slug, node.title, resolvedPrUrl, ciPolicy),
+              formatDagNodeSkipped(skippedNode.title, `upstream "${node.id}" completed without PR`),
               parent.threadId,
             )
           }
         } else {
-          node.status = "done"
+          node.prUrl = resolvedPrUrl
 
-          const progress = dagProgress(graph)
-          await this.ctx.telegram.sendMessage(
-            formatDagNodeComplete(childSession.slug, state, node.title, resolvedPrUrl, {
-              done: progress.done,
-              total: progress.total,
-              running: progress.running,
-            }),
-            parent.threadId,
-          )
-        }
+          const ciPolicy = this.ctx.config.ci.dagCiPolicy
+          if (ciPolicy !== "skip" && this.ctx.config.ci.babysitEnabled && resolvedPrUrl) {
+            node.status = "ci-pending"
 
-        if (node.status === "done") {
-          const newlyReady = advanceDag(graph)
-          if (newlyReady.length > 0) {
-            const isStack = !graph.nodes.some((n) => n.dependsOn.length > 1) &&
-              graph.nodes.every((n, i) => i === 0 || n.dependsOn.length === 1)
-            await this.scheduleDagNodes(parent, graph, isStack)
+            const progress = dagProgress(graph)
+            await this.ctx.telegram.sendMessage(
+              formatDagNodeComplete(childSession.slug, state, node.title, resolvedPrUrl, {
+                done: progress.done,
+                total: progress.total,
+                running: progress.running,
+              }),
+              parent.threadId,
+            )
+
+            await this.ctx.telegram.sendMessage(
+              formatDagCIWaiting(childSession.slug, node.title, resolvedPrUrl),
+              parent.threadId,
+            )
+
+            const ciBabysitResult = await this.ctx.babysitDagChildCI(childSession, resolvedPrUrl)
+
+            if (ciBabysitResult) {
+              node.status = "done"
+            } else if (ciPolicy === "warn") {
+              node.status = "done"
+              await this.ctx.telegram.sendMessage(
+                formatDagCIFailed(childSession.slug, node.title, resolvedPrUrl, ciPolicy),
+                parent.threadId,
+              )
+            } else {
+              node.status = "ci-failed"
+              node.error = "CI checks failed"
+              await this.ctx.telegram.sendMessage(
+                formatDagCIFailed(childSession.slug, node.title, resolvedPrUrl, ciPolicy),
+                parent.threadId,
+              )
+            }
+          } else {
+            node.status = "done"
+
+            const progress = dagProgress(graph)
+            await this.ctx.telegram.sendMessage(
+              formatDagNodeComplete(childSession.slug, state, node.title, resolvedPrUrl, {
+                done: progress.done,
+                total: progress.total,
+                running: progress.running,
+              }),
+              parent.threadId,
+            )
           }
         }
+      }
+    } catch (err) {
+      log.error({ err, nodeId: node.id, dagId: graph.id }, "DAG child completion error — recovering node status")
+      captureException(err, { operation: "onDagChildComplete", nodeId: node.id, dagId: graph.id })
+
+      if (node.status === "running" || node.status === "ci-pending") {
+        const resolvedPr = prUrl ?? node.prUrl
+        if (resolvedPr) {
+          node.prUrl = resolvedPr
+          node.status = "done"
+        } else {
+          failNode(graph, node.id)
+          node.error = `Internal error: ${err instanceof Error ? err.message : String(err)}`
+        }
+      }
+    }
+
+    if (node.status === "done") {
+      try {
+        const newlyReady = advanceDag(graph)
+        if (newlyReady.length > 0) {
+          const isStack = !graph.nodes.some((n) => n.dependsOn.length > 1) &&
+            graph.nodes.every((n, i) => i === 0 || n.dependsOn.length === 1)
+          await this.scheduleDagNodes(parent, graph, isStack)
+        }
+      } catch (err) {
+        log.error({ err, dagId: graph.id }, "DAG advancement failed")
       }
     }
 
     this.ctx.broadcastDag(graph, "dag_updated")
 
-    await this.ctx.updatePinnedDagStatus(parent, graph)
-
-    await this.updateDagPRDescriptions(graph, childSession.cwd)
+    try { await this.ctx.updatePinnedDagStatus(parent, graph) } catch { /* non-critical */ }
+    try { await this.updateDagPRDescriptions(graph, childSession.cwd) } catch { /* non-critical */ }
 
     if (isDagComplete(graph)) {
-      const progress = dagProgress(graph)
-      const totalFailed = progress.failed + progress.ciFailed
-      await this.ctx.telegram.sendMessage(
-        formatDagAllDone(progress.done, progress.total, totalFailed),
-        parent.threadId,
-      )
+      try {
+        const progress = dagProgress(graph)
+        const totalFailed = progress.failed + progress.ciFailed
+        await this.ctx.telegram.sendMessage(
+          formatDagAllDone(progress.done, progress.total, totalFailed),
+          parent.threadId,
+        )
 
-      await this.ctx.runDeferredBabysit(parent.threadId)
+        await this.ctx.runDeferredBabysit(parent.threadId)
 
-      if (parent.autoAdvance?.phase === "dag") {
-        if (totalFailed > 0) {
-          parent.autoAdvance.phase = "done"
+        if (parent.autoAdvance?.phase === "dag") {
+          if (totalFailed > 0) {
+            parent.autoAdvance.phase = "done"
+            await this.ctx.updateTopicTitle(parent, "⚠️")
+            await this.ctx.telegram.sendMessage(
+              `🚢 Ship pipeline halted: ${totalFailed} DAG node(s) failed. Use <code>/retry</code> to fix failed nodes.`,
+              parent.threadId,
+            )
+          } else {
+            await this.ctx.shipAdvanceToVerification(parent, graph)
+          }
+        } else if (totalFailed > 0) {
           await this.ctx.updateTopicTitle(parent, "⚠️")
           await this.ctx.telegram.sendMessage(
-            `🚢 Ship pipeline halted: ${totalFailed} DAG node(s) failed. Use <code>/retry</code> to fix failed nodes.`,
+            `Send <code>/retry</code> to retry failed nodes, <code>/force node-id</code> to advance past CI failures, or <code>/close</code> to finish.`,
             parent.threadId,
           )
         } else {
-          await this.ctx.shipAdvanceToVerification(parent, graph)
+          await this.ctx.updateTopicTitle(parent, "✅")
+          await this.ctx.closeChildSessions(parent)
         }
-      } else if (totalFailed > 0) {
-        await this.ctx.updateTopicTitle(parent, "⚠️")
-        await this.ctx.telegram.sendMessage(
-          `Send <code>/retry</code> to retry failed nodes, <code>/force node-id</code> to advance past CI failures, or <code>/close</code> to finish.`,
-          parent.threadId,
-        )
-      } else {
-        await this.ctx.updateTopicTitle(parent, "✅")
-        await this.ctx.closeChildSessions(parent)
+      } catch (err) {
+        log.error({ err, dagId: graph.id }, "DAG completion handling failed")
       }
     }
 
@@ -454,16 +477,23 @@ export class DagOrchestrator {
     for (const node of nodesWithPRs) {
       try {
         const dagSection = renderDagForGitHub(graph, node.id)
+        const prNumber = node.prUrl!.match(/\/pull\/(\d+)/)?.[1]
+        if (!prNumber) continue
 
-        const currentBody = execSync(
-          `gh pr view ${JSON.stringify(node.prUrl!)} --json body --jq .body`,
-          { cwd, stdio: ["pipe", "pipe", "pipe"], timeout: 30_000, env: { ...process.env } },
-        ).toString()
+        const repoMatch = node.prUrl!.match(/github\.com\/([^/]+\/[^/]+)\/pull\//)
+        const repoFlag = repoMatch ? ["--repo", repoMatch[1]] : []
+
+        const currentBody = execFileSync(
+          "gh",
+          ["pr", "view", prNumber, ...repoFlag, "--json", "body", "--jq", ".body"],
+          { cwd, stdio: ["pipe", "pipe", "pipe"], timeout: 30_000, encoding: "utf-8", env: { ...process.env } },
+        )
 
         const newBody = upsertDagSection(currentBody, dagSection)
 
-        execSync(
-          `gh pr edit ${JSON.stringify(node.prUrl!)} --body-file -`,
+        execFileSync(
+          "gh",
+          ["pr", "edit", prNumber, ...repoFlag, "--body-file", "-"],
           { input: newBody, cwd, stdio: ["pipe", "pipe", "pipe"], timeout: 30_000, env: { ...process.env } },
         )
       } catch (err) {

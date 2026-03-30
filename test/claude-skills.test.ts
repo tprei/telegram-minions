@@ -21,6 +21,10 @@ function parseSkillFrontmatter(content: string): Record<string, string> {
   return fields
 }
 
+function skillMdPath(skill: string): string {
+  return path.join(SKILLS_DIR, skill, `${skill}.md`)
+}
+
 describe("Claude Code skills", () => {
   it("skills directory exists", () => {
     expect(fs.existsSync(SKILLS_DIR)).toBe(true)
@@ -28,10 +32,11 @@ describe("Claude Code skills", () => {
   })
 
   for (const skill of REQUIRED_SKILLS) {
-    describe(`${skill}.md`, () => {
-      const filePath = path.join(SKILLS_DIR, `${skill}.md`)
+    describe(`${skill}`, () => {
+      const filePath = skillMdPath(skill)
 
-      it("exists", () => {
+      it("exists as a directory with a .md file", () => {
+        expect(fs.existsSync(path.join(SKILLS_DIR, skill))).toBe(true)
         expect(fs.existsSync(filePath)).toBe(true)
       })
 
@@ -45,7 +50,7 @@ describe("Claude Code skills", () => {
         }
       })
 
-      it("has name matching filename", () => {
+      it("has name matching directory name", () => {
         const content = fs.readFileSync(filePath, "utf-8")
         const frontmatter = parseSkillFrontmatter(content)
         expect(frontmatter["name"]).toBe(skill)
@@ -71,18 +76,26 @@ describe("Claude Code skills", () => {
   }
 
   it("skill names are unique", () => {
-    const files = fs.readdirSync(SKILLS_DIR).filter(f => f.endsWith(".md"))
-    const names = files.map(f => {
-      const content = fs.readFileSync(path.join(SKILLS_DIR, f), "utf-8")
+    const dirs = fs.readdirSync(SKILLS_DIR).filter(f =>
+      fs.statSync(path.join(SKILLS_DIR, f)).isDirectory(),
+    )
+    const names = dirs.map(d => {
+      const mdFile = path.join(SKILLS_DIR, d, `${d}.md`)
+      if (!fs.existsSync(mdFile)) return undefined
+      const content = fs.readFileSync(mdFile, "utf-8")
       return parseSkillFrontmatter(content)["name"]
-    })
+    }).filter(Boolean)
     expect(new Set(names).size).toBe(names.length)
   })
 
   it("no skill contains secrets or .env references to read", () => {
-    const files = fs.readdirSync(SKILLS_DIR).filter(f => f.endsWith(".md"))
-    for (const file of files) {
-      const content = fs.readFileSync(path.join(SKILLS_DIR, file), "utf-8")
+    const dirs = fs.readdirSync(SKILLS_DIR).filter(f =>
+      fs.statSync(path.join(SKILLS_DIR, f)).isDirectory(),
+    )
+    for (const dir of dirs) {
+      const mdFile = path.join(SKILLS_DIR, dir, `${dir}.md`)
+      if (!fs.existsSync(mdFile)) continue
+      const content = fs.readFileSync(mdFile, "utf-8")
       expect(content).not.toMatch(/cat \.env/)
       expect(content).not.toMatch(/echo \$\w*TOKEN/)
       expect(content).not.toMatch(/echo \$\w*KEY/)

@@ -160,10 +160,14 @@ describe("injectAgentFiles", () => {
   })
 
   describe("skills injection", () => {
-    it("copies skill .md files into .claude/skills/", () => {
+    it("copies skill subdirectories into .claude/skills/", () => {
       const skillsDir = makeTmpDir()
-      fs.writeFileSync(path.join(skillsDir, "commit.md"), "# Commit Skill")
-      fs.writeFileSync(path.join(skillsDir, "explore.md"), "# Explore Skill")
+      const commitDir = path.join(skillsDir, "commit")
+      const exploreDir = path.join(skillsDir, "explore")
+      fs.mkdirSync(commitDir)
+      fs.mkdirSync(exploreDir)
+      fs.writeFileSync(path.join(commitDir, "commit.md"), "# Commit Skill")
+      fs.writeFileSync(path.join(exploreDir, "explore.md"), "# Explore Skill")
       fs.writeFileSync(path.join(skillsDir, "not-md.txt"), "ignored")
 
       const result = injectAgentFiles(tmpDir, { skillsDir })
@@ -171,26 +175,28 @@ describe("injectAgentFiles", () => {
       expect(result.skills).toBe(2)
       const injectedDir = path.join(tmpDir, ".claude", "skills")
       expect(fs.existsSync(injectedDir)).toBe(true)
-      expect(fs.readFileSync(path.join(injectedDir, "commit.md"), "utf8")).toBe("# Commit Skill")
-      expect(fs.readFileSync(path.join(injectedDir, "explore.md"), "utf8")).toBe("# Explore Skill")
+      expect(fs.readFileSync(path.join(injectedDir, "commit", "commit.md"), "utf8")).toBe("# Commit Skill")
+      expect(fs.readFileSync(path.join(injectedDir, "explore", "explore.md"), "utf8")).toBe("# Explore Skill")
       expect(fs.existsSync(path.join(injectedDir, "not-md.txt"))).toBe(false)
 
       cleanup(skillsDir)
     })
 
-    it("does not overwrite existing skill files", () => {
+    it("does not overwrite existing skill directories", () => {
       const skillsDir = makeTmpDir()
-      fs.writeFileSync(path.join(skillsDir, "commit.md"), "new content")
+      const srcCommit = path.join(skillsDir, "commit")
+      fs.mkdirSync(srcCommit)
+      fs.writeFileSync(path.join(srcCommit, "commit.md"), "new content")
 
-      // Pre-create the skill in the workspace
+      // Pre-create the skill directory in the workspace
       const existingDir = path.join(tmpDir, ".claude", "skills")
-      fs.mkdirSync(existingDir, { recursive: true })
-      fs.writeFileSync(path.join(existingDir, "commit.md"), "existing content")
+      fs.mkdirSync(path.join(existingDir, "commit"), { recursive: true })
+      fs.writeFileSync(path.join(existingDir, "commit", "commit.md"), "existing content")
 
       const result = injectAgentFiles(tmpDir, { skillsDir })
 
       expect(result.skills).toBe(0)
-      const content = fs.readFileSync(path.join(existingDir, "commit.md"), "utf8")
+      const content = fs.readFileSync(path.join(existingDir, "commit", "commit.md"), "utf8")
       expect(content).toBe("existing content")
 
       cleanup(skillsDir)
@@ -201,9 +207,9 @@ describe("injectAgentFiles", () => {
 
       expect(result.skills).toBeGreaterThan(0)
       const skillsDir = path.join(tmpDir, ".claude", "skills")
-      const files = fs.readdirSync(skillsDir)
-      expect(files).toContain("commit.md")
-      expect(files).toContain("explore.md")
+      const entries = fs.readdirSync(skillsDir)
+      expect(entries).toContain("commit")
+      expect(entries).toContain("explore")
     })
   })
 
@@ -230,13 +236,11 @@ describe("injectAgentFiles", () => {
   })
 
   describe("default settings.json injection", () => {
-    it("injects default settings.json from assets/", () => {
+    it("does not inject settings.json when no agentDefs provided", () => {
       const result = injectAgentFiles(tmpDir)
-      expect(result.settingsJson).toBe(true)
+      expect(result.settingsJson).toBe(false)
       const settingsPath = path.join(tmpDir, ".claude", "settings.json")
-      expect(fs.existsSync(settingsPath)).toBe(true)
-      const content = JSON.parse(fs.readFileSync(settingsPath, "utf8"))
-      expect(content).toBeDefined()
+      expect(fs.existsSync(settingsPath)).toBe(false)
     })
   })
 

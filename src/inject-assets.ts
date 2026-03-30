@@ -60,6 +60,29 @@ function copyMdFiles(srcDir: string, dstDir: string): number {
 }
 
 /**
+ * Copy skill subdirectories from a source directory into a destination directory.
+ * Each skill is a subdirectory — loose files at the top level are ignored.
+ * All file types within each skill subdirectory are copied recursively.
+ * Skips skill directories that already exist in the destination (no-overwrite policy).
+ * Returns the number of skill directories injected.
+ */
+function copySkillsDir(srcDir: string, dstDir: string): number {
+  if (!fs.existsSync(srcDir)) return 0
+
+  const entries = fs.readdirSync(srcDir, { withFileTypes: true })
+  let count = 0
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue
+    const dst = path.join(dstDir, entry.name)
+    if (fs.existsSync(dst)) continue
+    fs.cpSync(path.join(srcDir, entry.name), dst, { recursive: true })
+    count++
+  }
+  return count
+}
+
+/**
  * Copy a single file to a destination path.
  * Skips if the destination already exists (no-overwrite policy).
  * Returns true if the file was copied.
@@ -106,10 +129,10 @@ export function injectAgentFiles(
   const agentsDst = path.join(cwd, ".claude", "agents")
   result.agents = copyMdFiles(agentsSrc, agentsDst)
 
-  // 2. Inject Claude skills (.md files)
+  // 2. Inject Claude skills (subdirectory-based)
   const skillsSrc = agentDefs?.skillsDir ?? path.join(assetsDir, ".claude", "skills")
   const skillsDst = path.join(cwd, ".claude", "skills")
-  result.skills = copyMdFiles(skillsSrc, skillsDst)
+  result.skills = copySkillsDir(skillsSrc, skillsDst)
 
   // 3. Inject CLAUDE.md
   if (agentDefs?.claudeMd) {
@@ -127,7 +150,7 @@ export function injectAgentFiles(
     result.goosehints = copySingleFile(defaultGoosehints, path.join(cwd, ".goosehints"))
   }
 
-  // 5. Inject settings.json into .claude/
+  // 5. Inject settings.json into .claude/ (only when explicitly provided)
   if (agentDefs?.settingsJson) {
     const settingsDst = path.join(cwd, ".claude", "settings.json")
     if (!fs.existsSync(settingsDst)) {
@@ -135,9 +158,6 @@ export function injectAgentFiles(
       fs.writeFileSync(settingsDst, JSON.stringify(agentDefs.settingsJson, null, 2))
       result.settingsJson = true
     }
-  } else {
-    const defaultSettings = path.join(assetsDir, "settings.json")
-    result.settingsJson = copySingleFile(defaultSettings, path.join(cwd, ".claude", "settings.json"))
   }
 
   const total = result.agents + result.skills + (result.claudeMd ? 1 : 0) + (result.goosehints ? 1 : 0) + (result.settingsJson ? 1 : 0)
