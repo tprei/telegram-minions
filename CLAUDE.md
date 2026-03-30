@@ -143,7 +143,7 @@ When a session starts, `injectAgentFiles()` copies bundled agents, skills, and g
 |---|---|---|
 | `assets/agents/` | `.claude/agents/` | Claude agent definitions (post-task-router, explorer, planner, etc.) |
 | `assets/.claude/skills/` | `.claude/skills/` | Claude Code skills (commit, explore, review-pr, update-config) |
-| `assets/CLAUDE.md` | `.claude/CLAUDE.md` | Default workspace guidance |
+| `assets/templates/.claude/CLAUDE.md` | `.claude/CLAUDE.md` | Default workspace guidance |
 | `assets/.goosehints` | `.goosehints` | Goose project hints (structure, commands, conventions) |
 | `assets/settings.json` | `.claude/settings.json` | Claude Code environment settings (token limits, permissions) |
 
@@ -152,7 +152,7 @@ When a session starts, `injectAgentFiles()` copies bundled agents, skills, and g
 | Env var | Purpose |
 |---|---|
 | `AGENTS_DIR` | Custom path to Claude agent `.md` files |
-| `SKILLS_DIR` | Custom path to Claude skill directories |
+| `SKILLS_DIR` | Custom path to Claude skill `.md` files |
 | `GOOSEHINTS_PATH` | Custom path to `.goosehints` file |
 | `CLAUDE_MD_PATH` | Custom path to `CLAUDE.md` guidance file |
 

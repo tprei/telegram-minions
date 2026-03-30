@@ -106,18 +106,16 @@ export function injectAgentFiles(
   const agentsDst = path.join(cwd, ".claude", "agents")
   result.agents = copyMdFiles(agentsSrc, agentsDst)
 
-  // 2. Inject Claude skills
-  const skillsSrc = agentDefs?.skillsDir ?? path.join(assetsDir, "skills")
+  // 2. Inject Claude skills (.md files)
+  const skillsSrc = agentDefs?.skillsDir ?? path.join(assetsDir, ".claude", "skills")
   const skillsDst = path.join(cwd, ".claude", "skills")
-  if (fs.existsSync(skillsSrc)) {
-    result.skills = copySkillDirs(skillsSrc, skillsDst)
-  }
+  result.skills = copyMdFiles(skillsSrc, skillsDst)
 
   // 3. Inject CLAUDE.md
   if (agentDefs?.claudeMd) {
     result.claudeMd = copySingleFile(agentDefs.claudeMd, path.join(cwd, ".claude", "CLAUDE.md"))
   } else {
-    const defaultClaudeMd = path.join(assetsDir, "CLAUDE.md")
+    const defaultClaudeMd = path.join(assetsDir, "templates", ".claude", "CLAUDE.md")
     result.claudeMd = copySingleFile(defaultClaudeMd, path.join(cwd, ".claude", "CLAUDE.md"))
   }
 
@@ -125,7 +123,7 @@ export function injectAgentFiles(
   if (agentDefs?.goosehintsPath) {
     result.goosehints = copySingleFile(agentDefs.goosehintsPath, path.join(cwd, ".goosehints"))
   } else {
-    const defaultGoosehints = path.join(assetsDir, "goosehints")
+    const defaultGoosehints = path.join(assetsDir, ".goosehints")
     result.goosehints = copySingleFile(defaultGoosehints, path.join(cwd, ".goosehints"))
   }
 
@@ -137,6 +135,9 @@ export function injectAgentFiles(
       fs.writeFileSync(settingsDst, JSON.stringify(agentDefs.settingsJson, null, 2))
       result.settingsJson = true
     }
+  } else {
+    const defaultSettings = path.join(assetsDir, "settings.json")
+    result.settingsJson = copySingleFile(defaultSettings, path.join(cwd, ".claude", "settings.json"))
   }
 
   const total = result.agents + result.skills + (result.claudeMd ? 1 : 0) + (result.goosehints ? 1 : 0) + (result.settingsJson ? 1 : 0)
@@ -147,29 +148,3 @@ export function injectAgentFiles(
   return result
 }
 
-/**
- * Copy skill directories from source to destination.
- * Each skill is a directory containing .md files.
- * Skips skill directories that already exist in the destination.
- */
-function copySkillDirs(srcDir: string, dstDir: string): number {
-  if (!fs.existsSync(srcDir)) return 0
-
-  let count = 0
-  const entries = fs.readdirSync(srcDir, { withFileTypes: true })
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue
-    const skillDst = path.join(dstDir, entry.name)
-    if (fs.existsSync(skillDst)) continue
-
-    const skillSrc = path.join(srcDir, entry.name)
-    fs.mkdirSync(skillDst, { recursive: true })
-    const files = fs.readdirSync(skillSrc, { withFileTypes: true })
-    for (const file of files) {
-      if (!file.isFile()) continue
-      fs.copyFileSync(path.join(skillSrc, file.name), path.join(skillDst, file.name))
-    }
-    count++
-  }
-  return count
-}

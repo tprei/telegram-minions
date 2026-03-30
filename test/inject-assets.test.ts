@@ -160,44 +160,50 @@ describe("injectAgentFiles", () => {
   })
 
   describe("skills injection", () => {
-    it("copies skill directories into .claude/skills/", () => {
+    it("copies skill .md files into .claude/skills/", () => {
       const skillsDir = makeTmpDir()
-
-      // Create a skill with files
-      const skillPath = path.join(skillsDir, "code-review")
-      fs.mkdirSync(skillPath, { recursive: true })
-      fs.writeFileSync(path.join(skillPath, "skill.md"), "# Code Review Skill")
-      fs.writeFileSync(path.join(skillPath, "config.json"), '{"name": "code-review"}')
+      fs.writeFileSync(path.join(skillsDir, "commit.md"), "# Commit Skill")
+      fs.writeFileSync(path.join(skillsDir, "explore.md"), "# Explore Skill")
+      fs.writeFileSync(path.join(skillsDir, "not-md.txt"), "ignored")
 
       const result = injectAgentFiles(tmpDir, { skillsDir })
 
-      expect(result.skills).toBe(1)
-      const injectedSkill = path.join(tmpDir, ".claude", "skills", "code-review")
-      expect(fs.existsSync(injectedSkill)).toBe(true)
-      expect(fs.readFileSync(path.join(injectedSkill, "skill.md"), "utf8")).toBe("# Code Review Skill")
-      expect(fs.readFileSync(path.join(injectedSkill, "config.json"), "utf8")).toBe('{"name": "code-review"}')
+      expect(result.skills).toBe(2)
+      const injectedDir = path.join(tmpDir, ".claude", "skills")
+      expect(fs.existsSync(injectedDir)).toBe(true)
+      expect(fs.readFileSync(path.join(injectedDir, "commit.md"), "utf8")).toBe("# Commit Skill")
+      expect(fs.readFileSync(path.join(injectedDir, "explore.md"), "utf8")).toBe("# Explore Skill")
+      expect(fs.existsSync(path.join(injectedDir, "not-md.txt"))).toBe(false)
 
       cleanup(skillsDir)
     })
 
-    it("does not overwrite existing skill directories", () => {
+    it("does not overwrite existing skill files", () => {
       const skillsDir = makeTmpDir()
-      const skillPath = path.join(skillsDir, "my-skill")
-      fs.mkdirSync(skillPath, { recursive: true })
-      fs.writeFileSync(path.join(skillPath, "skill.md"), "new content")
+      fs.writeFileSync(path.join(skillsDir, "commit.md"), "new content")
 
       // Pre-create the skill in the workspace
-      const existingSkill = path.join(tmpDir, ".claude", "skills", "my-skill")
-      fs.mkdirSync(existingSkill, { recursive: true })
-      fs.writeFileSync(path.join(existingSkill, "skill.md"), "existing content")
+      const existingDir = path.join(tmpDir, ".claude", "skills")
+      fs.mkdirSync(existingDir, { recursive: true })
+      fs.writeFileSync(path.join(existingDir, "commit.md"), "existing content")
 
       const result = injectAgentFiles(tmpDir, { skillsDir })
 
       expect(result.skills).toBe(0)
-      const content = fs.readFileSync(path.join(existingSkill, "skill.md"), "utf8")
+      const content = fs.readFileSync(path.join(existingDir, "commit.md"), "utf8")
       expect(content).toBe("existing content")
 
       cleanup(skillsDir)
+    })
+
+    it("injects default skills from assets/.claude/skills/", () => {
+      const result = injectAgentFiles(tmpDir)
+
+      expect(result.skills).toBeGreaterThan(0)
+      const skillsDir = path.join(tmpDir, ".claude", "skills")
+      const files = fs.readdirSync(skillsDir)
+      expect(files).toContain("commit.md")
+      expect(files).toContain("explore.md")
     })
   })
 
@@ -223,6 +229,17 @@ describe("injectAgentFiles", () => {
     })
   })
 
+  describe("default settings.json injection", () => {
+    it("injects default settings.json from assets/", () => {
+      const result = injectAgentFiles(tmpDir)
+      expect(result.settingsJson).toBe(true)
+      const settingsPath = path.join(tmpDir, ".claude", "settings.json")
+      expect(fs.existsSync(settingsPath)).toBe(true)
+      const content = JSON.parse(fs.readFileSync(settingsPath, "utf8"))
+      expect(content).toBeDefined()
+    })
+  })
+
   describe("idempotency", () => {
     it("produces same result when called twice", () => {
       const first = injectAgentFiles(tmpDir)
@@ -230,10 +247,13 @@ describe("injectAgentFiles", () => {
 
       // Second call should inject nothing since files already exist
       expect(second.agents).toBe(0)
+      expect(second.skills).toBe(0)
       expect(second.claudeMd).toBe(false)
+      expect(second.settingsJson).toBe(false)
 
       // First call should have injected something
       expect(first.agents).toBeGreaterThan(0)
+      expect(first.skills).toBeGreaterThan(0)
     })
   })
 
