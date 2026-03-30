@@ -16,6 +16,7 @@ export interface PinnedMessageDeps {
   readonly telegram: TelegramClient
   readonly topicSessions: Map<number, TopicSession>
   readonly workspaceRoot: string
+  readonly chatId?: number | string
 }
 
 export class PinnedMessageManager {
@@ -98,7 +99,7 @@ export class PinnedMessageManager {
   async updatePinnedSplitStatus(parent: TopicSession): Promise<void> {
     if (!parent.childThreadIds || parent.childThreadIds.length === 0) return
 
-    const children: { slug: string; label: string; prUrl?: string; status: "running" | "done" | "failed" }[] = []
+    const children: { slug: string; label: string; prUrl?: string; threadId?: number; status: "running" | "done" | "failed" }[] = []
 
     for (const id of parent.childThreadIds) {
       const child = this.deps.topicSessions.get(id)
@@ -107,13 +108,14 @@ export class PinnedMessageManager {
         slug: child.slug,
         label: child.splitLabel ?? child.slug,
         prUrl: child.prUrl,
+        threadId: child.threadId,
         status: child.activeSessionId ? "running" : child.prUrl ? "done" : "failed",
       })
     }
 
     if (children.length === 0) return
 
-    const html = formatPinnedSplitStatus(parent.slug, parent.repo, children)
+    const html = formatPinnedSplitStatus(parent.slug, parent.repo, children, this.deps.chatId)
     await this.pinThreadMessage(parent, html)
   }
 

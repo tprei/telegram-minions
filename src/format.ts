@@ -890,10 +890,22 @@ export function formatPinnedStatus(
   return lines.join("\n")
 }
 
+/**
+ * Build a Telegram forum topic deep-link URL.
+ * Chat IDs like -1001234567890 become 1234567890 in the t.me/c/ URL.
+ * Returns undefined if chatId or threadId is missing.
+ */
+export function threadLink(chatId: number | string | undefined, threadId: number | undefined): string | undefined {
+  if (chatId == null || threadId == null) return undefined
+  const raw = String(chatId).replace(/^-100/, "")
+  return `https://t.me/c/${raw}/${threadId}`
+}
+
 export function formatPinnedSplitStatus(
   parentSlug: string,
   repo: string,
-  children: { slug: string; label: string; prUrl?: string; status: "running" | "done" | "failed" }[],
+  children: { slug: string; label: string; prUrl?: string; threadId?: number; status: "running" | "done" | "failed" }[],
+  chatId?: number | string,
 ): string {
   const lines: string[] = [
     `🔀 <b>Split</b>  ·  🏷 <code>${esc(parentSlug)}</code>  ·  📦 ${esc(repo)}`,
@@ -907,10 +919,17 @@ export function formatPinnedSplitStatus(
   lines.push(`<b>Progress:</b> ${done}/${children.length} done${failed > 0 ? ` · ${failed} failed` : ""}${running > 0 ? ` · ${running} running` : ""}`)
   lines.push(``)
 
-  for (const child of children) {
+  for (let i = 0; i < children.length; i++) {
+    const child = children[i]
+    const isLast = i === children.length - 1
+    const branch = isLast ? "└── " : "├── "
     const icon = child.status === "done" ? "✅" : child.status === "failed" ? "❌" : "⚡"
+    const link = threadLink(chatId, child.threadId)
+    const slugPart = link
+      ? `<a href="${esc(link)}">${esc(child.slug)}</a>`
+      : `<code>${esc(child.slug)}</code>`
     const prPart = child.prUrl ? ` — <a href="${esc(child.prUrl)}">PR</a>` : ""
-    lines.push(`${icon} <code>${esc(child.slug)}</code>${prPart}`)
+    lines.push(`${branch}${icon} ${slugPart}${prPart}`)
   }
 
   return lines.join("\n")

@@ -13,7 +13,6 @@ import { DEFAULT_PROMPTS } from "./prompts.js"
 import { SessionStore } from "./store.js"
 import { ProfileStore } from "./profile-store.js"
 import {
-  esc,
   formatPlanIteration,
   formatPlanExecuting,
   formatPlanComplete,
@@ -47,10 +46,6 @@ import { StateBroadcaster, topicSessionToApi, dagToApi } from "./api-server.js"
 import { loggers } from "./logger.js"
 import { SessionNotFoundError } from "./errors.js"
 import {
-  TASK_PREFIX, TASK_SHORT, PLAN_PREFIX, THINK_PREFIX, REVIEW_PREFIX,
-  EXECUTE_CMD, STATUS_CMD, STATS_CMD, REPLY_PREFIX, REPLY_SHORT,
-  CLOSE_CMD, STOP_CMD, HELP_CMD, CLEAN_CMD, USAGE_CMD, CONFIG_CMD,
-  SPLIT_CMD, STACK_CMD, DAG_CMD, LAND_CMD, RETRY_CMD, FORCE_CMD, SHIP_PREFIX,
   parseTaskArgs, parseReviewArgs, buildReviewAllTask,
   buildRepoKeyboard, buildProfileKeyboard,
   escapeHtml, extractRepoName, appendImageContext,
@@ -119,6 +114,7 @@ export class Dispatcher {
       telegram: this.telegram,
       topicSessions: this.topicSessions,
       workspaceRoot: this.config.workspace.root,
+      chatId: this.config.telegram.chatId,
     })
   }
 

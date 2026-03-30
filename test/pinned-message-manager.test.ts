@@ -155,6 +155,21 @@ describe("PinnedMessageManager", () => {
         1,
       )
     })
+
+    it("includes thread hyperlinks when chatId is provided", async () => {
+      const telegram = makeTelegram()
+      const topicSessions = new Map<number, TopicSession>()
+      const child = makeSession({ threadId: 5, slug: "red-bear", splitLabel: "Add auth", prUrl: "https://github.com/pr/1", activeSessionId: undefined })
+      topicSessions.set(5, child)
+      const parent = makeSession({ childThreadIds: [5] })
+
+      const mgr = new PinnedMessageManager({ telegram, topicSessions, workspaceRoot: "/tmp/workspace", chatId: -1001234567890 })
+      await mgr.updatePinnedSplitStatus(parent)
+
+      const html = telegram.sendMessage.mock.calls[0][0] as string
+      expect(html).toContain('href="https://t.me/c/1234567890/5"')
+      expect(html).toContain("red-bear")
+    })
   })
 
   describe("updatePinnedDagStatus", () => {
