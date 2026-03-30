@@ -99,6 +99,122 @@ describe("PinnedMessageManager", () => {
 
       expect(telegram.sendMessage).toHaveBeenCalledWith("No active minion sessions.")
     })
+
+    it("includes header with total session count", async () => {
+      const telegram = makeTelegram()
+      const topicSessions = new Map<number, TopicSession>()
+      topicSessions.set(1, makeSession())
+      topicSessions.set(2, makeSession({ threadId: 2, slug: "calm-owl" }))
+
+      const mgr = new PinnedMessageManager({ telegram, topicSessions, workspaceRoot: "/tmp/workspace" })
+      mgr.updatePinnedSummary()
+
+      await new Promise((r) => setTimeout(r, 10))
+
+      const html = telegram.sendMessage.mock.calls[0][0] as string
+      expect(html).toContain("Minion Sessions")
+      expect(html).toContain("2 total")
+    })
+
+    it("adds thread hyperlinks when chatId is provided", async () => {
+      const telegram = makeTelegram()
+      const topicSessions = new Map<number, TopicSession>()
+      topicSessions.set(1, makeSession({ threadId: 42 }))
+
+      const mgr = new PinnedMessageManager({ telegram, topicSessions, workspaceRoot: "/tmp/workspace", chatId: -1001234567890 })
+      mgr.updatePinnedSummary()
+
+      await new Promise((r) => setTimeout(r, 10))
+
+      const html = telegram.sendMessage.mock.calls[0][0] as string
+      expect(html).toContain('href="https://t.me/c/1234567890/42"')
+      expect(html).toContain(">bold-fox</a>")
+    })
+
+    it("uses code tags for slugs when chatId is not provided", async () => {
+      const telegram = makeTelegram()
+      const topicSessions = new Map<number, TopicSession>()
+      topicSessions.set(1, makeSession())
+
+      const mgr = new PinnedMessageManager({ telegram, topicSessions, workspaceRoot: "/tmp/workspace" })
+      mgr.updatePinnedSummary()
+
+      await new Promise((r) => setTimeout(r, 10))
+
+      const html = telegram.sendMessage.mock.calls[0][0] as string
+      expect(html).toContain("<code>bold-fox</code>")
+    })
+
+    it("excludes child sessions from top level and nests them under parent", async () => {
+      const telegram = makeTelegram()
+      const topicSessions = new Map<number, TopicSession>()
+      const parent = makeSession({ threadId: 10, slug: "main-task", childThreadIds: [20, 30] })
+      const child1 = makeSession({ threadId: 20, slug: "child-one", parentThreadId: 10, splitLabel: "Add auth", prUrl: "https://pr/1", activeSessionId: undefined })
+      const child2 = makeSession({ threadId: 30, slug: "child-two", parentThreadId: 10, splitLabel: "Add tests" })
+      topicSessions.set(10, parent)
+      topicSessions.set(20, child1)
+      topicSessions.set(30, child2)
+
+      const mgr = new PinnedMessageManager({ telegram, topicSessions, workspaceRoot: "/tmp/workspace", chatId: -1001234567890 })
+      mgr.updatePinnedSummary()
+
+      await new Promise((r) => setTimeout(r, 10))
+
+      const html = telegram.sendMessage.mock.calls[0][0] as string
+      // Parent is at top level
+      expect(html).toContain(">main-task</a>")
+      // Children are nested with tree characters
+      expect(html).toContain("├── ")
+      expect(html).toContain("└── ")
+      // Child slugs are linked
+      expect(html).toContain(">child-one</a>")
+      expect(html).toContain(">child-two</a>")
+      // Split labels shown
+      expect(html).toContain("Add auth")
+      expect(html).toContain("Add tests")
+      // PR link for child1
+      expect(html).toContain('href="https://pr/1">PR</a>')
+      // Done count shown on parent
+      expect(html).toContain("1/2 done")
+      // 3 total in header (parent + 2 children)
+      expect(html).toContain("3 total")
+    })
+
+    it("shows correct status icons for sessions", async () => {
+      const telegram = makeTelegram()
+      const topicSessions = new Map<number, TopicSession>()
+      topicSessions.set(1, makeSession({ threadId: 1, slug: "running-one" })) // active → ⚡
+      topicSessions.set(2, makeSession({ threadId: 2, slug: "done-one", activeSessionId: undefined, prUrl: "https://pr/1" })) // done → ✅
+      topicSessions.set(3, makeSession({ threadId: 3, slug: "errored-one", activeSessionId: undefined, lastState: "errored" })) // errored → ❌
+      topicSessions.set(4, makeSession({ threadId: 4, slug: "idle-one", activeSessionId: undefined })) // idle → 💬
+
+      const mgr = new PinnedMessageManager({ telegram, topicSessions, workspaceRoot: "/tmp/workspace" })
+      mgr.updatePinnedSummary()
+
+      await new Promise((r) => setTimeout(r, 10))
+
+      const html = telegram.sendMessage.mock.calls[0][0] as string
+      expect(html).toMatch(/⚡.*running-one/)
+      expect(html).toMatch(/✅.*done-one/)
+      expect(html).toMatch(/❌.*errored-one/)
+      expect(html).toMatch(/💬.*idle-one/)
+    })
+
+    it("standalone session without children shows no tree formatting", async () => {
+      const telegram = makeTelegram()
+      const topicSessions = new Map<number, TopicSession>()
+      topicSessions.set(1, makeSession())
+
+      const mgr = new PinnedMessageManager({ telegram, topicSessions, workspaceRoot: "/tmp/workspace" })
+      mgr.updatePinnedSummary()
+
+      await new Promise((r) => setTimeout(r, 10))
+
+      const html = telegram.sendMessage.mock.calls[0][0] as string
+      expect(html).not.toContain("├── ")
+      expect(html).not.toContain("└── ")
+      expect(html).not.toContain("done)")
+    })
   })
 
   describe("pinThreadMessage", () => {
