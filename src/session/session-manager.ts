@@ -255,6 +255,7 @@ export function prepareWorkspace(
         cwd: workDir,
       })
 
+      ensureDevtoolsFallback(workspaceRoot)
       bootstrapDependencies(workDir, reposDir, repoName)
     } else {
       fs.mkdirSync(workDir, { recursive: true })
@@ -446,6 +447,29 @@ function makeNodeModulesReadOnly(nmDir: string, label: string): void {
   } catch (err) {
     log.warn({ err, label }, "failed to make node_modules read-only (non-fatal)")
   }
+}
+
+function ensureDevtoolsFallback(workspaceRoot: string): void {
+  const source = "/opt/devtools/node_modules"
+  const target = path.join(workspaceRoot, "node_modules")
+  const versionSrc = "/opt/devtools/.version"
+  const versionDst = path.join(target, ".devtools-version")
+
+  if (!fs.existsSync(source)) return
+
+  const srcVersion = fs.existsSync(versionSrc) ? fs.readFileSync(versionSrc, "utf8").trim() : ""
+  const dstVersion = fs.existsSync(versionDst) ? fs.readFileSync(versionDst, "utf8").trim() : ""
+  if (srcVersion && srcVersion === dstVersion) return
+
+  if (fs.existsSync(target)) fs.rmSync(target, { recursive: true, force: true })
+
+  const stdio: import("node:child_process").StdioOptions = ["ignore", "pipe", "pipe"]
+  try {
+    execSync(`cp -al "${source}" "${target}"`, { stdio, timeout: 30_000 })
+  } catch {
+    execSync(`cp -a "${source}" "${target}"`, { stdio, timeout: 60_000 })
+  }
+  if (srcVersion) fs.writeFileSync(versionDst, srcVersion)
 }
 
 export function bootstrapDependencies(workDir: string, reposDir: string, repoName: string): void {

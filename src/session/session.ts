@@ -288,7 +288,10 @@ export class SessionHandle {
     }
 
     const baseEnv: Record<string, string> = {
-      PATH: process.env["PATH"] ?? "/usr/local/bin:/usr/bin:/bin",
+      PATH: [
+        "/opt/uv-tools/bin",
+        process.env["PATH"] ?? "/usr/local/bin:/usr/bin:/bin",
+      ].join(":"),
       HOME: sessionHome,
       CLAUDE_CONFIG_DIR: parentClaudeDir,
       LANG: process.env["LANG"] ?? "C.UTF-8",
