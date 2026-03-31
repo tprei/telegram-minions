@@ -39,6 +39,11 @@ export interface DispatcherContext {
   /** DAG graphs keyed by dagId. */
   readonly dags: Map<string, DagGraph>
 
+  // ── Token management ───────────────────────────────────────────────
+
+  /** Refresh the GitHub token in process.env before git/gh operations. */
+  refreshGitToken(): Promise<void>
+
   // ── Session lifecycle ──────────────────────────────────────────────
 
   /** Spawn a new agent session in an existing topic. */

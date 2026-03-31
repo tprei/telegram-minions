@@ -14,6 +14,7 @@ interface DagStoreData {
 export class DagStore {
   private readonly filePath: string
   private readonly backupPath: string
+  private saveQueue: Promise<void> = Promise.resolve()
 
   constructor(workspaceRoot: string) {
     this.filePath = path.join(workspaceRoot, STORE_FILENAME)
@@ -21,6 +22,11 @@ export class DagStore {
   }
 
   async save(dags: Map<string, DagGraph>): Promise<void> {
+    this.saveQueue = this.saveQueue.then(() => this.doSave(dags), () => this.doSave(dags))
+    return this.saveQueue
+  }
+
+  private async doSave(dags: Map<string, DagGraph>): Promise<void> {
     const entries = Array.from(dags.entries())
     const data: DagStoreData = { dags: entries }
     const tmp = this.filePath + ".tmp"

@@ -277,6 +277,8 @@ export async function removeWorkspace(
   if (!topicSession.cwd || !fs.existsSync(topicSession.cwd)) return
 
   try {
+    restoreWritePermissions(topicSession.cwd)
+
     if (topicSession.repoUrl) {
       const repoName = extractRepoName(topicSession.repoUrl)
       const bareDir = path.join(workspaceRoot, ".repos", `${repoName}.git`)
@@ -287,7 +289,6 @@ export async function removeWorkspace(
           { cwd: bareDir, timeout: 30_000 },
         )
         log.debug({ cwd: topicSession.cwd }, "removed worktree")
-        // Clean up the branch so slug collisions don't block future sessions
         if (topicSession.branch) {
           try {
             await execFileAsync("git", ["branch", "-D", topicSession.branch], {
@@ -405,6 +406,36 @@ function bootstrapOnePackage(
  * and breaking the hardlink cache. Uses `chmod -R a-w` so npm fails fast
  * instead of silently duplicating everything.
  */
+function restoreWritePermissions(cwd: string): void {
+  const targets = ["node_modules", ".venv"]
+  for (const name of targets) {
+    const target = path.join(cwd, name)
+    try {
+      if (fs.existsSync(target)) {
+        execSync(`chmod -R u+w ${JSON.stringify(target)}`, {
+          stdio: ["ignore", "pipe", "pipe"],
+          timeout: 30_000,
+        })
+      }
+    } catch { /* best-effort */ }
+  }
+  try {
+    const entries = fs.readdirSync(cwd, { withFileTypes: true })
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name === "node_modules" || entry.name.startsWith(".")) continue
+      const nested = path.join(cwd, entry.name, "node_modules")
+      try {
+        if (fs.existsSync(nested)) {
+          execSync(`chmod -R u+w ${JSON.stringify(nested)}`, {
+            stdio: ["ignore", "pipe", "pipe"],
+            timeout: 30_000,
+          })
+        }
+      } catch { /* best-effort */ }
+    }
+  } catch { /* best-effort */ }
+}
+
 function makeNodeModulesReadOnly(nmDir: string, label: string): void {
   try {
     execSync(`chmod -R a-w ${JSON.stringify(nmDir)}`, {

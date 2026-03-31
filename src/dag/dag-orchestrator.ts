@@ -482,6 +482,7 @@ export class DagOrchestrator {
   }
 
   async updateDagPRDescriptions(graph: DagGraph, cwd: string): Promise<void> {
+    await this.ctx.refreshGitToken()
     const nodesWithPRs = graph.nodes.filter((n) => n.prUrl)
     if (nodesWithPRs.length === 0) return
 

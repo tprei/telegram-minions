@@ -17,6 +17,7 @@ export class SessionStore {
   private readonly filePath: string
   private readonly backupPath: string
   private readonly ttlMs: number
+  private saveQueue: Promise<void> = Promise.resolve()
 
   constructor(workspaceRoot: string, ttlMs = DEFAULT_TTL_MS) {
     this.filePath = path.join(workspaceRoot, STORE_FILENAME)
@@ -25,6 +26,11 @@ export class SessionStore {
   }
 
   async save(sessions: Map<number, TopicSession>, offset: number = 0): Promise<void> {
+    this.saveQueue = this.saveQueue.then(() => this.doSave(sessions, offset), () => this.doSave(sessions, offset))
+    return this.saveQueue
+  }
+
+  private async doSave(sessions: Map<number, TopicSession>, offset: number): Promise<void> {
     const entries = Array.from(sessions.entries())
     const data: StoreData = { sessions: entries, offset }
     const tmp = this.filePath + ".tmp"
@@ -32,7 +38,6 @@ export class SessionStore {
       await fs.mkdir(path.dirname(tmp), { recursive: true })
       await fs.writeFile(tmp, JSON.stringify(data), "utf-8")
       await fs.rename(tmp, this.filePath)
-      // Keep a backup of the last good write for crash recovery
       try {
         await fs.copyFile(this.filePath, this.backupPath)
       } catch {

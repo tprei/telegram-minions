@@ -58,6 +58,7 @@ export class LandingManager {
   constructor(private readonly ctx: DispatcherContext) {}
 
   async handleLandCommand(topicSession: TopicSession): Promise<void> {
+    await this.ctx.refreshGitToken()
     if (!topicSession.dagId) {
       if (!topicSession.childThreadIds || topicSession.childThreadIds.length === 0) {
         await this.ctx.telegram.sendMessage(

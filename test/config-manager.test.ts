@@ -70,6 +70,7 @@ function createMockContext(overrides: Partial<DispatcherContext> = {}): Dispatch
     sessions,
     topicSessions,
     dags,
+    refreshGitToken: async () => {},
     spawnTopicAgent: async () => {},
     spawnCIFixAgent: async () => {},
     prepareWorkspace: async () => "/tmp/test/workspace",

@@ -134,6 +134,7 @@ export class Dispatcher {
       sessions: this.sessions,
       topicSessions: this.topicSessions,
       dags: this.dags,
+      refreshGitToken: () => this.refreshGitToken(),
       spawnTopicAgent: (ts, task, mcp, sp) => this.spawnTopicAgent(ts, task, mcp, sp),
       spawnCIFixAgent: (ts, task, cb) => this.spawnCIFixAgent(ts, task, cb),
       prepareWorkspace: (slug, repo, branch) => this.prepareWorkspace(slug, repo, branch),
@@ -1788,10 +1789,16 @@ export class Dispatcher {
     log.info({ slug: topicSession.slug, threadId }, "stopped session")
   }
 
+  // ── Token management ──────────────────────────────────────────────────
+
+  private async refreshGitToken(): Promise<void> {
+    await this.tokenProvider?.refreshEnv()
+  }
+
   // ── Workspace wrappers ────────────────────────────────────────────────
 
   private async prepareWorkspace(slug: string, repoUrl?: string, startBranch?: string): Promise<string | null> {
-    await this.tokenProvider?.refreshEnv()
+    await this.refreshGitToken()
     return prepareWorkspace(slug, this.config.workspace.root, repoUrl, startBranch)
   }
 
@@ -1804,6 +1811,7 @@ export class Dispatcher {
   }
 
   private async prepareFanInBranch(slug: string, repoUrl: string, upstreamBranches: string[]): Promise<string | null> {
+    await this.refreshGitToken()
     return prepareFanInBranch(slug, repoUrl, upstreamBranches, this.config.workspace.root)
   }
 
