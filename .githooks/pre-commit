@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "Running pre-commit checks..."
+
+echo "→ Linting..."
+npm run lint
+
+echo "→ Type-checking..."
+npm run typecheck
+
+echo "✓ All pre-commit checks passed."

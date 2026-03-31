@@ -31,6 +31,7 @@
     "typecheck:ui": "cd ui && npm run typecheck",
     "test": "vitest run",
     "test:watch": "vitest",
+    "prepare": "git config core.hooksPath .githooks",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
