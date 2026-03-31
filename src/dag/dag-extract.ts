@@ -1,7 +1,7 @@
 import type { TopicMessage } from "../types.js"
 import type { DagInput } from "./dag.js"
 import type { ProviderProfile } from "../config/config-types.js"
-import { retryClaudeExtraction, buildConversationText } from "../claude-extract.js"
+import { retryClaudeExtraction, buildConversationText, ParseError } from "../claude-extract.js"
 import { loggers } from "../logger.js"
 
 const log = loggers.dagExtract
@@ -123,20 +123,17 @@ export function parseDagItems(output: string): DagInput[] {
 
   const arrayMatch = text.match(/\[[\s\S]*\]/)
   if (!arrayMatch) {
-    log.debug("no JSON array found in output")
-    return []
+    throw new ParseError("no JSON array found in DAG output")
   }
 
   let parsed: unknown
   try {
     parsed = JSON.parse(arrayMatch[0])
   } catch (e) {
-    log.debug({ err: String(e) }, "JSON parse error")
-    return []
+    throw new ParseError(`JSON parse error in DAG output: ${String(e)}`)
   }
   if (!Array.isArray(parsed)) {
-    log.debug("parsed value is not an array")
-    return []
+    throw new ParseError("parsed value is not an array in DAG output")
   }
 
   const valid = parsed.filter((item: unknown): item is DagInput => {
@@ -167,18 +164,18 @@ export function parseStackItems(output: string): { title: string; description: s
 
   const arrayMatch = text.match(/\[[\s\S]*\]/)
   if (!arrayMatch) {
-    log.debug("no JSON array found in stack output")
-    return []
+    throw new ParseError("no JSON array found in stack output")
   }
 
   let parsed: unknown
   try {
     parsed = JSON.parse(arrayMatch[0])
   } catch (e) {
-    log.debug({ err: String(e) }, "JSON parse error in stack output")
-    return []
+    throw new ParseError(`JSON parse error in stack output: ${String(e)}`)
   }
-  if (!Array.isArray(parsed)) return []
+  if (!Array.isArray(parsed)) {
+    throw new ParseError("parsed value is not an array in stack output")
+  }
 
   return parsed.filter((item: unknown): item is { title: string; description: string } => {
     if (typeof item !== "object" || item === null) return false

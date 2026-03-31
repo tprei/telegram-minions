@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest"
+import { ParseError } from "../src/claude-extract.js"
 import { parseDagItems, parseStackItems, buildDagChildPrompt, extractDagItems, extractStackItems } from "../src/dag/dag-extract.js"
 import type { TopicMessage } from "../src/types.js"
 import type { DagInput } from "../src/dag/dag.js"
@@ -49,12 +50,18 @@ describe("parseDagItems", () => {
     expect(items).toHaveLength(1)
   })
 
-  it("returns empty array for no JSON", () => {
-    expect(parseDagItems("no json here")).toEqual([])
+  it("throws ParseError when no JSON array found", () => {
+    expect(() => parseDagItems("no json here")).toThrow(ParseError)
+    expect(() => parseDagItems("no json here")).toThrow("no JSON array found")
   })
 
-  it("returns empty array for invalid JSON", () => {
-    expect(parseDagItems("[not valid json]")).toEqual([])
+  it("throws ParseError for invalid JSON", () => {
+    expect(() => parseDagItems("[not valid json]")).toThrow(ParseError)
+    expect(() => parseDagItems("[not valid json]")).toThrow("JSON parse error")
+  })
+
+  it("returns empty array when valid JSON array has no valid items", () => {
+    expect(parseDagItems("[]")).toEqual([])
   })
 
   it("filters items with missing id", () => {
@@ -99,8 +106,18 @@ describe("parseStackItems", () => {
     expect(items).toHaveLength(1)
   })
 
-  it("returns empty for no JSON", () => {
-    expect(parseStackItems("nothing")).toEqual([])
+  it("throws ParseError when no JSON array found", () => {
+    expect(() => parseStackItems("nothing")).toThrow(ParseError)
+    expect(() => parseStackItems("nothing")).toThrow("no JSON array found")
+  })
+
+  it("throws ParseError for invalid JSON", () => {
+    expect(() => parseStackItems("[not valid json]")).toThrow(ParseError)
+    expect(() => parseStackItems("[not valid json]")).toThrow("JSON parse error")
+  })
+
+  it("returns empty array when valid JSON array has no valid items", () => {
+    expect(parseStackItems("[]")).toEqual([])
   })
 })
 
