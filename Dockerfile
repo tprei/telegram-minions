@@ -1,3 +1,5 @@
+FROM ghcr.io/astral-sh/uv:latest AS uv
+
 FROM node:22-slim
 
 # Install system dependencies + GitHub CLI
@@ -9,6 +11,18 @@ RUN apt-get update && apt-get install -y \
      | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
   && apt-get update && apt-get install -y gh \
   && rm -rf /var/lib/apt/lists/*
+
+# Install UV package manager (from official image)
+COPY --from=uv /uv /uvx /usr/local/bin/
+
+# Install managed Python 3.13 via UV
+ENV UV_PYTHON_INSTALL_DIR="/opt/uv-python"
+RUN uv python install 3.13 \
+    && chmod -R o+rx /opt/uv-python
+
+# Install build-essential for Python packages with C extensions
+RUN apt-get update && apt-get install -y build-essential \
+    && rm -rf /var/lib/apt/lists/*
 
 # Install Goose CLI (manual extract — the install script tries interactive configure)
 RUN curl -fsSL -o /tmp/goose.tar.bz2 \
@@ -44,7 +58,8 @@ RUN npm run build && npm prune --production
 
 # Non-root user (claude-agent-acp SIGKILL's under root)
 RUN useradd -m -s /bin/bash minion \
-    && chown -R minion:minion /opt/pw-browsers
+    && chown -R minion:minion /opt/pw-browsers \
+    && chown -R minion:minion /opt/uv-python
 
 RUN chmod +x /app/entrypoint.sh /app/scripts/*.sh
 
