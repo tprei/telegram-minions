@@ -41,7 +41,7 @@ import { StatsTracker } from "../stats.js"
 import { fetchClaudeUsage } from "../claude-usage.js"
 import { writeSessionLog } from "../session/session-log.js"
 import { extractPRUrl } from "../ci/ci-babysit.js"
-import { buildConversationDigest } from "../conversation-digest.js"
+import { buildConversationDigest, buildChildSessionDigest } from "../conversation-digest.js"
 import { truncateConversation } from "../conversation-limits.js"
 import { DEFAULT_CI_FIX_PROMPT } from "../config/prompts.js"
 import { StateBroadcaster, topicSessionToApi, dagToApi } from "../api-server.js"
@@ -167,7 +167,7 @@ export class Dispatcher {
       handleShipAdvance: (ts) => this.shipPipeline.handleShipAdvance(ts),
       handleExecuteCommand: (ts, d) => this.handleExecuteCommand(ts, d),
       notifyParentOfChildComplete: (cs, s) => this.notifyParentOfChildComplete(cs, s),
-      postSessionDigest: (ts, pr) => this.postSessionDigest(ts, pr),
+      postSessionDigest: (ts, pr) => { this.postSessionDigest(ts, pr).catch(() => {}) },
       runDeferredBabysit: (id) => this.ciBabysitter.runDeferredBabysit(id),
       babysitPR: (ts, pr, qr) => this.ciBabysitter.babysitPR(ts, pr, qr),
       babysitDagChildCI: (cs, pr) => this.ciBabysitter.babysitDagChildCI(cs, pr),
@@ -1350,7 +1350,7 @@ export class Dispatcher {
           const prUrl = this.extractPRFromConversation(topicSession)
           if (prUrl) {
             topicSession.prUrl = prUrl
-            this.postSessionDigest(topicSession, prUrl)
+            await this.postSessionDigest(topicSession, prUrl)
             await this.pinnedMessages.pinThreadMessage(
               topicSession,
               formatPinnedStatus(topicSession.slug, topicSession.repo, "completed", prUrl),
@@ -1670,11 +1670,24 @@ export class Dispatcher {
     return null
   }
 
-  private postSessionDigest(topicSession: TopicSession, prUrl: string): void {
+  private async postSessionDigest(topicSession: TopicSession, prUrl: string): Promise<void> {
     const summaryPath = path.join(topicSession.cwd, ".session-summary.md")
     if (fs.existsSync(summaryPath)) return
 
-    const digest = buildConversationDigest(topicSession.conversation)
+    let digest: string | null
+    if (topicSession.parentThreadId) {
+      const parentSession = this.topicSessions.get(topicSession.parentThreadId)
+      const profile = topicSession.profileId
+        ? this.profileStore.get(topicSession.profileId)
+        : undefined
+      digest = await buildChildSessionDigest({
+        childConversation: topicSession.conversation,
+        parentConversation: parentSession?.conversation,
+        profile,
+      })
+    } else {
+      digest = buildConversationDigest(topicSession.conversation)
+    }
     if (!digest) return
 
     try {
