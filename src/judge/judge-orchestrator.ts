@@ -194,6 +194,77 @@ export class JudgeOrchestrator {
     log.info({ slug, chosenOptionId: decision.chosenOptionId }, "judge arena complete")
   }
 
+  async tryJudgeArena(topicSession: TopicSession, directive?: string): Promise<boolean> {
+    const { slug, threadId, conversation } = topicSession
+
+    const profile = topicSession.profileId
+      ? this.ctx.profileStore.get(topicSession.profileId)
+      : undefined
+
+    const extractResult = await extractJudgeOptions(conversation, directive, profile)
+
+    if (extractResult.error || extractResult.options.length < 2) {
+      log.info({ slug, optionCount: extractResult.options.length }, "judge arena skipped — insufficient options")
+      return false
+    }
+
+    const options = extractResult.options
+    const question = directive ?? summarizeQuestion(conversation)
+
+    await this.ctx.telegram.sendMessage(
+      formatJudgeArena(slug, question, options),
+      threadId,
+    )
+
+    log.info({ slug, optionCount: options.length }, "spawning advocates")
+    const advocateResults = await this.runAdvocates(options, conversation, question, profile)
+
+    for (const result of advocateResults) {
+      const option = options.find((o) => o.id === result.optionId)
+      if (!option) continue
+      await this.ctx.telegram.sendMessage(
+        formatAdvocateArgument(result.optionId, option.title, result.argument, result.sources.length),
+        threadId,
+      )
+    }
+
+    if (advocateResults.length === 0) {
+      log.warn({ slug }, "all advocates failed in ship judge arena")
+      return false
+    }
+
+    log.info({ slug, advocateCount: advocateResults.length }, "running final judge")
+    const decision = await this.runJudge(options, advocateResults, conversation, question, profile)
+
+    if (!decision) {
+      log.warn({ slug }, "judge failed in ship judge arena")
+      return false
+    }
+
+    const chosenOption = options.find((o) => o.id === decision.chosenOptionId)
+    const chosenTitle = chosenOption?.title ?? decision.chosenOptionId
+
+    await this.ctx.telegram.sendMessage(
+      formatJudgeVerdict(question, decision.chosenOptionId, chosenTitle, decision.reasoning),
+      threadId,
+    )
+
+    this.ctx.pushToConversation(topicSession, {
+      role: "assistant",
+      text: [
+        `Judge Arena Verdict: ${decision.summary}`,
+        `Chosen: ${decision.chosenOptionId} — ${chosenTitle}`,
+        `Reasoning: ${decision.reasoning}`,
+        decision.tradeoffs.length > 0
+          ? `Tradeoffs: ${decision.tradeoffs.join("; ")}`
+          : "",
+      ].filter(Boolean).join("\n"),
+    })
+
+    log.info({ slug, chosenOptionId: decision.chosenOptionId }, "ship judge arena complete")
+    return true
+  }
+
   private async runAdvocates(
     options: JudgeOption[],
     conversation: TopicMessage[],

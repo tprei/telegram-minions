@@ -176,7 +176,7 @@ export interface TopicSession {
 
 // Ship pipeline types
 
-export type ShipPhase = "think" | "plan" | "dag" | "verify" | "done"
+export type ShipPhase = "think" | "plan" | "judge" | "dag" | "verify" | "done"
 
 export interface AutoAdvance {
   phase: ShipPhase

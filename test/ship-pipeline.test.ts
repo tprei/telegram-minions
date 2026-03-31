@@ -17,15 +17,29 @@ vi.mock("../src/dag/dag-extract.js", () => ({
   }),
 }))
 
+vi.mock("../src/judge/judge-extraction.js", () => ({
+  extractJudgeOptions: vi.fn().mockResolvedValue({ options: [] }),
+}))
+
+vi.mock("../src/claude-extract.js", () => ({
+  runClaudeExtraction: vi.fn().mockResolvedValue("{}"),
+  retryClaudeExtraction: vi.fn().mockResolvedValue("{}"),
+  buildConversationText: vi.fn().mockReturnValue(""),
+}))
+
 vi.mock("../src/sentry.js", () => ({
   captureException: vi.fn(),
 }))
 
 import { extractDagItems } from "../src/dag/dag-extract.js"
 import { parseCompletenessResult } from "../src/ci/verification.js"
+import { extractJudgeOptions } from "../src/judge/judge-extraction.js"
+import { runClaudeExtraction } from "../src/claude-extract.js"
 
 const mockExtractDagItems = vi.mocked(extractDagItems)
 const mockParseCompletenessResult = vi.mocked(parseCompletenessResult)
+const mockExtractJudgeOptions = vi.mocked(extractJudgeOptions)
+const mockRunClaudeExtraction = vi.mocked(runClaudeExtraction)
 
 function makeAutoAdvance(overrides: Partial<AutoAdvance> = {}): AutoAdvance {
   return {
@@ -152,7 +166,9 @@ describe("ShipPipeline", () => {
       expect(ctx.spawnTopicAgent).toHaveBeenCalled()
     })
 
-    it("advances from plan to dag phase", async () => {
+    it("advances from plan through judge to dag when no options found", async () => {
+      mockExtractJudgeOptions.mockResolvedValueOnce({ options: [] })
+
       const session = makeSession({
         autoAdvance: makeAutoAdvance({ phase: "plan" }),
       })
@@ -160,7 +176,71 @@ describe("ShipPipeline", () => {
       await pipeline.handleShipAdvance(session)
 
       expect(session.autoAdvance!.phase).toBe("dag")
+      expect(ctx.telegram.sendMessage).toHaveBeenCalledWith(
+        expect.stringContaining("skipping judge arena"),
+        session.threadId,
+      )
       expect(ctx.startDag).toHaveBeenCalledWith(session, expect.any(Array), false)
+    })
+
+    it("advances from plan through judge arena to dag when options found", async () => {
+      mockExtractJudgeOptions.mockResolvedValueOnce({
+        options: [
+          { id: "opt-a", title: "Option A", description: "Use approach A" },
+          { id: "opt-b", title: "Option B", description: "Use approach B" },
+        ],
+      })
+
+      mockRunClaudeExtraction
+        .mockResolvedValueOnce(JSON.stringify({ argument: "A is great", sources: ["src1"], searchCount: 1 }))
+        .mockResolvedValueOnce(JSON.stringify({ argument: "B is great", sources: ["src2"], searchCount: 1 }))
+        .mockResolvedValueOnce(JSON.stringify({
+          chosenOptionId: "opt-a",
+          reasoning: "A wins because reasons",
+          summary: "Option A chosen",
+          tradeoffs: ["tradeoff 1"],
+        }))
+
+      const session = makeSession({
+        autoAdvance: makeAutoAdvance({ phase: "plan" }),
+      })
+
+      await pipeline.handleShipAdvance(session)
+
+      expect(session.autoAdvance!.phase).toBe("dag")
+      expect(ctx.pushToConversation).toHaveBeenCalledWith(
+        session,
+        expect.objectContaining({ text: expect.stringContaining("Judge Arena Verdict") }),
+      )
+      expect(ctx.startDag).toHaveBeenCalledWith(session, expect.any(Array), false)
+    })
+
+    it("advances from plan to dag when judge extraction errors", async () => {
+      mockExtractJudgeOptions.mockRejectedValueOnce(new Error("extraction boom"))
+
+      const session = makeSession({
+        autoAdvance: makeAutoAdvance({ phase: "plan" }),
+      })
+
+      await pipeline.handleShipAdvance(session)
+
+      expect(session.autoAdvance!.phase).toBe("dag")
+      expect(ctx.telegram.sendMessage).toHaveBeenCalledWith(
+        expect.stringContaining("skipping to DAG"),
+        session.threadId,
+      )
+      expect(ctx.startDag).toHaveBeenCalledWith(session, expect.any(Array), false)
+    })
+
+    it("does nothing for judge phase (auto-advances inline)", async () => {
+      const session = makeSession({
+        autoAdvance: makeAutoAdvance({ phase: "judge" }),
+      })
+
+      await pipeline.handleShipAdvance(session)
+
+      expect(ctx.spawnTopicAgent).not.toHaveBeenCalled()
+      expect(ctx.startDag).not.toHaveBeenCalled()
     })
 
     it("does nothing for dag phase (handled by DagOrchestrator)", async () => {

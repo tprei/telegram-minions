@@ -5,6 +5,7 @@ import type { DagGraph } from "../dag/dag.js"
 import { SessionHandle, type SessionConfig } from "../session/session.js"
 import { buildCompletenessReviewPrompt, parseCompletenessResult } from "../ci/verification.js"
 import { extractDagItems } from "../dag/dag-extract.js"
+import { JudgeOrchestrator } from "../judge/judge-orchestrator.js"
 import { esc, formatShipPhaseAdvance, formatShipComplete } from "../telegram/format.js"
 import { loggers } from "../logger.js"
 
@@ -18,9 +19,11 @@ const log = loggers.ship
  */
 export class ShipPipeline {
   private readonly ctx: DispatcherContext
+  private readonly judgeOrchestrator: JudgeOrchestrator
 
   constructor(ctx: DispatcherContext) {
     this.ctx = ctx
+    this.judgeOrchestrator = new JudgeOrchestrator(ctx)
   }
 
   async handleShipAdvance(topicSession: TopicSession): Promise<void> {
@@ -32,7 +35,9 @@ export class ShipPipeline {
         await this.shipAdvanceToPlanning(topicSession)
         break
       case "plan":
-        await this.shipAdvanceToDag(topicSession)
+        await this.shipTryJudge(topicSession)
+        break
+      case "judge":
         break
       case "dag":
         // DAG completion is handled in onDagChildComplete
@@ -79,9 +84,36 @@ export class ShipPipeline {
     await this.ctx.spawnTopicAgent(topicSession, planTask)
   }
 
+  private async shipTryJudge(topicSession: TopicSession): Promise<void> {
+    topicSession.autoAdvance!.phase = "judge"
+
+    await this.ctx.telegram.sendMessage(
+      formatShipPhaseAdvance(topicSession.slug, "plan", "judge"),
+      topicSession.threadId,
+    )
+
+    try {
+      const ran = await this.judgeOrchestrator.tryJudgeArena(topicSession)
+      if (!ran) {
+        await this.ctx.telegram.sendMessage(
+          `No competing design options detected — skipping judge arena.`,
+          topicSession.threadId,
+        )
+      }
+    } catch (err) {
+      log.warn({ err, slug: topicSession.slug }, "judge arena failed, continuing to DAG")
+      await this.ctx.telegram.sendMessage(
+        `Judge arena encountered an error — skipping to DAG.`,
+        topicSession.threadId,
+      )
+    }
+
+    await this.shipAdvanceToDag(topicSession)
+  }
+
   async shipAdvanceToDag(topicSession: TopicSession): Promise<void> {
     await this.ctx.telegram.sendMessage(
-      formatShipPhaseAdvance(topicSession.slug, "plan", "dag"),
+      formatShipPhaseAdvance(topicSession.slug, "judge", "dag"),
       topicSession.threadId,
     )
 
