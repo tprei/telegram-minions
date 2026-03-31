@@ -1,3 +1,5 @@
+FROM ghcr.io/astral-sh/uv:latest AS uv
+
 FROM node:22-slim
 
 # Install system dependencies + GitHub CLI
@@ -10,6 +12,35 @@ RUN apt-get update && apt-get install -y \
   && apt-get update && apt-get install -y gh \
   && rm -rf /var/lib/apt/lists/*
 
+# Install UV package manager (from official image)
+COPY --from=uv /uv /uvx /usr/local/bin/
+
+# Install managed Python 3.13 via UV
+ENV UV_PYTHON_INSTALL_DIR="/opt/uv-python"
+RUN uv python install 3.13 \
+    && chmod -R o+rx /opt/uv-python
+
+# Install build-essential for Python packages with C extensions
+RUN apt-get update && apt-get install -y build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Pre-install Node.js devtools as ancestor-resolution fallback
+RUN mkdir -p /opt/devtools \
+    && cd /opt/devtools \
+    && npm init -y \
+    && npm install --ignore-scripts vitest typescript happy-dom jsdom \
+    && rm package.json package-lock.json \
+    && node -e "const c=require('crypto');const h=c.createHash('sha256');const fs=require('fs');h.update(fs.readdirSync('/opt/devtools/node_modules').sort().join(','));fs.writeFileSync('/opt/devtools/.version',h.digest('hex'))" \
+    && chmod -R o+rx /opt/devtools
+
+# Pre-install Python devtools as global fallback
+ENV UV_TOOL_DIR="/opt/uv-tools"
+ENV UV_TOOL_BIN_DIR="/opt/uv-tools/bin"
+RUN uv tool install pytest \
+    && uv tool install ruff \
+    && uv tool install mypy \
+    && chmod -R o+rx /opt/uv-tools
+
 # Install Goose CLI (manual extract — the install script tries interactive configure)
 RUN curl -fsSL -o /tmp/goose.tar.bz2 \
       https://github.com/block/goose/releases/download/stable/goose-x86_64-unknown-linux-gnu.tar.bz2 \
@@ -18,16 +49,12 @@ RUN curl -fsSL -o /tmp/goose.tar.bz2 \
     && chmod +x /usr/local/bin/goose \
     && rm /tmp/goose.tar.bz2
 
-# Install Claude Code CLI + MCP servers + dev tools
-# Note: vitest is NOT installed globally to ensure projects use their local
-# vitest with its own dependencies (e.g., happy-dom). Global vitest can't
-# resolve project-local test environment packages.
+# Install Claude Code CLI + MCP servers
 RUN npm install -g \
   @anthropic-ai/claude-code \
   @zed-industries/claude-agent-acp \
   @playwright/mcp \
-  @upstash/context7-mcp \
-  typescript
+  @upstash/context7-mcp
 
 # Install GitHub MCP server (official Go binary)
 RUN curl -fsSL -o /tmp/github-mcp-server.tar.gz \
@@ -51,7 +78,10 @@ RUN npm run build && npm prune --production
 
 # Non-root user (claude-agent-acp SIGKILL's under root)
 RUN useradd -m -s /bin/bash minion \
-    && chown -R minion:minion /opt/pw-browsers
+    && chown -R minion:minion /opt/pw-browsers \
+    && chown -R minion:minion /opt/uv-python \
+    && chown -R minion:minion /opt/devtools \
+    && chown -R minion:minion /opt/uv-tools
 
 RUN chmod +x /app/entrypoint.sh /app/scripts/*.sh
 

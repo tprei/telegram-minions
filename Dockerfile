@@ -24,6 +24,26 @@ RUN uv python install 3.13 \
 RUN apt-get update && apt-get install -y build-essential \
     && rm -rf /var/lib/apt/lists/*
 
+# Pre-install Node.js devtools as ancestor-resolution fallback
+# Session worktrees live at /workspace/<slug>/, so /workspace/node_modules/
+# acts as a fallback when the project doesn't have tools locally.
+# Installed at /opt/devtools/ here, then hardlink-copied to /workspace/ at session start.
+RUN mkdir -p /opt/devtools \
+    && cd /opt/devtools \
+    && npm init -y \
+    && npm install --ignore-scripts vitest typescript happy-dom jsdom \
+    && rm package.json package-lock.json \
+    && node -e "const c=require('crypto');const h=c.createHash('sha256');const fs=require('fs');h.update(fs.readdirSync('/opt/devtools/node_modules').sort().join(','));fs.writeFileSync('/opt/devtools/.version',h.digest('hex'))" \
+    && chmod -R o+rx /opt/devtools
+
+# Pre-install Python devtools as global fallback
+ENV UV_TOOL_DIR="/opt/uv-tools"
+ENV UV_TOOL_BIN_DIR="/opt/uv-tools/bin"
+RUN uv tool install pytest \
+    && uv tool install ruff \
+    && uv tool install mypy \
+    && chmod -R o+rx /opt/uv-tools
+
 # Install Goose CLI (manual extract — the install script tries interactive configure)
 RUN curl -fsSL -o /tmp/goose.tar.bz2 \
       https://github.com/block/goose/releases/download/stable/goose-x86_64-unknown-linux-gnu.tar.bz2 \
@@ -59,7 +79,9 @@ RUN npm run build && npm prune --production
 # Non-root user (claude-agent-acp SIGKILL's under root)
 RUN useradd -m -s /bin/bash minion \
     && chown -R minion:minion /opt/pw-browsers \
-    && chown -R minion:minion /opt/uv-python
+    && chown -R minion:minion /opt/uv-python \
+    && chown -R minion:minion /opt/devtools \
+    && chown -R minion:minion /opt/uv-tools
 
 RUN chmod +x /app/entrypoint.sh /app/scripts/*.sh
 
