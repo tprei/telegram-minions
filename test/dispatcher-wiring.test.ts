@@ -266,6 +266,8 @@ describe("Dispatcher module wiring", () => {
     expect(session.mode).toBe("task")
     expect(session.autoAdvance).toBeUndefined()
     expect(session.pendingFeedback).toEqual([])
+  })
+
   describe("ship phase error resilience", () => {
     it("preserves phase and shows recovery options when ship session errors", async () => {
       const telegram = makeMockTelegram()
