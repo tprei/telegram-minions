@@ -868,6 +868,72 @@ export function formatStackAnalyzing(slug: string): string {
   return `📚 <b>Analyzing conversation</b>  ·  🏷 <code>${esc(slug)}</code>\nExtracting sequential work items for stacked PRs…`
 }
 
+export function formatJudgeExtraction(slug: string): string {
+  return `⚖️ <b>Extracting options</b>  ·  🏷 <code>${esc(slug)}</code>\nAnalyzing conversation for design decisions…`
+}
+
+export function formatJudgeArena(
+  slug: string,
+  question: string,
+  options: { id: string; title: string }[],
+): string {
+  const MAX_QUESTION = 200
+  const lines: string[] = [
+    `⚖️ <b>Judge Arena</b>  ·  🏷 <code>${esc(slug)}</code>`,
+    "",
+    `<blockquote>${esc(truncate(question, MAX_QUESTION))}</blockquote>`,
+    "",
+  ]
+  for (let i = 0; i < options.length; i++) {
+    lines.push(`${i + 1}. 🗣 <b>${esc(options[i].id)}</b> — ${esc(options[i].title)}`)
+  }
+  lines.push("")
+  lines.push("Advocates are researching and arguing each option…")
+  return lines.join("\n")
+}
+
+export function formatAdvocateArgument(
+  optionId: string,
+  optionTitle: string,
+  argument: string,
+  searchCount: number,
+): string {
+  const MAX_ARG = 600
+  const searchPart = searchCount > 0 ? `  ·  🌐 ${searchCount} search${searchCount === 1 ? "" : "es"}` : ""
+  return [
+    `🗣 <b>Advocate: ${esc(optionId)}</b> — ${esc(optionTitle)}${searchPart}`,
+    "",
+    `<blockquote>${esc(truncate(argument, MAX_ARG))}</blockquote>`,
+  ].join("\n")
+}
+
+export function formatJudgeVerdict(
+  question: string,
+  chosenId: string,
+  chosenTitle: string,
+  reasoning: string,
+): string {
+  const MAX_QUESTION = 150
+  const MAX_REASONING = 800
+  return [
+    `⚖️ <b>Verdict</b>`,
+    "",
+    `<blockquote>${esc(truncate(question, MAX_QUESTION))}</blockquote>`,
+    "",
+    `✅ <b>Winner: ${esc(chosenId)}</b> — ${esc(chosenTitle)}`,
+    "",
+    `<blockquote>${esc(truncate(reasoning, MAX_REASONING))}</blockquote>`,
+  ].join("\n")
+}
+
+export function formatJudgeError(slug: string, error: string): string {
+  return [
+    `⚖️ ❌ <b>Judge Arena failed</b>  ·  🏷 <code>${esc(slug)}</code>`,
+    "",
+    `<code>${esc(truncate(error, 300))}</code>`,
+  ].join("\n")
+}
+
 export function formatDagAnalyzing(slug: string): string {
   return `🔗 <b>Analyzing conversation</b>  ·  🏷 <code>${esc(slug)}</code>\nExtracting work items with dependencies…`
 }
