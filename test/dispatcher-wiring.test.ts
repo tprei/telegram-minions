@@ -228,4 +228,145 @@ describe("Dispatcher module wiring", () => {
     expect(dispatcher.getDags()).toBeInstanceOf(Map)
     expect(dispatcher.getDags().size).toBe(0)
   })
+
+  describe("ship phase error resilience", () => {
+    it("preserves phase and shows recovery options when ship session errors", async () => {
+      const telegram = makeMockTelegram()
+      const config = makeConfig()
+      const observer = new Observer(telegram, 123)
+      const dispatcher = new Dispatcher(telegram, observer, config)
+
+      const d = dispatcher as unknown as {
+        topicSessions: Map<number, TopicSession>
+        handleSessionComplete: (ts: TopicSession, m: any, state: string, sid: string) => void
+        observer: { onSessionComplete: ReturnType<typeof vi.fn> }
+        cleanBuildArtifacts: ReturnType<typeof vi.fn>
+        stats: { record: ReturnType<typeof vi.fn> }
+        pinnedMessages: { updateTopicTitle: ReturnType<typeof vi.fn>; updatePinnedSummary: ReturnType<typeof vi.fn> }
+        persistTopicSessions: ReturnType<typeof vi.fn>
+      }
+
+      // Stub internal dependencies
+      d.observer.onSessionComplete = vi.fn().mockResolvedValue(undefined)
+      d.cleanBuildArtifacts = vi.fn()
+      d.stats.record = vi.fn().mockResolvedValue(undefined)
+      d.pinnedMessages.updateTopicTitle = vi.fn().mockResolvedValue(undefined)
+      d.pinnedMessages.updatePinnedSummary = vi.fn()
+      d.persistTopicSessions = vi.fn().mockResolvedValue(undefined)
+
+      const session: TopicSession = {
+        threadId: 300,
+        repo: "test-repo",
+        cwd: "/tmp/test",
+        slug: "ship-test",
+        conversation: [],
+        pendingFeedback: [],
+        mode: "ship-plan",
+        lastActivityAt: Date.now(),
+        activeSessionId: "session-abc",
+        autoAdvance: {
+          phase: "plan",
+          featureDescription: "Build feature",
+          autoLand: false,
+        },
+      }
+      d.topicSessions.set(300, session)
+
+      const meta = {
+        sessionId: "session-abc",
+        threadId: 300,
+        topicName: "ship-test",
+        repo: "test-repo",
+        cwd: "/tmp/test",
+        startedAt: Date.now() - 5000,
+        mode: "ship-plan" as const,
+      }
+
+      d.handleSessionComplete(session, meta, "errored", "session-abc")
+
+      // Phase should be preserved, not set to "done"
+      expect(session.autoAdvance!.phase).toBe("plan")
+
+      // Should show warning emoji, not error
+      expect(d.pinnedMessages.updateTopicTitle).toHaveBeenCalledWith(session, "⚠️")
+
+      // Should send recovery options
+      expect(telegram.sendMessage).toHaveBeenCalledWith(
+        expect.stringContaining("Recovery options"),
+        300,
+      )
+      expect(telegram.sendMessage).toHaveBeenCalledWith(
+        expect.stringContaining("/dag"),
+        300,
+      )
+      expect(telegram.sendMessage).toHaveBeenCalledWith(
+        expect.stringContaining("/execute"),
+        300,
+      )
+      expect(telegram.sendMessage).toHaveBeenCalledWith(
+        expect.stringContaining("/close"),
+        300,
+      )
+    })
+
+    it("preserves phase for ship-think mode errors too", async () => {
+      const telegram = makeMockTelegram()
+      const config = makeConfig()
+      const observer = new Observer(telegram, 123)
+      const dispatcher = new Dispatcher(telegram, observer, config)
+
+      const d = dispatcher as unknown as {
+        topicSessions: Map<number, TopicSession>
+        handleSessionComplete: (ts: TopicSession, m: any, state: string, sid: string) => void
+        observer: { onSessionComplete: ReturnType<typeof vi.fn> }
+        cleanBuildArtifacts: ReturnType<typeof vi.fn>
+        stats: { record: ReturnType<typeof vi.fn> }
+        pinnedMessages: { updateTopicTitle: ReturnType<typeof vi.fn>; updatePinnedSummary: ReturnType<typeof vi.fn> }
+        persistTopicSessions: ReturnType<typeof vi.fn>
+      }
+
+      d.observer.onSessionComplete = vi.fn().mockResolvedValue(undefined)
+      d.cleanBuildArtifacts = vi.fn()
+      d.stats.record = vi.fn().mockResolvedValue(undefined)
+      d.pinnedMessages.updateTopicTitle = vi.fn().mockResolvedValue(undefined)
+      d.pinnedMessages.updatePinnedSummary = vi.fn()
+      d.persistTopicSessions = vi.fn().mockResolvedValue(undefined)
+
+      const session: TopicSession = {
+        threadId: 301,
+        repo: "test-repo",
+        cwd: "/tmp/test",
+        slug: "ship-test-2",
+        conversation: [],
+        pendingFeedback: [],
+        mode: "ship-think",
+        lastActivityAt: Date.now(),
+        activeSessionId: "session-def",
+        autoAdvance: {
+          phase: "think",
+          featureDescription: "Build feature",
+          autoLand: false,
+        },
+      }
+      d.topicSessions.set(301, session)
+
+      const meta = {
+        sessionId: "session-def",
+        threadId: 301,
+        topicName: "ship-test-2",
+        repo: "test-repo",
+        cwd: "/tmp/test",
+        startedAt: Date.now() - 5000,
+        mode: "ship-think" as const,
+      }
+
+      d.handleSessionComplete(session, meta, "errored", "session-def")
+
+      expect(session.autoAdvance!.phase).toBe("think")
+      expect(telegram.sendMessage).toHaveBeenCalledWith(
+        expect.stringContaining("paused"),
+        301,
+      )
+    })
+  })
 })
