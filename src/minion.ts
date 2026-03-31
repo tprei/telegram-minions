@@ -56,6 +56,7 @@ export function createMinion(config: MinionConfig, options?: MinionOptions): Min
   })
   const broadcaster = new StateBroadcaster()
   const tokenProvider = new GitHubTokenProvider(config.githubApp)
+  tokenProvider.setTokenFilePath(path.join(config.workspace.root, ".github-token"))
   const dispatcher = new Dispatcher(telegram, observer, config, broadcaster, tokenProvider)
 
   let apiServer: http.Server | undefined
@@ -99,11 +100,13 @@ export function createMinion(config: MinionConfig, options?: MinionOptions): Min
       }
 
       await tokenProvider.refreshEnv()
+      tokenProvider.startPeriodicRefresh()
       await dispatcher.loadPersistedSessions()
       dispatcher.startCleanupTimer()
       await dispatcher.start()
     },
     stop() {
+      tokenProvider.stopPeriodicRefresh()
       dispatcher.stop()
       if (apiServer) {
         apiServer.close()

@@ -10,8 +10,13 @@ done
 
 org="${path%%/*}"
 
-# Prefer GITHUB_TOKEN (refreshed by GitHub App auth) over static GITHUB_TOKENS
-token="$GITHUB_TOKEN"
+# Read fresh token from file (updated by parent process every 45min),
+# fall back to env var
+token=""
+if [ -n "$GITHUB_TOKEN_FILE" ] && [ -f "$GITHUB_TOKEN_FILE" ]; then
+  token=$(cat "$GITHUB_TOKEN_FILE" 2>/dev/null)
+fi
+[ -z "$token" ] && token="$GITHUB_TOKEN"
 
 if [ -z "$token" ] && [ -n "$GITHUB_TOKENS" ]; then
   declare -A TOKENS

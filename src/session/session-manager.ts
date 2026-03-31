@@ -143,8 +143,15 @@ function ensureGitAskpass(): string {
   const script = [
     "#!/bin/sh",
     'case "$1" in',
-    '  Username*) echo "x-access-token" ;;',
-    '  Password*) echo "$GITHUB_TOKEN" ;;',
+    "  Username*) echo \"x-access-token\" ;;",
+    "  Password*)",
+    "    token=\"\"",
+    "    if [ -n \"$GITHUB_TOKEN_FILE\" ] && [ -f \"$GITHUB_TOKEN_FILE\" ]; then",
+    "      token=$(cat \"$GITHUB_TOKEN_FILE\" 2>/dev/null)",
+    "    fi",
+    "    [ -z \"$token\" ] && token=\"$GITHUB_TOKEN\"",
+    "    echo \"$token\"",
+    "    ;;",
     "esac",
   ].join("\n")
 

@@ -298,6 +298,7 @@ export class SessionHandle {
       TERM: process.env["TERM"] ?? "xterm",
       NODE_PATH: process.env["NODE_PATH"] ?? "",
       GITHUB_TOKEN: process.env["GITHUB_TOKEN"] ?? "",
+      GITHUB_TOKEN_FILE: process.env["GITHUB_TOKEN_FILE"] ?? "",
       GIT_TERMINAL_PROMPT: "0",
       GIT_ASKPASS: process.env["GIT_ASKPASS"] ?? "",
       GIT_CONFIG_GLOBAL: path.join(parentHome, ".gitconfig"),

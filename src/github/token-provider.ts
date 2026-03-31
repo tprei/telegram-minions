@@ -1,10 +1,12 @@
 import crypto from "node:crypto"
+import fs from "node:fs"
 import type { GitHubAppConfig } from "../config/config-types.js"
 import { loggers } from "../logger.js"
 
 const log = loggers.github
 
 const REFRESH_MARGIN_MS = 5 * 60 * 1000
+const REFRESH_INTERVAL_MS = 45 * 60 * 1000
 const JWT_EXPIRY_SECONDS = 600
 
 interface CachedToken {
@@ -16,9 +18,32 @@ export class GitHubTokenProvider {
   private readonly appConfig?: GitHubAppConfig
   private cached?: CachedToken
   private pendingRefresh?: Promise<string>
+  private tokenFilePath?: string
+  private refreshTimer?: ReturnType<typeof setInterval>
 
   constructor(appConfig?: GitHubAppConfig) {
     this.appConfig = appConfig
+  }
+
+  setTokenFilePath(p: string): void {
+    this.tokenFilePath = p
+  }
+
+  startPeriodicRefresh(): void {
+    if (!this.appConfig) return
+    this.refreshTimer = setInterval(() => {
+      this.refreshEnv().catch((err) => {
+        log.warn({ err }, "periodic token refresh failed")
+      })
+    }, REFRESH_INTERVAL_MS)
+    log.info({ intervalMinutes: Math.round(REFRESH_INTERVAL_MS / 60_000) }, "started periodic GitHub token refresh")
+  }
+
+  stopPeriodicRefresh(): void {
+    if (this.refreshTimer) {
+      clearInterval(this.refreshTimer)
+      this.refreshTimer = undefined
+    }
   }
 
   get isAppAuth(): boolean {
@@ -41,6 +66,14 @@ export class GitHubTokenProvider {
     if (!this.appConfig) return
     const token = await this.getToken()
     process.env["GITHUB_TOKEN"] = token
+    if (this.tokenFilePath) {
+      try {
+        fs.writeFileSync(this.tokenFilePath, token, { mode: 0o600 })
+        process.env["GITHUB_TOKEN_FILE"] = this.tokenFilePath
+      } catch {
+        log.warn("failed to write token file")
+      }
+    }
     log.info("refreshed GITHUB_TOKEN from GitHub App installation token")
   }
 
