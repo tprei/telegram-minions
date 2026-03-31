@@ -287,7 +287,7 @@ describe("ShipPipeline", () => {
       )
     })
 
-    it("halts when no items extracted", async () => {
+    it("falls back to /execute when no items extracted", async () => {
       mockExtractDagItems.mockResolvedValueOnce({ items: [] })
 
       const session = makeSession({
@@ -296,11 +296,12 @@ describe("ShipPipeline", () => {
 
       await pipeline.shipAdvanceToDag(session)
 
-      expect(session.autoAdvance!.phase).toBe("done")
       expect(ctx.telegram.sendMessage).toHaveBeenCalledWith(
-        expect.stringContaining("could not extract work items"),
+        expect.stringContaining("falling back to"),
         session.threadId,
       )
+      expect(ctx.handleExecuteCommand).toHaveBeenCalledWith(session)
+      expect(ctx.startDag).not.toHaveBeenCalled()
     })
 
     it("starts DAG with extracted items", async () => {

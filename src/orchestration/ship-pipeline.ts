@@ -136,12 +136,12 @@ export class ShipPipeline {
     }
 
     if (result.items.length === 0) {
-      topicSession.autoAdvance!.phase = "done"
+      log.warn({ slug: topicSession.slug }, "DAG extraction yielded 0 items, falling back to /execute")
       await this.ctx.telegram.sendMessage(
-        `❌ Ship pipeline halted: could not extract work items from the plan.`,
+        `⚠️ No work items extracted — falling back to <code>/execute</code>.`,
         topicSession.threadId,
       )
-      await this.ctx.updateTopicTitle(topicSession, "❌")
+      await this.ctx.handleExecuteCommand(topicSession)
       return
     }
 
