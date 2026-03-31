@@ -266,7 +266,7 @@ describe("ShipPipeline", () => {
   })
 
   describe("shipAdvanceToDag", () => {
-    it("halts on system extraction error", async () => {
+    it("reverts to plan phase on system extraction error with recovery hints", async () => {
       mockExtractDagItems.mockResolvedValueOnce({
         items: [],
         error: "system",
@@ -279,12 +279,15 @@ describe("ShipPipeline", () => {
 
       await pipeline.shipAdvanceToDag(session)
 
-      expect(session.autoAdvance!.phase).toBe("done")
-      expect(ctx.updateTopicTitle).toHaveBeenCalledWith(session, "❌")
-      expect(ctx.telegram.sendMessage).toHaveBeenCalledWith(
-        expect.stringContaining("DAG extraction failed"),
-        session.threadId,
+      expect(session.autoAdvance!.phase).toBe("plan")
+      expect(ctx.updateTopicTitle).toHaveBeenCalledWith(session, "⚠️")
+      const msg = (ctx.telegram.sendMessage as ReturnType<typeof vi.fn>).mock.calls.find(
+        (c: unknown[]) => typeof c[0] === "string" && c[0].includes("DAG extraction failed"),
       )
+      expect(msg).toBeDefined()
+      expect(msg![0]).toContain("/dag")
+      expect(msg![0]).toContain("/execute")
+      expect(msg![0]).toContain("/split")
     })
 
     it("halts when no items extracted", async () => {

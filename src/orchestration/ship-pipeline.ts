@@ -126,12 +126,12 @@ export class ShipPipeline {
     const result = await extractDagItems(topicSession.conversation, undefined, profile)
 
     if (result.error === "system") {
-      topicSession.autoAdvance!.phase = "done"
+      topicSession.autoAdvance!.phase = "plan"
       await this.ctx.telegram.sendMessage(
-        `❌ Ship pipeline halted: DAG extraction failed — <code>${result.errorMessage ?? "Unknown error"}</code>`,
+        `⚠️ DAG extraction failed — <code>${result.errorMessage ?? "Unknown error"}</code>\n\nYou can retry with <code>/dag</code>, or fall back to <code>/execute</code> or <code>/split</code>.`,
         topicSession.threadId,
       )
-      await this.ctx.updateTopicTitle(topicSession, "❌")
+      await this.ctx.updateTopicTitle(topicSession, "⚠️")
       return
     }
 
