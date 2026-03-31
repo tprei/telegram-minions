@@ -308,6 +308,11 @@ export class SessionHandle {
       SENTRY_ACCESS_TOKEN: process.env["SENTRY_ACCESS_TOKEN"] ?? "",
       SUPABASE_ACCESS_TOKEN: process.env["SUPABASE_ACCESS_TOKEN"] ?? "",
       ZAI_API_KEY: process.env["ZAI_API_KEY"] ?? "",
+
+      // UV / Python — allow sessions to use uv for Python dependency management
+      UV_CACHE_DIR: path.join(sessionHome, ".cache", "uv"),
+      UV_PYTHON_PREFERENCE: "only-managed",
+      UV_LINK_MODE: "copy",
     }
 
     const profile = this.sessionConfig.profile
