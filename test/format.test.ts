@@ -42,6 +42,11 @@ import {
   threadLink,
   formatPinnedSplitStatus,
   formatPinnedDagStatus,
+  formatJudgeExtraction,
+  formatJudgeArena,
+  formatAdvocateArgument,
+  formatJudgeVerdict,
+  formatJudgeError,
 } from "../src/telegram/format.js"
 import type { ClaudeUsageResponse } from "../src/claude-usage.js"
 import type { AggregateStats, SessionRecord, ModeBreakdown } from "../src/stats.js"
@@ -1546,6 +1551,121 @@ describe("formatPinnedDagStatus", () => {
       ]
       const result = formatPinnedDagStatus("slug", "repo", nodes, false)
       expect(result).toContain("<b>Broken</b>")
+    })
+  })
+
+  describe("formatJudgeExtraction", () => {
+    it("includes slug and analyzing message", () => {
+      const result = formatJudgeExtraction("my-slug")
+      expect(result).toContain("⚖️")
+      expect(result).toContain("<b>Extracting options</b>")
+      expect(result).toContain("<code>my-slug</code>")
+      expect(result).toContain("Analyzing conversation for design decisions")
+    })
+  })
+
+  describe("formatJudgeArena", () => {
+    it("formats question and options list", () => {
+      const result = formatJudgeArena("my-slug", "Use REST or GraphQL?", [
+        { id: "rest", title: "REST API" },
+        { id: "graphql", title: "GraphQL API" },
+      ])
+      expect(result).toContain("⚖️ <b>Judge Arena</b>")
+      expect(result).toContain("<code>my-slug</code>")
+      expect(result).toContain("Use REST or GraphQL?")
+      expect(result).toContain("1. 🗣 <b>rest</b> — REST API")
+      expect(result).toContain("2. 🗣 <b>graphql</b> — GraphQL API")
+      expect(result).toContain("Advocates are researching")
+    })
+
+    it("escapes HTML in question and option titles", () => {
+      const result = formatJudgeArena("s", "Use <script>?", [
+        { id: "a", title: "Option <b>" },
+      ])
+      expect(result).toContain("&lt;script&gt;")
+      expect(result).toContain("Option &lt;b&gt;")
+    })
+
+    it("truncates long questions", () => {
+      const longQ = "x".repeat(300)
+      const result = formatJudgeArena("s", longQ, [{ id: "a", title: "A" }])
+      expect(result).toContain("…")
+      expect(result.length).toBeLessThan(longQ.length + 200)
+    })
+  })
+
+  describe("formatAdvocateArgument", () => {
+    it("includes option id, title, and argument text", () => {
+      const result = formatAdvocateArgument("rest", "REST API", "REST is simpler and more cacheable", 3)
+      expect(result).toContain("🗣 <b>Advocate: rest</b> — REST API")
+      expect(result).toContain("🌐 3 searches")
+      expect(result).toContain("REST is simpler and more cacheable")
+    })
+
+    it("uses singular for one search", () => {
+      const result = formatAdvocateArgument("a", "A", "arg", 1)
+      expect(result).toContain("🌐 1 search")
+      expect(result).not.toContain("searches")
+    })
+
+    it("omits search count when zero", () => {
+      const result = formatAdvocateArgument("a", "A", "arg", 0)
+      expect(result).not.toContain("🌐")
+    })
+
+    it("truncates long arguments", () => {
+      const longArg = "y".repeat(800)
+      const result = formatAdvocateArgument("a", "A", longArg, 0)
+      expect(result).toContain("…")
+    })
+  })
+
+  describe("formatJudgeVerdict", () => {
+    it("includes question, winner, and reasoning", () => {
+      const result = formatJudgeVerdict(
+        "Use REST or GraphQL?",
+        "rest",
+        "REST API",
+        "REST is the better choice for this use case because it offers simpler caching.",
+      )
+      expect(result).toContain("⚖️ <b>Verdict</b>")
+      expect(result).toContain("Use REST or GraphQL?")
+      expect(result).toContain("✅ <b>Winner: rest</b> — REST API")
+      expect(result).toContain("simpler caching")
+    })
+
+    it("escapes HTML in all fields", () => {
+      const result = formatJudgeVerdict("Q<x>", "a&b", "T<y>", "R<z>")
+      expect(result).toContain("Q&lt;x&gt;")
+      expect(result).toContain("a&amp;b")
+      expect(result).toContain("T&lt;y&gt;")
+      expect(result).toContain("R&lt;z&gt;")
+    })
+
+    it("truncates long reasoning", () => {
+      const longReasoning = "z".repeat(1000)
+      const result = formatJudgeVerdict("Q", "a", "A", longReasoning)
+      expect(result).toContain("…")
+    })
+  })
+
+  describe("formatJudgeError", () => {
+    it("includes slug and error message", () => {
+      const result = formatJudgeError("my-slug", "Timeout after 30s")
+      expect(result).toContain("⚖️ ❌ <b>Judge Arena failed</b>")
+      expect(result).toContain("<code>my-slug</code>")
+      expect(result).toContain("Timeout after 30s")
+    })
+
+    it("escapes HTML in error", () => {
+      const result = formatJudgeError("s", "Error: <bad>")
+      expect(result).toContain("&lt;bad&gt;")
+    })
+
+    it("truncates long errors", () => {
+      const longErr = "e".repeat(500)
+      const result = formatJudgeError("s", longErr)
+      expect(result).toContain("…")
     })
   })
 })
