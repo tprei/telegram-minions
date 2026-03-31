@@ -57,6 +57,7 @@ export const loggers = {
   conflictResolver: createLogger({ component: "conflict-resolver" }),
   dagStore: createLogger({ component: "dag-store" }),
   github: createLogger({ component: "github" }),
+  judgeExtract: createLogger({ component: "judge-extract" }),
 } as const
 
 /**
