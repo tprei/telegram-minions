@@ -162,4 +162,27 @@ describe("SessionHandle.buildIsolatedEnv", () => {
       expect(env["SENTRY_ACCESS_TOKEN"]).toBe("sentry_token")
     })
   })
+
+  describe("UV / Python env vars", () => {
+    it("sets UV_CACHE_DIR under session home", () => {
+      const handle = makeHandle()
+      const env = getIsolatedEnv(handle)
+
+      expect(env["UV_CACHE_DIR"]).toBe("/tmp/.home/.cache/uv")
+    })
+
+    it("sets UV_PYTHON_PREFERENCE to only-managed", () => {
+      const handle = makeHandle()
+      const env = getIsolatedEnv(handle)
+
+      expect(env["UV_PYTHON_PREFERENCE"]).toBe("only-managed")
+    })
+
+    it("sets UV_LINK_MODE to copy", () => {
+      const handle = makeHandle()
+      const env = getIsolatedEnv(handle)
+
+      expect(env["UV_LINK_MODE"]).toBe("copy")
+    })
+  })
 })
