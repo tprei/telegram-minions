@@ -88,6 +88,13 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+export class ParseError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "ParseError"
+  }
+}
+
 function isRetryableSpawnError(err: unknown): boolean {
   const code = (err as NodeJS.ErrnoException).code
   return (
@@ -96,6 +103,10 @@ function isRetryableSpawnError(err: unknown): boolean {
     code === "EAGAIN" ||
     (err instanceof Error && err.message.includes("spawn"))
   )
+}
+
+function isRetryableError(err: unknown): boolean {
+  return isRetryableSpawnError(err) || err instanceof ParseError
 }
 
 export interface RetryResult<T> {
@@ -128,13 +139,14 @@ export async function retryClaudeExtraction<T>(
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err))
 
-      if (isRetryableSpawnError(err) && attempt < MAX_RETRIES) {
+      if (isRetryableError(err) && attempt < MAX_RETRIES) {
         const delay = INITIAL_DELAY_MS * Math.pow(2, attempt - 1)
-        log.warn({ attempt, delay, err }, "spawn error, retrying")
+        log.warn({ attempt, delay, err }, "retryable error, retrying")
         await sleep(delay)
       } else {
-        log.error({ err }, "extraction failed")
-        return { error: "system", errorMessage: lastError.message }
+        const errorType = err instanceof ParseError ? "parse" as const : "system" as const
+        log.error({ err, errorType }, "extraction failed")
+        return { error: errorType, errorMessage: lastError.message }
       }
     }
   }
