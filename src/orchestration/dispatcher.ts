@@ -67,6 +67,7 @@ import { LandingManager } from "../dag/landing-manager.js"
 import { DagOrchestrator } from "../dag/dag-orchestrator.js"
 import { ShipPipeline } from "./ship-pipeline.js"
 import { SplitOrchestrator } from "./split-orchestrator.js"
+import { JudgeOrchestrator } from "../judge/judge-orchestrator.js"
 import { PinnedMessageManager } from "../telegram/pinned-message-manager.js"
 import { routeCommand } from "../commands/command-router.js"
 
@@ -94,6 +95,7 @@ export class Dispatcher {
   private readonly dagOrchestrator: DagOrchestrator
   private readonly shipPipeline: ShipPipeline
   private readonly splitOrchestrator: SplitOrchestrator
+  private readonly judgeOrchestrator: JudgeOrchestrator
   private readonly pinnedMessages: PinnedMessageManager
 
   constructor(
@@ -115,6 +117,7 @@ export class Dispatcher {
     this.dagOrchestrator = new DagOrchestrator(ctx)
     this.shipPipeline = new ShipPipeline(ctx)
     this.splitOrchestrator = new SplitOrchestrator(ctx)
+    this.judgeOrchestrator = new JudgeOrchestrator(ctx)
     this.pinnedMessages = new PinnedMessageManager({
       telegram: this.telegram,
       topicSessions: this.topicSessions,
@@ -500,6 +503,7 @@ export class Dispatcher {
       case "split": return this.splitOrchestrator.handleSplitCommand(topicSession!, routed.directive)
       case "stack": return this.splitOrchestrator.handleStackCommand(topicSession!, routed.directive)
       case "dag": return this.handleDagCommand(topicSession!, routed.directive)
+      case "judge": return this.judgeOrchestrator.handleJudgeCommand(topicSession!, routed.directive)
       case "land": return this.landingManager.handleLandCommand(topicSession!)
       case "retry": return this.dagOrchestrator.handleRetryCommand(topicSession!, routed.nodeId)
       case "force": return this.dagOrchestrator.handleForceCommand(topicSession!, routed.nodeId)

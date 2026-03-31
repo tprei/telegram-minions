@@ -111,6 +111,7 @@ describe("Dispatcher module wiring", () => {
     expect(d.dagOrchestrator).toBeDefined()
     expect(d.shipPipeline).toBeDefined()
     expect(d.splitOrchestrator).toBeDefined()
+    expect(d.judgeOrchestrator).toBeDefined()
     expect(d.pinnedMessages).toBeDefined()
   })
 

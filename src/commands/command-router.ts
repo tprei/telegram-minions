@@ -3,7 +3,7 @@ import {
   TASK_PREFIX, TASK_SHORT, PLAN_PREFIX, THINK_PREFIX, REVIEW_PREFIX,
   EXECUTE_CMD, STATUS_CMD, STATS_CMD, REPLY_PREFIX, REPLY_SHORT,
   CLOSE_CMD, STOP_CMD, HELP_CMD, CLEAN_CMD, USAGE_CMD, CONFIG_CMD,
-  SPLIT_CMD, STACK_CMD, DAG_CMD, LAND_CMD, RETRY_CMD, FORCE_CMD, SHIP_PREFIX,
+  SPLIT_CMD, STACK_CMD, DAG_CMD, JUDGE_CMD, LAND_CMD, RETRY_CMD, FORCE_CMD, SHIP_PREFIX,
 } from "./command-parser.js"
 
 export type RoutedCommand =
@@ -24,6 +24,7 @@ export type RoutedCommand =
   | { type: "split"; threadId: number; directive?: string }
   | { type: "stack"; threadId: number; directive?: string }
   | { type: "dag"; threadId: number; directive?: string }
+  | { type: "judge"; threadId: number; directive?: string }
   | { type: "land"; threadId: number }
   | { type: "retry"; threadId: number; nodeId?: string }
   | { type: "force"; threadId: number; nodeId?: string }
@@ -100,6 +101,9 @@ export function routeCommand(
     }
     if (isPlanLike && (text === DAG_CMD || text?.startsWith(DAG_CMD + " "))) {
       return { type: "dag", threadId, directive: text!.slice(DAG_CMD.length).trim() || undefined }
+    }
+    if (isPlanLike && (text === JUDGE_CMD || text?.startsWith(JUDGE_CMD + " "))) {
+      return { type: "judge", threadId, directive: text!.slice(JUDGE_CMD.length).trim() || undefined }
     }
     if (text === LAND_CMD) return { type: "land", threadId }
     if (text === RETRY_CMD || text?.startsWith(RETRY_CMD + " ")) {

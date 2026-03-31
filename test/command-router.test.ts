@@ -168,6 +168,22 @@ describe("routeCommand", () => {
       })
     })
 
+    it("routes /judge in plan mode", () => {
+      expect(routeCommand("/judge", 10, "plan", true)).toEqual({ type: "judge", threadId: 10, directive: undefined })
+    })
+
+    it("routes /judge with directive in think mode", () => {
+      expect(routeCommand("/judge focus on performance", 10, "think", true)).toEqual({
+        type: "judge",
+        threadId: 10,
+        directive: "focus on performance",
+      })
+    })
+
+    it("does not route /judge in task mode", () => {
+      expect(routeCommand("/judge", 10, "task", true)).toBeNull()
+    })
+
     it("routes /land", () => {
       expect(routeCommand("/land", 10, "plan", true)).toEqual({ type: "land", threadId: 10 })
     })
