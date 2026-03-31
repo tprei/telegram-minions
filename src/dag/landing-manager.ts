@@ -171,85 +171,83 @@ export class LandingManager {
         )
 
         const toRestack = needsRestack(graph, node.id, { includeDone: true })
-        if (toRestack.length > 0) {
-          const cwd = this.findValidCwd(topicSession, graph)
-          if (cwd) {
+        for (const downstream of toRestack) {
+          if (!downstream.branch || !downstream.prUrl) continue
+
+          const dsCwd = this.findWorktreePathForBranch(downstream)
+          const useOwnWorktree = !!(dsCwd && existsSync(dsCwd))
+          const restackCwd = useOwnWorktree ? dsCwd : this.findValidCwd(topicSession, graph)
+          if (!restackCwd) {
+            log.warn({ nodeId: downstream.id }, "no valid cwd for restacking — skipping")
+            continue
+          }
+
+          await this.ctx.telegram.sendMessage(
+            formatLandRestacking(downstream.title, downstream.branch),
+            topicSession.threadId,
+          )
+
+          try {
+            const newBase = `origin/${baseBranch}`
+
+            gitSync(["fetch", "origin"], { cwd: restackCwd })
+            if (!useOwnWorktree) {
+              gitSync(["checkout", downstream.branch], { cwd: restackCwd })
+            }
+            gitSync(["rebase", "--onto", newBase, downstream.mergeBase!, downstream.branch], { cwd: restackCwd })
+            gitSync(["push", "--force-with-lease", "origin", downstream.branch], { cwd: restackCwd })
+
+            downstream.mergeBase = gitSync(["rev-parse", "HEAD"], { cwd: restackCwd, timeout: 10_000 })
+
+            const dsRepo = repoFromPrUrl(downstream.prUrl!)
+            const dsRepoFlag = dsRepo ? ["--repo", dsRepo] : repoFlag
+            const dsNumber = prNumberFromUrl(downstream.prUrl!)
+            if (dsNumber) {
+              ghSync(["pr", "edit", dsNumber, ...dsRepoFlag, "--base", baseBranch])
+            }
+          } catch (err) {
+            const errMsg = err instanceof Error ? err.message : String(err)
+            log.error({ err, nodeId: downstream.id, branch: downstream.branch }, "restack failed")
+
+            let conflictResolved = false
             try {
-              gitSync(["fetch", "origin"], { cwd })
-            } catch (err) {
-              log.warn({ err, nodeId: node.id }, "git fetch failed during restack")
+              const unmerged = gitSync(["diff", "--name-only", "--diff-filter=U"], { cwd: restackCwd })
+              if (unmerged.length > 0) {
+                await this.ctx.telegram.sendMessage(
+                  `🤖 Attempting conflict resolution for <b>${esc(downstream.title)}</b>…`,
+                  topicSession.threadId,
+                )
+                conflictResolved = await resolveConflictsWithAgent(restackCwd, downstream.branch, baseBranch)
+
+                if (conflictResolved) {
+                  gitSync(["rebase", "--continue"], { cwd: restackCwd, env: { GIT_EDITOR: "true" } })
+                  gitSync(["push", "--force-with-lease", "origin", downstream.branch], { cwd: restackCwd })
+                  downstream.mergeBase = gitSync(["rev-parse", "HEAD"], { cwd: restackCwd, timeout: 10_000 })
+
+                  const dsRepo = repoFromPrUrl(downstream.prUrl!)
+                  const dsRepoFlag = dsRepo ? ["--repo", dsRepo] : repoFlag
+                  const dsNumber = prNumberFromUrl(downstream.prUrl!)
+                  if (dsNumber) {
+                    ghSync(["pr", "edit", dsNumber, ...dsRepoFlag, "--base", baseBranch])
+                  }
+                }
+
+                await this.ctx.telegram.sendMessage(
+                  formatLandConflictResolution(downstream.title, downstream.branch, conflictResolved),
+                  topicSession.threadId,
+                )
+              }
+            } catch {
+              // Conflict resolution itself failed
             }
 
-            for (const downstream of toRestack) {
-              if (!downstream.branch || !downstream.prUrl) continue
-
+            if (!conflictResolved) {
               await this.ctx.telegram.sendMessage(
-                formatLandRestacking(downstream.title, downstream.branch),
+                `⚠️ Restack failed for <b>${esc(downstream.title)}</b>: <code>${esc(errMsg)}</code>`,
                 topicSession.threadId,
               )
-
-              try {
-                const newBase = `origin/${baseBranch}`
-
-                gitSync(["checkout", downstream.branch], { cwd })
-                gitSync(["rebase", "--onto", newBase, downstream.mergeBase!, downstream.branch], { cwd })
-                gitSync(["push", "--force-with-lease", "origin", downstream.branch], { cwd })
-
-                downstream.mergeBase = gitSync(["rev-parse", "HEAD"], { cwd, timeout: 10_000 })
-
-                const dsRepo = repoFromPrUrl(downstream.prUrl!)
-                const dsRepoFlag = dsRepo ? ["--repo", dsRepo] : repoFlag
-                const dsNumber = prNumberFromUrl(downstream.prUrl!)
-                if (dsNumber) {
-                  ghSync(["pr", "edit", dsNumber, ...dsRepoFlag, "--base", baseBranch])
-                }
-              } catch (err) {
-                const errMsg = err instanceof Error ? err.message : String(err)
-                log.error({ err, nodeId: downstream.id, branch: downstream.branch }, "restack failed")
-
-                let conflictResolved = false
-                try {
-                  const unmerged = gitSync(["diff", "--name-only", "--diff-filter=U"], { cwd })
-                  if (unmerged.length > 0) {
-                    await this.ctx.telegram.sendMessage(
-                      `🤖 Attempting conflict resolution for <b>${esc(downstream.title)}</b>…`,
-                      topicSession.threadId,
-                    )
-                    conflictResolved = await resolveConflictsWithAgent(cwd, downstream.branch, baseBranch)
-
-                    if (conflictResolved) {
-                      gitSync(["rebase", "--continue"], { cwd, env: { GIT_EDITOR: "true" } })
-                      gitSync(["push", "--force-with-lease", "origin", downstream.branch], { cwd })
-                      downstream.mergeBase = gitSync(["rev-parse", "HEAD"], { cwd, timeout: 10_000 })
-
-                      const dsRepo = repoFromPrUrl(downstream.prUrl!)
-                      const dsRepoFlag = dsRepo ? ["--repo", dsRepo] : repoFlag
-                      const dsNumber = prNumberFromUrl(downstream.prUrl!)
-                      if (dsNumber) {
-                        ghSync(["pr", "edit", dsNumber, ...dsRepoFlag, "--base", baseBranch])
-                      }
-                    }
-
-                    await this.ctx.telegram.sendMessage(
-                      formatLandConflictResolution(downstream.title, downstream.branch, conflictResolved),
-                      topicSession.threadId,
-                    )
-                  }
-                } catch {
-                  // Conflict resolution itself failed
-                }
-
-                if (!conflictResolved) {
-                  await this.ctx.telegram.sendMessage(
-                    `⚠️ Restack failed for <b>${esc(downstream.title)}</b>: <code>${esc(errMsg)}</code>`,
-                    topicSession.threadId,
-                  )
-                  try { gitSync(["rebase", "--abort"], { cwd }) } catch { /* ignore */ }
-                }
-              }
+              try { gitSync(["rebase", "--abort"], { cwd: restackCwd }) } catch { /* ignore */ }
             }
-          } else {
-            log.warn({ nodeId: node.id }, "no valid cwd for restacking — skipping restack")
           }
         }
 
@@ -304,7 +302,9 @@ export class LandingManager {
       return
     }
 
-    const cwd = this.findValidCwd(topicSession, graph)
+    const nodeCwd = this.findWorktreePathForBranch(node)
+    const useOwnWorktree = !!(nodeCwd && existsSync(nodeCwd))
+    const cwd = useOwnWorktree ? nodeCwd : this.findValidCwd(topicSession, graph)
     if (!cwd) {
       log.warn({ nodeId: node.id }, "PR not mergeable but no valid cwd for rebase")
       return
@@ -317,7 +317,9 @@ export class LandingManager {
 
     try {
       gitSync(["fetch", "origin", node.branch, baseBranch], { cwd })
-      gitSync(["checkout", node.branch], { cwd })
+      if (!useOwnWorktree) {
+        gitSync(["checkout", node.branch], { cwd })
+      }
       if (node.mergeBase) {
         gitSync(["rebase", "--onto", `origin/${baseBranch}`, node.mergeBase, node.branch], { cwd })
       } else {
