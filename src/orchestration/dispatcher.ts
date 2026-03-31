@@ -1265,11 +1265,12 @@ export class Dispatcher {
           loggers.ship.error({ err }, "flushAndComplete error in ship phase")
         })
       } else {
-        topicSession.autoAdvance.phase = "done"
-        this.pinnedMessages.updateTopicTitle(topicSession, "❌").catch(() => {})
+        // Keep phase unchanged so the user can retry — don't set to "done"
+        this.pinnedMessages.updateTopicTitle(topicSession, "⚠️").catch(() => {})
         this.observer.onSessionComplete(m, state, durationMs).catch(() => {})
+        const phase = topicSession.autoAdvance.phase
         this.telegram.sendMessage(
-          `❌ Ship pipeline halted: ${topicSession.mode} phase errored.`,
+          `⚠️ Ship pipeline paused: ${topicSession.mode} phase errored during <b>${phase}</b>.\n\nRecovery options:\n• /dag — retry DAG extraction\n• /execute — run as a single task\n• /split — split into parallel sub-tasks\n• /close — abandon this ship`,
           topicSession.threadId,
         ).catch(() => {})
         writeSessionLog(topicSession, m, state, durationMs)
