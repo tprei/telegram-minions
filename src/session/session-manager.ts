@@ -422,6 +422,8 @@ export function bootstrapDependencies(workDir: string, reposDir: string, repoNam
     bootstrapOnePackage(workDir, reposDir, repoName, workDir)
   }
 
+  bootstrapPythonDependencies(workDir, reposDir, repoName)
+
   try {
     const entries = fs.readdirSync(workDir, { withFileTypes: true })
     for (const entry of entries) {
@@ -430,17 +432,146 @@ export function bootstrapDependencies(workDir: string, reposDir: string, repoNam
       if (fs.existsSync(path.join(nested, "package.json"))) {
         bootstrapOnePackage(nested, reposDir, `${repoName}-${entry.name}`, `${workDir}/${entry.name}`)
       }
+      bootstrapPythonDependencies(nested, reposDir, `${repoName}-${entry.name}`)
     }
   } catch {
     // non-fatal
   }
 }
 
+function bootstrapPythonProject(
+  pkgDir: string, reposDir: string, cacheKey: string, label: string,
+): void {
+  const lockFile = path.join(pkgDir, "uv.lock")
+  const cacheDir = path.join(reposDir, `${cacheKey}-venv`)
+  const cacheLockHash = path.join(reposDir, `${cacheKey}-uvlock.hash`)
+
+  const currentHash = fs.existsSync(lockFile)
+    ? crypto.createHash("sha256").update(fs.readFileSync(lockFile)).digest("hex")
+    : null
+
+  const cachedHash = fs.existsSync(cacheLockHash)
+    ? fs.readFileSync(cacheLockHash, "utf8").trim()
+    : null
+
+  const stdio: import("node:child_process").StdioOptions = ["ignore", "pipe", "pipe"]
+  const venvDir = path.join(pkgDir, ".venv")
+
+  if (currentHash && cachedHash === currentHash && fs.existsSync(cacheDir)) {
+    try {
+      execSync(`cp -al ${JSON.stringify(cacheDir)} ${JSON.stringify(venvDir)}`, {
+        stdio, timeout: 30_000,
+      })
+      log.debug({ label }, "hardlinked .venv from cache")
+      return
+    } catch (err) {
+      log.warn({ err, label }, "hardlink copy failed for .venv, falling back to uv sync")
+    }
+  }
+
+  try {
+    log.debug({ label }, "running uv sync")
+    execSync("uv sync", { cwd: pkgDir, stdio, timeout: 300_000 })
+
+    if (fs.existsSync(cacheDir)) {
+      fs.rmSync(cacheDir, { recursive: true, force: true })
+    }
+    if (fs.existsSync(venvDir)) {
+      execSync(`cp -al ${JSON.stringify(venvDir)} ${JSON.stringify(cacheDir)}`, {
+        stdio, timeout: 60_000,
+      })
+      if (currentHash) {
+        fs.writeFileSync(cacheLockHash, currentHash)
+      }
+      log.debug({ label }, "cached .venv")
+    }
+  } catch (err) {
+    log.warn({ err, label }, "uv sync failed (non-fatal)")
+  }
+}
+
+function bootstrapPythonRequirements(
+  pkgDir: string, reposDir: string, cacheKey: string, label: string,
+): void {
+  const reqFile = path.join(pkgDir, "requirements.txt")
+  const cacheDir = path.join(reposDir, `${cacheKey}-venv`)
+  const cacheLockHash = path.join(reposDir, `${cacheKey}-req.hash`)
+
+  const currentHash = crypto.createHash("sha256").update(fs.readFileSync(reqFile)).digest("hex")
+
+  const cachedHash = fs.existsSync(cacheLockHash)
+    ? fs.readFileSync(cacheLockHash, "utf8").trim()
+    : null
+
+  const stdio: import("node:child_process").StdioOptions = ["ignore", "pipe", "pipe"]
+  const venvDir = path.join(pkgDir, ".venv")
+
+  if (cachedHash === currentHash && fs.existsSync(cacheDir)) {
+    try {
+      execSync(`cp -al ${JSON.stringify(cacheDir)} ${JSON.stringify(venvDir)}`, {
+        stdio, timeout: 30_000,
+      })
+      log.debug({ label }, "hardlinked .venv from requirements cache")
+      return
+    } catch (err) {
+      log.warn({ err, label }, "hardlink copy failed for .venv, falling back to uv pip install")
+    }
+  }
+
+  try {
+    log.debug({ label }, "running uv venv + uv pip install")
+    execSync("uv venv", { cwd: pkgDir, stdio, timeout: 60_000 })
+    execSync("uv pip install -r requirements.txt", { cwd: pkgDir, stdio, timeout: 300_000 })
+
+    if (fs.existsSync(cacheDir)) {
+      fs.rmSync(cacheDir, { recursive: true, force: true })
+    }
+    if (fs.existsSync(venvDir)) {
+      execSync(`cp -al ${JSON.stringify(venvDir)} ${JSON.stringify(cacheDir)}`, {
+        stdio, timeout: 60_000,
+      })
+      fs.writeFileSync(cacheLockHash, currentHash)
+      log.debug({ label }, "cached .venv from requirements")
+    }
+  } catch (err) {
+    log.warn({ err, label }, "uv pip install failed (non-fatal)")
+  }
+}
+
+export function bootstrapPythonDependencies(
+  pkgDir: string, reposDir: string, cacheKey: string,
+): void {
+  const hasPyproject = fs.existsSync(path.join(pkgDir, "pyproject.toml"))
+  const hasRequirements = fs.existsSync(path.join(pkgDir, "requirements.txt"))
+
+  if (hasPyproject) {
+    bootstrapPythonProject(pkgDir, reposDir, cacheKey, pkgDir)
+  } else if (hasRequirements) {
+    bootstrapPythonRequirements(pkgDir, reposDir, cacheKey, pkgDir)
+  }
+}
+
+function cleanPycache(cwd: string): void {
+  try {
+    const output = execSync(
+      `find ${JSON.stringify(cwd)} -type d -name __pycache__ -not -path "*/node_modules/*" -not -path "*/.git/*"`,
+      { stdio: ["ignore", "pipe", "pipe"], timeout: 30_000, encoding: "utf-8" },
+    ).trim()
+    if (!output) return
+    for (const dir of output.split("\n")) {
+      try {
+        fs.rmSync(dir, { recursive: true, force: true })
+        log.debug({ dir, cwd }, "cleaned __pycache__")
+      } catch { /* best-effort */ }
+    }
+  } catch { /* non-fatal */ }
+}
+
 /**
  * Clean build artifacts from a workspace to free disk space.
  */
 export function cleanBuildArtifacts(cwd: string): void {
-  const artifacts = ["node_modules", ".next", ".turbo", ".cache", "dist", ".npm"]
+  const artifacts = ["node_modules", ".next", ".turbo", ".cache", "dist", ".npm", ".venv"]
   for (const name of artifacts) {
     const target = path.join(cwd, name)
     try {
@@ -474,8 +605,23 @@ export function cleanBuildArtifacts(cwd: string): void {
         fs.rmSync(nested, { recursive: true, force: true })
         log.debug({ name: `${entry.name}/node_modules`, cwd }, "cleaned nested artifact")
       }
+      const nestedVenv = path.join(cwd, entry.name, ".venv")
+      if (fs.existsSync(nestedVenv)) {
+        fs.rmSync(nestedVenv, { recursive: true, force: true })
+        log.debug({ name: `${entry.name}/.venv`, cwd }, "cleaned nested artifact")
+      }
     }
   } catch { /* non-fatal */ }
+  cleanPycache(cwd)
+  const homeUvCache = path.join(cwd, ".home", ".cache", "uv")
+  try {
+    if (fs.existsSync(homeUvCache)) {
+      fs.rmSync(homeUvCache, { recursive: true, force: true })
+      log.debug({ cwd }, "cleaned .home/.cache/uv")
+    }
+  } catch {
+    /* best effort */
+  }
   const homeCacheDir = path.join(cwd, ".home", ".npm")
   try {
     if (fs.existsSync(homeCacheDir)) {
