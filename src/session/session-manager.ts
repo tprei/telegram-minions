@@ -351,12 +351,15 @@ export function resolveDefaultBranch(bareDir: string, gitOpts: object, repoUrl?:
   throw new DefaultBranchError(repoUrl)
 }
 
+const CACHE_VERSION = "v2"
+
 function bootstrapOnePackage(
   pkgDir: string, reposDir: string, cacheKey: string, label: string,
 ): void {
+  const versionedKey = `${CACHE_VERSION}-${cacheKey}`
   const lockFile = path.join(pkgDir, "package-lock.json")
-  const cacheDir = path.join(reposDir, `${cacheKey}-node_modules`)
-  const cacheLockHash = path.join(reposDir, `${cacheKey}-lock.hash`)
+  const cacheDir = path.join(reposDir, `${versionedKey}-node_modules`)
+  const cacheLockHash = path.join(reposDir, `${versionedKey}-lock.hash`)
 
   const currentHash = fs.existsSync(lockFile)
     ? crypto.createHash("sha256").update(fs.readFileSync(lockFile)).digest("hex")
@@ -384,7 +387,10 @@ function bootstrapOnePackage(
   try {
     const installCmd = fs.existsSync(lockFile) ? "npm ci --prefer-offline" : "npm install --prefer-offline"
     log.debug({ installCmd, label }, "running package install")
-    execSync(installCmd, { cwd: pkgDir, stdio, timeout: 300_000 })
+    execSync(installCmd, {
+      cwd: pkgDir, stdio, timeout: 300_000,
+      env: { ...process.env, NODE_ENV: "development" },
+    })
 
     if (fs.existsSync(cacheDir)) {
       fs.rmSync(cacheDir, { recursive: true, force: true })

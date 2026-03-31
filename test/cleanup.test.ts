@@ -114,13 +114,13 @@ describe("bootstrapDependencies", () => {
     fs.writeFileSync(path.join(workDir, "package-lock.json"), lockContent)
 
     // Create cached node_modules with matching hash
-    const cacheDir = path.join(reposDir, "test-repo-node_modules")
+    const cacheDir = path.join(reposDir, "v2-test-repo-node_modules")
     fs.mkdirSync(path.join(cacheDir, "some-pkg"), { recursive: true })
     fs.writeFileSync(path.join(cacheDir, "some-pkg", "index.js"), "module.exports = 1")
 
     // Write matching hash
     const hash = crypto.createHash("sha256").update(lockContent).digest("hex")
-    fs.writeFileSync(path.join(reposDir, "test-repo-lock.hash"), hash)
+    fs.writeFileSync(path.join(reposDir, "v2-test-repo-lock.hash"), hash)
 
     bootstrapDependencies(workDir, reposDir, "test-repo")
 
@@ -140,10 +140,10 @@ describe("bootstrapDependencies", () => {
     fs.writeFileSync(path.join(workDir, "package-lock.json"), '{"lockfileVersion":3}')
 
     // Create cached node_modules with WRONG hash
-    const cacheDir = path.join(reposDir, "test-repo-node_modules")
+    const cacheDir = path.join(reposDir, "v2-test-repo-node_modules")
     fs.mkdirSync(path.join(cacheDir, "some-pkg"), { recursive: true })
     fs.writeFileSync(path.join(cacheDir, "some-pkg", "index.js"), "old")
-    fs.writeFileSync(path.join(reposDir, "test-repo-lock.hash"), "wrong-hash")
+    fs.writeFileSync(path.join(reposDir, "v2-test-repo-lock.hash"), "wrong-hash")
 
     // This will attempt npm ci which will fail (no real npm project), but should be non-fatal
     bootstrapDependencies(workDir, reposDir, "test-repo")
@@ -160,12 +160,12 @@ describe("bootstrapDependencies", () => {
     const hash = crypto.createHash("sha256").update(lockContent).digest("hex")
 
     // Simulate first worktree populating the cache via hardlink
-    const cacheDir = path.join(reposDir, "test-repo-node_modules")
+    const cacheDir = path.join(reposDir, "v2-test-repo-node_modules")
     fs.mkdirSync(path.join(cacheDir, "dep-a"), { recursive: true })
     fs.writeFileSync(path.join(cacheDir, "dep-a", "index.js"), "module.exports = 'a'")
     fs.mkdirSync(path.join(cacheDir, "dep-b"), { recursive: true })
     fs.writeFileSync(path.join(cacheDir, "dep-b", "index.js"), "module.exports = 'b'")
-    fs.writeFileSync(path.join(reposDir, "test-repo-lock.hash"), hash)
+    fs.writeFileSync(path.join(reposDir, "v2-test-repo-lock.hash"), hash)
 
     // Create 3 sibling worktrees (simulating DAG children)
     const worktrees = ["child-1", "child-2", "child-3"].map((name) => {
@@ -202,10 +202,10 @@ describe("bootstrapDependencies", () => {
     const hash = crypto.createHash("sha256").update(lockContent).digest("hex")
 
     // Set up cache
-    const cacheDir = path.join(reposDir, "test-repo-node_modules")
+    const cacheDir = path.join(reposDir, "v2-test-repo-node_modules")
     fs.mkdirSync(path.join(cacheDir, "shared-pkg"), { recursive: true })
     fs.writeFileSync(path.join(cacheDir, "shared-pkg", "index.js"), "original")
-    fs.writeFileSync(path.join(reposDir, "test-repo-lock.hash"), hash)
+    fs.writeFileSync(path.join(reposDir, "v2-test-repo-lock.hash"), hash)
 
     // Two sibling worktrees
     const child1 = path.join(tmpDir, "child-1")
@@ -253,10 +253,10 @@ describe("bootstrapDependencies", () => {
 
     // Pre-populate cache for nested package
     const uiHash = crypto.createHash("sha256").update(uiLock).digest("hex")
-    const uiCache = path.join(reposDir, "test-repo-ui-node_modules")
+    const uiCache = path.join(reposDir, "v2-test-repo-ui-node_modules")
     fs.mkdirSync(path.join(uiCache, "ui-pkg"), { recursive: true })
     fs.writeFileSync(path.join(uiCache, "ui-pkg", "index.js"), "ui module")
-    fs.writeFileSync(path.join(reposDir, "test-repo-ui-lock.hash"), uiHash)
+    fs.writeFileSync(path.join(reposDir, "v2-test-repo-ui-lock.hash"), uiHash)
 
     bootstrapDependencies(workDir, reposDir, "test-repo")
 
