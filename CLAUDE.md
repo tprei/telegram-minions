@@ -207,6 +207,20 @@ The `.goosehints` file injected into workspaces contains:
 - Key conventions (ESM imports, conventional commits)
 - Dependency and environment guidance
 
+## Python / UV support
+
+Sessions include [uv](https://docs.astral.sh/uv/) and a managed Python 3.13 installation. Python project dependencies are bootstrapped automatically at session start:
+
+- If `uv.lock` exists → `uv sync --frozen`
+- Else if `pyproject.toml` exists → `uv sync`
+- Else if `requirements.txt` exists → `uv venv && uv pip install -r requirements.txt`
+
+The `.venv` directory is cached similarly to `node_modules` — hardlinked from a hash-based cache keyed on `uv.lock` contents.
+
+Session environment includes `UV_CACHE_DIR` pointing to an isolated cache directory per session. The managed Python and `uv` binary are on `PATH` in all sessions.
+
+Agent guidance in `CLAUDE.md` and `.goosehints` instructs agents to use `uv run`, `uv add`, and `uv pip install` rather than bare `pip` or manual venv creation.
+
 ## Goose stream-json event schema
 
 Events are one JSON object per line (NDJSON). Types:

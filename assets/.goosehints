@@ -25,7 +25,18 @@ This is a TypeScript project that runs as a Telegram bot controlling autonomous 
 
 ## Dependencies
 
+### Node.js
 Dependencies are pre-installed and read-only. Do NOT run `npm install` or `npm ci`.
+
+### Python
+Python projects use [uv](https://docs.astral.sh/uv/) for dependency management. UV and a managed Python are pre-installed.
+
+- Use `uv run <script>` to execute Python scripts (auto-resolves `.venv`)
+- Use `uv add <package>` to add dependencies (updates `pyproject.toml` + `uv.lock`)
+- Use `uv pip install <package>` for ad-hoc installs into `.venv`
+- Do not create virtual environments manually — `uv` handles `.venv` automatically
+- Do not use bare `pip install` — use `uv pip install` or `uv add`
+- If `pyproject.toml` or `requirements.txt` exists, deps are pre-installed during bootstrap
 
 ## Environment
 

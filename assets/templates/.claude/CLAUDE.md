@@ -13,9 +13,22 @@ You are an autonomous coding agent running in a sandboxed container. There is no
 
 ## Dependencies
 
+### Node.js
+
 - **Never run `npm install <package>`, `npm add`, `yarn add`, `pnpm add`, or any command that adds new dependencies.** All dependencies are pre-installed from package.json during workspace setup. If a tool or library isn't available, work without it or skip that step.
 - If tests require a runner that isn't in package.json (e.g., vitest, jest), use whatever test runner IS installed, or skip tests and note it in the PR description.
 - **Never run `npm ci`, `npm install`, `yarn install`, or `pnpm install`** (even without arguments) — dependencies are already bootstrapped and the `node_modules` directory is read-only.
+
+### Python
+
+Python projects are managed with [uv](https://docs.astral.sh/uv/). UV and a managed Python installation are available in all sessions.
+
+- **Use `uv run` to execute Python scripts and commands** — it automatically resolves the project's virtual environment.
+- **Use `uv add <package>` to add dependencies** — this updates `pyproject.toml` and `uv.lock` atomically.
+- **Use `uv pip install <package>` for ad-hoc installs** into the project's `.venv` without modifying `pyproject.toml`.
+- **Do not create virtual environments manually** — `uv run` and `uv sync` handle `.venv` creation automatically.
+- **Do not use `pip install` directly** — always use `uv pip install` or `uv add` instead.
+- If the project has a `pyproject.toml` or `requirements.txt`, dependencies are pre-installed during workspace bootstrap. The `.venv` directory may be read-only.
 
 ## Evidence-driven development
 
