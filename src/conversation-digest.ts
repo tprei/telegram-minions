@@ -1,4 +1,6 @@
 import type { TopicMessage } from "./types.js"
+import type { ProviderProfile } from "./config/config-types.js"
+import { summarizeConversation, formatSummary } from "./conversation-summarizer.js"
 
 const MAX_DIGEST_CHARS = 3000
 const MAX_MSG_CHARS = 500
@@ -32,6 +34,75 @@ export function buildConversationDigest(conversation: TopicMessage[]): string | 
 
   lines.push("</details>")
   return lines.join("\n")
+}
+
+export interface ChildDigestOptions {
+  childConversation: TopicMessage[]
+  parentConversation?: TopicMessage[]
+  profile?: ProviderProfile
+}
+
+/**
+ * Build an enhanced digest for a child session (DAG/split child).
+ * Uses the Haiku summarizer to create concise summaries of both
+ * the parent planning loop and the child's execution.
+ * Falls back to the basic buildConversationDigest on failure.
+ */
+export async function buildChildSessionDigest(
+  options: ChildDigestOptions,
+): Promise<string | null> {
+  const { childConversation, parentConversation, profile } = options
+
+  if (childConversation.length === 0) return null
+
+  const childInstructions = extractChildInstructions(childConversation)
+
+  const [parentSummary, childSummary] = await Promise.all([
+    parentConversation && parentConversation.length > 0
+      ? summarizeConversation(parentConversation, profile)
+      : Promise.resolve(null),
+    summarizeConversation(childConversation, profile),
+  ])
+
+  if (!parentSummary && !childSummary) {
+    return buildConversationDigest(childConversation)
+  }
+
+  const lines: string[] = [
+    "<details>",
+    "<summary>Session conversation log</summary>",
+    "",
+  ]
+
+  if (parentSummary) {
+    lines.push("**Planning context:**")
+    lines.push(formatSummary(parentSummary))
+    lines.push("")
+  }
+
+  if (childInstructions) {
+    lines.push(`**Child scope:** ${truncate(childInstructions, MAX_MSG_CHARS)}`)
+    lines.push("")
+  }
+
+  if (childSummary) {
+    lines.push("**Execution:**")
+    lines.push(formatSummary(childSummary))
+    lines.push("")
+  }
+
+  lines.push("</details>")
+  return lines.join("\n")
+}
+
+/**
+ * Extract the initial instructions/scope given to a child session.
+ * This is typically the first user message in the child conversation.
+ */
+function extractChildInstructions(conversation: TopicMessage[]): string | null {
+  const first = conversation[0]
+  if (!first || first.role !== "user") return null
+  return stripToolNoise(first.text) || null
 }
 
 function stripToolNoise(text: string): string {
