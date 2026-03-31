@@ -794,6 +794,7 @@ export function mergeUpstreamBranches(
           conflictFiles.push("(unknown files)")
         }
         log.warn({ branch, workDir, conflictFiles }, "merge conflict — leaving for agent to resolve")
+        break
       } else {
         log.error({ err, branch, workDir }, "merge of branch into worktree failed (non-conflict)")
         try {
