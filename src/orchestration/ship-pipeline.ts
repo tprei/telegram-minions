@@ -163,14 +163,15 @@ export class ShipPipeline {
       return
     }
 
-    let passed = 0
     let failed = 0
+    const nodeResults = new Map<string, boolean>()
     const verifyStartedAt = Date.now()
 
     for (const node of completedNodes) {
       const childSession = this.findChildSession(topicSession, node.threadId)
       if (!childSession) {
         failed++
+        nodeResults.set(node.id, false)
         continue
       }
 
@@ -219,7 +220,7 @@ export class ShipPipeline {
             })
           },
           async (m, state) => {
-            if (childSession.activeSessionId !== m.sessionId) { resolve(); return }
+            if (childSession.activeSessionId !== m.sessionId) { failed++; nodeResults.set(node.id, false); resolve(); return }
             this.ctx.sessions.delete(childSession.threadId)
             childSession.activeSessionId = undefined
 
@@ -233,9 +234,10 @@ export class ShipPipeline {
             const result = parseCompletenessResult(output)
 
             if (result.passed) {
-              passed++
+              nodeResults.set(node.id, true)
             } else {
               failed++
+              nodeResults.set(node.id, false)
             }
 
             this.ctx.telegram.sendMessage(
@@ -257,7 +259,7 @@ export class ShipPipeline {
         }
         this.ctx.observer.onSessionStart(meta, verifyTask, onTextCapture, onDeadThread)
           .then(() => handle.start(verifyTask))
-          .catch((err) => { log.error({ err }, "verify session start failed"); resolve() })
+          .catch((err) => { log.error({ err }, "verify session start failed"); failed++; nodeResults.set(node.id, false); resolve() })
       })
     }
 
@@ -268,7 +270,7 @@ export class ShipPipeline {
         round: 1,
         checks: completedNodes.map((n) => ({
           kind: "completeness-review" as const,
-          status: (passed === completedNodes.length ? "passed" : "failed") as "passed" | "failed",
+          status: (nodeResults.get(n.id) ? "passed" : "failed") as "passed" | "failed",
           nodeId: n.id,
           finishedAt: Date.now(),
         })),
