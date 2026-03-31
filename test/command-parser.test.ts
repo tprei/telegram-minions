@@ -106,6 +106,19 @@ describe("parseTaskArgs", () => {
     expect(result.repoUrl).toBe("https://github.com/org/my-repo")
     expect(result.task).toBe("Fix the bug and add tests for it")
   })
+
+  it("auto-selects repo when only one is configured", () => {
+    const singleRepo = { "only": "https://github.com/org/only-repo" }
+    const result = parseTaskArgs(singleRepo, "Fix the bug")
+    expect(result.repoUrl).toBe("https://github.com/org/only-repo")
+    expect(result.task).toBe("Fix the bug")
+  })
+
+  it("does not auto-select when multiple repos are configured", () => {
+    const result = parseTaskArgs(repos, "Fix the bug")
+    expect(result.repoUrl).toBeUndefined()
+    expect(result.task).toBe("Fix the bug")
+  })
 })
 
 describe("parseReviewArgs", () => {
@@ -137,8 +150,18 @@ describe("parseReviewArgs", () => {
     expect(result.task).toBe("")
   })
 
-  it("parses PR number only", () => {
+  it("auto-selects repo for PR number when only one repo configured", () => {
     const result = parseReviewArgs(repos, "789")
+    expect(result.repoUrl).toBe("https://github.com/org/my-repo")
+    expect(result.task).toBe("Review PR #789")
+  })
+
+  it("does not auto-select repo for PR number when multiple repos configured", () => {
+    const multiRepos = {
+      "my-repo": "https://github.com/org/my-repo",
+      "other": "https://github.com/org/other-repo",
+    }
+    const result = parseReviewArgs(multiRepos, "789")
     expect(result.repoUrl).toBeUndefined()
     expect(result.task).toBe("Review PR #789")
   })

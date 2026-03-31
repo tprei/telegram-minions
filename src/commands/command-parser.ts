@@ -57,6 +57,12 @@ export function parseTaskArgs(
     }
   }
 
+  // Auto-select when there's exactly one configured repo
+  const repoValues = Object.values(repos)
+  if (repoValues.length === 1) {
+    return { repoUrl: repoValues[0], task: args.trim() }
+  }
+
   return { task: args.trim() }
 }
 
@@ -102,7 +108,18 @@ export function parseReviewArgs(
   }
 
   if (/^\d+$/.test(args.trim())) {
+    // Auto-select when there's exactly one configured repo
+    const repoValues = Object.values(repos)
+    if (repoValues.length === 1) {
+      return { repoUrl: repoValues[0], task: `Review PR #${args.trim()}` }
+    }
     return { task: `Review PR #${args.trim()}` }
+  }
+
+  // Auto-select when there's exactly one configured repo
+  const repoValues = Object.values(repos)
+  if (repoValues.length === 1) {
+    return { repoUrl: repoValues[0], task: args.trim() }
   }
 
   return { task: args.trim() }
