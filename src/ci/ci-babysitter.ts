@@ -77,6 +77,7 @@ export class CIBabysitter {
    * until checks pass or retries are exhausted.
    */
   async babysitPR(topicSession: TopicSession, prUrl: string, initialQualityReport?: QualityReport): Promise<void> {
+    await this.ctx.refreshGitToken()
     const maxRetries = this.ctx.config.ci.maxRetries
     let localReport: QualityReport | undefined = initialQualityReport && !initialQualityReport.allPassed
       ? initialQualityReport
@@ -263,6 +264,7 @@ export class CIBabysitter {
    * Run inline CI check for a DAG child. Returns true if CI passed (or was fixed).
    */
   async babysitDagChildCI(childSession: TopicSession, prUrl: string): Promise<boolean> {
+    await this.ctx.refreshGitToken()
     const result = await waitForCI(prUrl, childSession.cwd, this.ctx.config.ci)
 
     if (result.passed) {
