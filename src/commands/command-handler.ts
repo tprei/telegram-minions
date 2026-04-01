@@ -466,15 +466,30 @@ export class CommandHandler {
       return
     }
 
+    const repoMatch = prUrl.match(/github\.com\/([^/]+\/[^/]+)\/pull\//)
+    const prNumberMatch = prUrl.match(/\/pull\/(\d+)/)
+    const repo = repoMatch?.[1]
+    const prNumber = prNumberMatch?.[1]
+
+    if (!repo || !prNumber) {
+      await this.ctx.telegram.sendMessage(
+        `⚠️ Could not parse PR URL: <code>${escapeHtml(prUrl)}</code>`,
+        threadId,
+      )
+      return
+    }
+
+    const execOpts = {
+      cwd: topicSession.cwd,
+      timeout: 30_000,
+      encoding: "utf-8" as const,
+      stdio: ["pipe" as const, "pipe" as const, "pipe" as const],
+      env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+    }
+
     await this.ctx.refreshGitToken()
     try {
-      const checksJson = execSync(`gh pr checks "${prUrl}" --json name,state,bucket`, {
-        cwd: topicSession.cwd,
-        timeout: 30_000,
-        encoding: "utf-8",
-        stdio: ["pipe", "pipe", "pipe"],
-        env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
-      }).trim()
+      const checksJson = execSync(`gh pr checks ${prNumber} --repo ${repo} --json name,state,bucket`, execOpts).trim()
 
       if (checksJson && checksJson !== "[]") {
         const checks = JSON.parse(checksJson) as { name: string; state: string; bucket: string }[]
@@ -508,12 +523,9 @@ export class CommandHandler {
     }
 
     try {
-      execSync(`gh pr merge "${prUrl}" --squash --delete-branch`, {
-        cwd: topicSession.cwd,
+      execSync(`gh pr merge ${prNumber} --repo ${repo} --squash --delete-branch`, {
+        ...execOpts,
         timeout: 120_000,
-        encoding: "utf-8",
-        stdio: ["pipe", "pipe", "pipe"],
-        env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
       })
     } catch (err) {
       const errMsg = String((err as Error).message ?? "")
