@@ -45,6 +45,7 @@ export { SessionHandle } from "./session/session.js"
 export type { SessionConfig } from "./session/session.js"
 export type {
   SessionMeta,
+  SessionPort,
   TopicSession,
   SessionMode,
   SessionState,
