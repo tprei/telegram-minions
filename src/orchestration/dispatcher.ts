@@ -69,6 +69,7 @@ import { ShipPipeline } from "./ship-pipeline.js"
 import { SplitOrchestrator } from "./split-orchestrator.js"
 import { JudgeOrchestrator } from "../judge/judge-orchestrator.js"
 import { PinnedMessageManager } from "../telegram/pinned-message-manager.js"
+import { TopicManager } from "./topic-manager.js"
 import { routeCommand } from "../commands/command-router.js"
 
 const log = loggers.dispatcher
@@ -96,6 +97,7 @@ export class Dispatcher {
   private readonly shipPipeline: ShipPipeline
   private readonly splitOrchestrator: SplitOrchestrator
   private readonly judgeOrchestrator: JudgeOrchestrator
+  private readonly topicManager: TopicManager
   private readonly pinnedMessages: PinnedMessageManager
 
   constructor(
@@ -118,6 +120,7 @@ export class Dispatcher {
     this.shipPipeline = new ShipPipeline(ctx)
     this.splitOrchestrator = new SplitOrchestrator(ctx)
     this.judgeOrchestrator = new JudgeOrchestrator(ctx)
+    this.topicManager = new TopicManager(ctx)
     this.pinnedMessages = new PinnedMessageManager({
       telegram: this.telegram,
       topicSessions: this.topicSessions,
@@ -159,8 +162,8 @@ export class Dispatcher {
       broadcastSessionDeleted: (slug) => this.broadcastSessionDeleted(slug),
       broadcastDag: (g, e) => this.broadcastDag(g, e),
       broadcastDagDeleted: (id) => this.broadcastDagDeleted(id),
-      closeChildSessions: (p) => this.closeChildSessions(p),
-      closeSingleChild: (c) => this.closeSingleChild(c),
+      closeChildSessions: (p) => this.topicManager.closeChildSessions(p),
+      closeSingleChild: (c) => this.topicManager.closeSingleChild(c),
       startDag: (ts, items, isStack) => this.dagOrchestrator.startDag(ts, items, isStack),
       shipAdvanceToVerification: (ts, g) => this.shipPipeline.shipAdvanceToVerification(ts, g),
       handleLandCommand: (ts) => this.landingManager.handleLandCommand(ts),
@@ -352,7 +355,7 @@ export class Dispatcher {
       await this.telegram.sendMessage(`❌ Thread ${threadId} not found or no active session`, threadId)
       return
     }
-    await this.handleCloseCommandInternal(topicSession)
+    await this.topicManager.handleCloseCommand(topicSession)
   }
 
   // ── Cleanup timer ─────────────────────────────────────────────────────
@@ -401,7 +404,7 @@ export class Dispatcher {
         this.dags.delete(session.dagId)
         this.broadcastDagDeleted(session.dagId)
       }
-      await this.closeChildSessions(session)
+      await this.topicManager.closeChildSessions(session)
       await this.telegram.deleteForumTopic(threadId)
       await this.removeWorkspace(session)
       this.topicSessions.delete(threadId)
@@ -498,14 +501,14 @@ export class Dispatcher {
       case "think": return this.handleThinkCommand(routed.args, routed.threadId, routed.photos)
       case "review": return this.handleReviewCommand(routed.args, routed.threadId)
       case "ship": return this.handleShipCommand(routed.args, routed.threadId)
-      case "close": return this.handleCloseCommandInternal(topicSession!)
+      case "close": return this.topicManager.handleCloseCommand(topicSession!)
       case "stop": return this.handleStopCommandInternal(topicSession!)
       case "execute": return this.handleExecuteCommand(topicSession!, routed.directive)
       case "split": return this.splitOrchestrator.handleSplitCommand(topicSession!, routed.directive)
       case "stack": return this.splitOrchestrator.handleStackCommand(topicSession!, routed.directive)
       case "dag": return this.handleDagCommand(topicSession!, routed.directive)
       case "judge": return this.judgeOrchestrator.handleJudgeCommand(topicSession!, routed.directive)
-      case "done": return this.handleDoneCommand(topicSession!)
+      case "done": return this.topicManager.handleDoneCommand(topicSession!)
       case "land": return this.landingManager.handleLandCommand(topicSession!)
       case "retry": return this.dagOrchestrator.handleRetryCommand(topicSession!, routed.nodeId)
       case "force": return this.dagOrchestrator.handleForceCommand(topicSession!, routed.nodeId)
@@ -1703,209 +1706,6 @@ export class Dispatcher {
     } catch (err) {
       log.error({ err }, "failed to post session digest")
     }
-  }
-
-  // ── Child session management ──────────────────────────────────────────
-
-  private async closeChildSessions(parent: TopicSession): Promise<void> {
-    const childrenToClose = new Map<number, TopicSession>()
-
-    if (parent.childThreadIds) {
-      for (const childId of parent.childThreadIds) {
-        const child = this.topicSessions.get(childId)
-        if (child) childrenToClose.set(childId, child)
-      }
-    }
-
-    for (const [candidateId, candidate] of this.topicSessions) {
-      if (candidate.parentThreadId !== undefined &&
-          candidate.parentThreadId === parent.threadId &&
-          !childrenToClose.has(candidateId)) {
-        childrenToClose.set(candidateId, candidate)
-      }
-    }
-
-    if (childrenToClose.size > 10) {
-      log.warn(
-        { count: childrenToClose.size, parentThreadId: parent.threadId, parentSlug: parent.slug },
-        "Unusually high number of children to close - possible bug?",
-      )
-    }
-
-    await Promise.all([...childrenToClose.values()].map((child) => this.closeSingleChild(child)))
-
-    parent.childThreadIds = []
-  }
-
-  private async closeSingleChild(child: TopicSession): Promise<void> {
-    const childId = child.threadId
-
-    if (child.activeSessionId) {
-      const childActive = this.sessions.get(childId)
-      this.sessions.delete(childId)
-      if (childActive) await childActive.handle.kill().catch(() => {})
-    }
-    this.topicSessions.delete(childId)
-    this.broadcastSessionDeleted(child.slug)
-    await this.telegram.deleteForumTopic(childId).catch(() => {})
-    await this.removeWorkspace(child).catch(() => {})
-    log.info({ slug: child.slug, threadId: childId }, "closed child topic")
-  }
-
-  private async handleCloseCommandInternal(topicSession: TopicSession): Promise<void> {
-    const threadId = topicSession.threadId
-
-    await this.closeChildSessions(topicSession)
-
-    if (topicSession.dagId) {
-      this.broadcastDagDeleted(topicSession.dagId)
-      this.dags.delete(topicSession.dagId)
-    }
-
-    this.topicSessions.delete(threadId)
-    this.broadcastSessionDeleted(topicSession.slug)
-    await this.persistTopicSessions()
-    this.pinnedMessages.updatePinnedSummary()
-    await this.telegram.deleteForumTopic(threadId)
-    log.info({ slug: topicSession.slug, threadId }, "closed and deleted topic")
-
-    if (topicSession.activeSessionId) {
-      const activeSession = this.sessions.get(threadId)
-      this.sessions.delete(threadId)
-      if (activeSession) {
-        activeSession.handle.kill().then(
-          () => this.removeWorkspace(topicSession),
-          () => this.removeWorkspace(topicSession),
-        ).catch((err) => {
-          log.error({ err, slug: topicSession.slug }, "background cleanup failed")
-        })
-        return
-      }
-    }
-
-    this.removeWorkspace(topicSession).catch((err) => {
-      log.error({ err, slug: topicSession.slug }, "background cleanup failed")
-    })
-  }
-
-  private async handleDoneCommand(topicSession: TopicSession): Promise<void> {
-    const threadId = topicSession.threadId
-
-    // Short-circuit: DAG/stack children should be managed from the parent
-    if (topicSession.parentThreadId || topicSession.dagNodeId) {
-      await this.telegram.sendMessage(
-        `⚠️ <code>/done</code> is not available on child sessions. Use <code>/done</code> or <code>/land</code> from the parent thread.`,
-        threadId,
-      )
-      return
-    }
-
-    // Short-circuit: no PR found
-    const prUrl = topicSession.prUrl ?? this.extractPRFromConversation(topicSession)
-    if (!prUrl) {
-      await this.telegram.sendMessage(
-        `⚠️ No PR found for this session. Nothing to merge.`,
-        threadId,
-      )
-      return
-    }
-
-    // Short-circuit: CI not green
-    await this.refreshGitToken()
-    try {
-      const checksJson = execSync(`gh pr checks "${prUrl}" --json name,state,bucket`, {
-        cwd: topicSession.cwd,
-        timeout: 30_000,
-        encoding: "utf-8",
-        stdio: ["pipe", "pipe", "pipe"],
-        env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
-      }).trim()
-
-      if (checksJson && checksJson !== "[]") {
-        const checks = JSON.parse(checksJson) as { name: string; state: string; bucket: string }[]
-        const pending = checks.filter((c) => c.bucket === "pending")
-        if (pending.length > 0) {
-          await this.telegram.sendMessage(
-            `⚠️ CI checks still running (${pending.length} pending). Wait for CI to finish before using <code>/done</code>.`,
-            threadId,
-          )
-          return
-        }
-        const failed = checks.filter((c) => c.bucket === "fail")
-        if (failed.length > 0) {
-          const names = failed.map((c) => `<code>${escapeHtml(c.name)}</code>`).join(", ")
-          await this.telegram.sendMessage(
-            `⚠️ CI is not green — ${failed.length} failed check(s): ${names}. Fix CI before using <code>/done</code>.`,
-            threadId,
-          )
-          return
-        }
-      }
-    } catch (err) {
-      const errMsg = String((err as Error).message ?? "")
-      if (!errMsg.includes("no checks reported")) {
-        await this.telegram.sendMessage(
-          `⚠️ Could not verify CI status: <code>${escapeHtml(errMsg.slice(0, 200))}</code>`,
-          threadId,
-        )
-        return
-      }
-      // "no checks reported" — treat as OK (no CI configured)
-    }
-
-    // Merge the PR
-    try {
-      execSync(`gh pr merge "${prUrl}" --squash --delete-branch`, {
-        cwd: topicSession.cwd,
-        timeout: 120_000,
-        encoding: "utf-8",
-        stdio: ["pipe", "pipe", "pipe"],
-        env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
-      })
-    } catch (err) {
-      const errMsg = String((err as Error).message ?? "")
-      await this.telegram.sendMessage(
-        `⚠️ Failed to merge PR: <code>${escapeHtml(errMsg.slice(0, 300))}</code>`,
-        threadId,
-      )
-      return
-    }
-
-    await this.telegram.sendMessage(`✅ Merged and closed: ${prUrl}`, threadId)
-    log.info({ slug: topicSession.slug, threadId, prUrl }, "/done — merged PR")
-
-    // Close children, delete topic, wipe workspace
-    await this.closeChildSessions(topicSession)
-
-    if (topicSession.dagId) {
-      this.broadcastDagDeleted(topicSession.dagId)
-      this.dags.delete(topicSession.dagId)
-    }
-
-    this.topicSessions.delete(threadId)
-    this.broadcastSessionDeleted(topicSession.slug)
-    await this.persistTopicSessions()
-    this.pinnedMessages.updatePinnedSummary()
-    await this.telegram.deleteForumTopic(threadId)
-    log.info({ slug: topicSession.slug, threadId }, "/done — closed topic")
-
-    if (topicSession.activeSessionId) {
-      const activeSession = this.sessions.get(threadId)
-      this.sessions.delete(threadId)
-      if (activeSession) {
-        activeSession.handle.kill().then(
-          () => this.removeWorkspace(topicSession),
-          () => this.removeWorkspace(topicSession),
-        ).catch((err) => {
-          log.error({ err, slug: topicSession.slug }, "/done background cleanup failed")
-        })
-        return
-      }
-    }
-
-    this.removeWorkspace(topicSession).catch((err) => {
-      log.error({ err, slug: topicSession.slug }, "/done background cleanup failed")
-    })
   }
 
   private async handleStopCommandInternal(topicSession: TopicSession): Promise<void> {
