@@ -1,0 +1,45 @@
+{
+  "steps": [
+    {
+      "event": {
+        "type": "message",
+        "message": {
+          "role": "assistant",
+          "created": 1700000000,
+          "content": [{ "type": "text", "text": "Starting work on DAG sub-task..." }]
+        }
+      }
+    },
+    {
+      "delay": 10,
+      "event": {
+        "type": "message",
+        "message": {
+          "role": "assistant",
+          "created": 1700000001,
+          "content": [{
+            "type": "toolRequest",
+            "id": "tool_dag_fail_1",
+            "toolCall": { "name": "Bash", "arguments": { "command": "npm run build" } }
+          }]
+        }
+      }
+    },
+    {
+      "delay": 10,
+      "event": {
+        "type": "message",
+        "message": {
+          "role": "user",
+          "created": 1700000002,
+          "content": [{ "type": "toolResponse", "id": "tool_dag_fail_1", "toolResult": { "error": "Build failed: type errors in src/feature.ts" } }]
+        }
+      }
+    },
+    {
+      "delay": 10,
+      "event": { "type": "error", "error": "Build failed with type errors, unable to complete task" }
+    }
+  ],
+  "exitCode": 1
+}
