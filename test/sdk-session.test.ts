@@ -101,27 +101,23 @@ describe("SDKSessionHandle", () => {
       const result = configs["plan"](baseConfig)
       expect(result.model).toBe("plan-model")
       expect(result.disallowedTools).toEqual(["Edit", "Write", "NotebookEdit"])
-      expect(result.detached).toBe(true)
     })
 
     it("think mode uses thinkModel and disallowed tools", () => {
       const result = configs["think"](baseConfig)
       expect(result.model).toBe("think-model")
       expect(result.disallowedTools).toEqual(["Edit", "Write", "NotebookEdit"])
-      expect(result.detached).toBe(true)
     })
 
-    it("review mode uses reviewModel with no detached flag", () => {
+    it("review mode uses reviewModel and disallowed tools", () => {
       const result = configs["review"](baseConfig)
       expect(result.model).toBe("review-model")
       expect(result.disallowedTools).toEqual(["Edit", "Write", "NotebookEdit"])
-      expect(result.detached).toBeUndefined()
     })
 
-    it("ship-verify mode uses reviewModel with detached", () => {
+    it("ship-verify mode uses reviewModel", () => {
       const result = configs["ship-verify"](baseConfig)
       expect(result.model).toBe("review-model")
-      expect(result.detached).toBe(true)
     })
   })
 

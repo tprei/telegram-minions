@@ -20,7 +20,6 @@ interface SpawnOpts {
   systemPrompt: string
   model: string
   disallowedTools?: string[]
-  detached?: boolean
 }
 
 type McpServerConfig = {
@@ -70,19 +69,16 @@ export class SDKSessionHandle implements SessionPort {
       systemPrompt: DEFAULT_PLAN_PROMPT,
       model: cfg.claude.planModel,
       disallowedTools: READONLY_DISALLOWED_TOOLS,
-      detached: true,
     }),
     think: (cfg) => ({
       systemPrompt: DEFAULT_THINK_PROMPT,
       model: cfg.claude.thinkModel,
       disallowedTools: READONLY_DISALLOWED_TOOLS,
-      detached: true,
     }),
     "ship-think": (cfg) => ({
       systemPrompt: DEFAULT_THINK_PROMPT,
       model: cfg.claude.thinkModel,
       disallowedTools: READONLY_DISALLOWED_TOOLS,
-      detached: true,
     }),
     review: (cfg) => ({
       systemPrompt: DEFAULT_REVIEW_PROMPT,
@@ -93,12 +89,10 @@ export class SDKSessionHandle implements SessionPort {
       systemPrompt: DEFAULT_SHIP_PLAN_PROMPT,
       model: cfg.claude.planModel,
       disallowedTools: READONLY_DISALLOWED_TOOLS,
-      detached: true,
     }),
     "ship-verify": (cfg) => ({
       systemPrompt: DEFAULT_SHIP_VERIFY_PROMPT,
       model: cfg.claude.reviewModel,
-      detached: true,
     }),
   }
 
@@ -450,7 +444,7 @@ export class SDKSessionHandle implements SessionPort {
       cwd: this.meta.cwd,
       env,
       stdio: ["pipe", "pipe", "pipe"],
-      ...(opts.detached ? { detached: true } : {}),
+      detached: true,
     })
 
     // Write the initial task as the first user message to stdin

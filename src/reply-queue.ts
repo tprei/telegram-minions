@@ -23,16 +23,41 @@ interface ReplyFileData {
 
 export class ReplyQueue {
   private readonly queueDir: string
-  private seq = 0
+  private seq: number | null = null
 
   constructor(cwd: string) {
     this.queueDir = path.join(cwd, QUEUE_DIR)
   }
 
+  private async nextSeq(): Promise<number> {
+    if (this.seq === null) {
+      let entries: string[]
+      try {
+        entries = await fs.readdir(this.queueDir)
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+          entries = []
+        } else {
+          throw err
+        }
+      }
+      let max = -1
+      for (const entry of entries) {
+        const match = entry.match(/^\d+-(\d{4})-[a-z0-9]+\.json$/)
+        if (match) {
+          const n = parseInt(match[1], 10)
+          if (n > max) max = n
+        }
+      }
+      this.seq = max + 1
+    }
+    return this.seq++
+  }
+
   async push(text: string, images?: string[]): Promise<QueuedReply> {
     await fs.mkdir(this.queueDir, { recursive: true })
     const timestamp = Date.now()
-    const seq = String(this.seq++).padStart(4, "0")
+    const seq = String(await this.nextSeq()).padStart(4, "0")
     const id = `${timestamp}-${seq}-${randomSuffix()}`
     const data: ReplyFileData = { text, timestamp, delivered: false }
     if (images && images.length > 0) {
@@ -40,7 +65,10 @@ export class ReplyQueue {
     }
     const filePath = path.join(this.queueDir, `${id}.json`)
     const tmp = filePath + ".tmp"
-    await fs.writeFile(tmp, JSON.stringify(data), "utf-8")
+    const handle = await fs.open(tmp, "w")
+    await handle.writeFile(JSON.stringify(data), "utf-8")
+    await handle.datasync()
+    await handle.close()
     await fs.rename(tmp, filePath)
     log.debug({ id }, "reply queued")
     return { id, ...data }
@@ -86,7 +114,10 @@ export class ReplyQueue {
       const data: ReplyFileData = JSON.parse(raw)
       data.delivered = true
       const tmp = filePath + ".tmp"
-      await fs.writeFile(tmp, JSON.stringify(data), "utf-8")
+      const handle = await fs.open(tmp, "w")
+      await handle.writeFile(JSON.stringify(data), "utf-8")
+      await handle.datasync()
+      await handle.close()
       await fs.rename(tmp, filePath)
       log.debug({ id }, "reply marked delivered")
     } catch (err) {
