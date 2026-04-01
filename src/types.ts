@@ -113,6 +113,7 @@ export type GooseStreamEvent =
 
 // Session types
 
+export type SessionDoneState = "completed" | "errored" | "quota_exhausted"
 export type SessionState = "spawning" | "working" | "idle" | "completed" | "errored"
 
 /**
@@ -130,7 +131,7 @@ export interface SessionPort {
   injectReply(text: string, images?: string[]): boolean
 
   /** Returns a promise that resolves when the session finishes (completes or errors) */
-  waitForCompletion(): Promise<"completed" | "errored">
+  waitForCompletion(): Promise<SessionDoneState>
 
   /** Whether the session process has exited */
   isClosed(): boolean

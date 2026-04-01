@@ -11,7 +11,7 @@ export interface SessionRecord {
   slug: string
   repo: string
   mode: string
-  state: "completed" | "errored"
+  state: "completed" | "errored" | "quota_exhausted"
   durationMs: number
   totalTokens: number
   timestamp: number

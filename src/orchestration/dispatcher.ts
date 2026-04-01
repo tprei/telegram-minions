@@ -8,7 +8,7 @@ import { SessionHandle, type SessionConfig } from "../session/session.js"
 import { SDKSessionHandle } from "../session/sdk-session.js"
 import { ReplyQueue } from "../reply-queue.js"
 import { Observer } from "../telegram/observer.js"
-import type { TelegramUpdate, TelegramCallbackQuery, TelegramPhotoSize, GooseStreamEvent, SessionMeta, SessionPort, TopicSession, SessionMode, SessionState, TopicMessage, AutoAdvance } from "../types.js"
+import type { TelegramUpdate, TelegramCallbackQuery, TelegramPhotoSize, GooseStreamEvent, SessionMeta, SessionDoneState, SessionPort, TopicSession, SessionMode, SessionState, TopicMessage, AutoAdvance } from "../types.js"
 import { generateSlug, taskToLabel } from "../slugs.js"
 import type { MinionConfig, McpConfig } from "../config/config-types.js"
 import type { GitHubTokenProvider } from "../github/index.js"
@@ -195,7 +195,7 @@ export class Dispatcher {
     }
   }
 
-  private broadcastSession(session: TopicSession, eventType: "session_created" | "session_updated", sessionState?: "completed" | "errored"): void {
+  private broadcastSession(session: TopicSession, eventType: "session_created" | "session_updated", sessionState?: SessionDoneState): void {
     if (!this.broadcaster) return
     const apiSession = topicSessionToApi(session, this.config.telegram.chatId, session.activeSessionId, sessionState)
     this.broadcaster.broadcast({ type: eventType, session: apiSession })
@@ -902,7 +902,7 @@ export class Dispatcher {
         handle.interrupt()
       }
     }
-    const onDone = (m: SessionMeta, state: "completed" | "errored") => this.handleSessionComplete(topicSession, m, state, sessionId)
+    const onDone = (m: SessionMeta, state: SessionDoneState) => this.handleSessionComplete(topicSession, m, state, sessionId)
 
     const handle: SessionPort = useSDK
       ? new SDKSessionHandle(
@@ -936,14 +936,14 @@ export class Dispatcher {
     handle.start(task, systemPrompt)
   }
 
-  private handleSessionComplete(topicSession: TopicSession, m: SessionMeta, state: "completed" | "errored", sessionId: string): void {
+  private handleSessionComplete(topicSession: TopicSession, m: SessionMeta, state: SessionDoneState, sessionId: string): void {
     if (topicSession.activeSessionId !== m.sessionId) return
 
     const durationMs = Date.now() - m.startedAt
     this.sessions.delete(topicSession.threadId)
     topicSession.activeSessionId = undefined
     topicSession.lastActivityAt = Date.now()
-    this.broadcastSession(topicSession, "session_updated", state as "completed" | "errored")
+    this.broadcastSession(topicSession, "session_updated", state)
     this.pinnedMessages.updatePinnedSummary()
 
     this.stats.record({

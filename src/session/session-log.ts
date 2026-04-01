@@ -15,7 +15,7 @@ export interface SessionLogEntry {
   completedAt: number
   durationMs: number
   totalTokens: number
-  state: "completed" | "errored"
+  state: "completed" | "errored" | "quota_exhausted"
   qualityGates?: QualityReport
   conversationLength: number
 }
@@ -23,7 +23,7 @@ export interface SessionLogEntry {
 export function writeSessionLog(
   topicSession: TopicSession,
   meta: SessionMeta,
-  state: "completed" | "errored",
+  state: "completed" | "errored" | "quota_exhausted",
   durationMs: number,
   qualityReport?: QualityReport,
 ): void {

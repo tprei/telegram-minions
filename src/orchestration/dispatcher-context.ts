@@ -13,6 +13,7 @@ import type { Observer } from "../telegram/observer.js"
 import type {
   TopicSession, TopicMessage,
   TelegramPhotoSize,
+  SessionDoneState,
 } from "../types.js"
 import type { MinionConfig, McpConfig } from "../config/config-types.js"
 import type { DagGraph, DagNode, DagInput } from "../dag/dag.js"
@@ -119,7 +120,7 @@ export interface DispatcherContext {
   // ── Broadcasting ───────────────────────────────────────────────────
 
   /** Broadcast session state changes to the API server. */
-  broadcastSession(session: TopicSession, eventType: "session_created" | "session_updated", sessionState?: "completed" | "errored"): void
+  broadcastSession(session: TopicSession, eventType: "session_created" | "session_updated", sessionState?: SessionDoneState): void
 
   /** Broadcast session deletion to the API server. */
   broadcastSessionDeleted(slug: string): void

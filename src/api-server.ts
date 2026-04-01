@@ -3,7 +3,7 @@ import fs from "node:fs"
 import path from "node:path"
 import crypto from "node:crypto"
 import { EventEmitter } from "node:events"
-import type { TopicSession, SessionState } from "./types.js"
+import type { TopicSession, SessionState, SessionDoneState } from "./types.js"
 import type { DagGraph } from "./dag/dag.js"
 import { loggers } from "./logger.js"
 
@@ -207,11 +207,11 @@ export function topicSessionToApi(
   session: TopicSession,
   chatId: string,
   activeSessionId?: string,
-  sessionState?: SessionState,
+  sessionState?: SessionState | SessionDoneState,
 ): ApiSession {
   const status = sessionState === "completed"
     ? "completed"
-    : sessionState === "errored"
+    : sessionState === "errored" || sessionState === "quota_exhausted"
       ? "failed"
       : session.activeSessionId || activeSessionId
         ? "running"

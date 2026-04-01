@@ -1,7 +1,7 @@
 import fs from "node:fs"
 import path from "node:path"
 import type { TelegramClient } from "./telegram.js"
-import type { GooseStreamEvent, GooseMessage, GooseToolRequestContent, GooseToolResponseContent, SessionMeta } from "../types.js"
+import type { GooseStreamEvent, GooseMessage, GooseToolRequestContent, GooseToolResponseContent, SessionMeta, SessionDoneState } from "../types.js"
 import { captureException } from "../sentry.js"
 import { loggers } from "../logger.js"
 import { isThreadNotFoundError } from "../errors.js"
@@ -354,7 +354,7 @@ export class Observer {
 
   async onSessionComplete(
     meta: SessionMeta,
-    finalState: "completed" | "errored",
+    finalState: SessionDoneState,
     durationMs: number,
   ): Promise<void> {
     const state = this.sessions.get(meta.sessionId)
@@ -375,7 +375,7 @@ export class Observer {
 
   async flushAndComplete(
     meta: SessionMeta,
-    _finalState: "completed" | "errored",
+    _finalState: SessionDoneState,
     _durationMs: number,
   ): Promise<void> {
     await this.flushTextBuffer(meta)

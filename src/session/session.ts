@@ -3,9 +3,10 @@ import { createInterface } from "node:readline"
 import fs from "node:fs"
 import path from "node:path"
 import type { GooseConfig, ClaudeConfig, McpConfig, ProviderProfile, AgentDefinitions } from "../config/config-types.js"
-import type { GooseStreamEvent, SessionMeta, SessionState, SessionPort } from "../types.js"
+import type { GooseStreamEvent, SessionMeta, SessionState, SessionPort, SessionDoneState } from "../types.js"
 import { translateClaudeEvents } from "./claude-stream.js"
 import { captureException, setContext, addBreadcrumb } from "../sentry.js"
+import { isQuotaError, parseResetTime } from "./quota-detection.js"
 import { DEFAULT_TASK_PROMPT, DEFAULT_PLAN_PROMPT, DEFAULT_THINK_PROMPT, DEFAULT_REVIEW_PROMPT, DEFAULT_SHIP_PLAN_PROMPT, DEFAULT_SHIP_VERIFY_PROMPT } from "../config/prompts.js"
 import { createSessionLogger } from "../logger.js"
 import { injectAgentFiles } from "./inject-assets.js"
@@ -13,7 +14,7 @@ import { injectAgentFiles } from "./inject-assets.js"
 export const SCREENSHOTS_DIR = ".screenshots"
 
 export type SessionEventCallback = (event: GooseStreamEvent) => void
-export type SessionDoneCallback = (meta: SessionMeta, state: "completed" | "errored") => void
+export type SessionDoneCallback = (meta: SessionMeta, state: SessionDoneState) => void
 
 export interface SessionConfig {
   goose: GooseConfig
@@ -55,8 +56,9 @@ export class SessionHandle implements SessionPort {
   private state: SessionState = "spawning"
   private timeoutHandle: ReturnType<typeof setTimeout> | null = null
   private inactivityHandle: ReturnType<typeof setTimeout> | null = null
-  private completionResolve: ((result: "completed" | "errored") => void) | null = null
-  private completionPromise: Promise<"completed" | "errored">
+  private completionResolve: ((result: SessionDoneState) => void) | null = null
+  private completionPromise: Promise<SessionDoneState>
+  private stderrChunks: string[] = []
   private log: ReturnType<typeof createSessionLogger>
 
   constructor(
@@ -484,12 +486,26 @@ export class SessionHandle implements SessionPort {
 
     proc.stderr?.on("data", (chunk: Buffer) => {
       resetInactivityTimer()
-      this.log.debug({ stderr: chunk.toString() }, "process stderr")
+      const text = chunk.toString()
+      this.stderrChunks.push(text)
+      this.log.debug({ stderr: text }, "process stderr")
     })
 
     proc.on("close", (code) => {
       this.clearTimeout()
+      const stderrText = this.stderrChunks.join("")
+
       if (code !== 0 && code !== null) {
+        if (isQuotaError(stderrText)) {
+          const sleepMs = parseResetTime(stderrText)
+          this.log.warn({ sleepMs }, "quota exhausted detected in session")
+          this.state = "errored"
+          this.onEvent({ type: "quota_exhausted", resetAt: sleepMs, rawMessage: stderrText.slice(0, 500) })
+          this.completionResolve?.("quota_exhausted")
+          this.onDone(this.meta, "quota_exhausted")
+          return
+        }
+
         captureException(new Error(`Session process exited with code ${code}`), {
           sessionId: this.meta.sessionId,
           repo: this.meta.repo,
@@ -497,7 +513,7 @@ export class SessionHandle implements SessionPort {
           exitCode: code,
         })
       }
-      const finalState: "completed" | "errored" = code === 0 ? "completed" : "errored"
+      const finalState: SessionDoneState = code === 0 ? "completed" : "errored"
       this.state = finalState
       this.completionResolve?.(finalState)
       this.onDone(this.meta, finalState)
@@ -593,7 +609,7 @@ export class SessionHandle implements SessionPort {
     return false
   }
 
-  waitForCompletion(): Promise<"completed" | "errored"> {
+  waitForCompletion(): Promise<SessionDoneState> {
     return this.completionPromise
   }
 
