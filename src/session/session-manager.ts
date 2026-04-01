@@ -9,8 +9,7 @@ import path from "node:path"
 import fs from "node:fs"
 import os from "node:os"
 import crypto from "node:crypto"
-import type { SessionHandle } from "./session.js"
-import type { AutoAdvance, SessionMeta, TopicSession } from "../types.js"
+import type { AutoAdvance, SessionMeta, SessionPort, TopicSession } from "../types.js"
 import { extractRepoName } from "../commands/command-parser.js"
 import { loggers } from "../logger.js"
 import { DefaultBranchError } from "../errors.js"
@@ -20,7 +19,7 @@ const log = loggers.session
 const execFileAsync = promisify(execFile)
 
 export interface ActiveSession {
-  handle: SessionHandle
+  handle: SessionPort
   meta: SessionMeta
   task: string
 }

@@ -60,6 +60,7 @@ export const loggers = {
   judgeExtract: createLogger({ component: "judge-extract" }),
   conversationSummarizer: createLogger({ component: "conversation-summarizer" }),
   judgeOrchestrator: createLogger({ component: "judge-orchestrator" }),
+  replyQueue: createLogger({ component: "reply-queue" }),
 } as const
 
 /**

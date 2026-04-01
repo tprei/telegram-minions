@@ -114,6 +114,39 @@ export type GooseStreamEvent =
 
 export type SessionState = "spawning" | "working" | "idle" | "completed" | "errored"
 
+/**
+ * Abstraction over different session backends (CLI subprocess, SDK streaming).
+ * Enables the dispatcher to work uniformly regardless of the underlying session type.
+ */
+export interface SessionPort {
+  /** Session metadata */
+  readonly meta: SessionMeta
+
+  /** Start the session with the given task and optional system prompt */
+  start(task: string, systemPrompt?: string): void
+
+  /** Inject a user reply into the running session (processed FIFO before the next tool call) */
+  injectReply(text: string, images?: string[]): boolean
+
+  /** Returns a promise that resolves when the session finishes (completes or errors) */
+  waitForCompletion(): Promise<"completed" | "errored">
+
+  /** Whether the session process has exited */
+  isClosed(): boolean
+
+  /** Current session state */
+  getState(): SessionState
+
+  /** Whether the session is still actively running */
+  isActive(): boolean
+
+  /** Send SIGINT to gracefully interrupt the session */
+  interrupt(): void
+
+  /** Kill the session, escalating from SIGINT to SIGKILL after gracefulMs */
+  kill(gracefulMs?: number): Promise<void>
+}
+
 export type SessionMode = "task" | "plan" | "think" | "review" | "ci-fix" | "dag-review" | "ship-think" | "ship-plan" | "ship-verify"
 
 export interface SessionMeta {
