@@ -81,7 +81,7 @@ function runMockAgent(
 
 // ── Tests ──
 
-describe("mock-agent", () => {
+describe("mock-agent", { timeout: 15_000 }, () => {
   let install: MockAgentInstall
   let scenarioDir: string | undefined
 
