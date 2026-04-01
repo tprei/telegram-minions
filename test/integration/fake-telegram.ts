@@ -102,10 +102,11 @@ export class FakeTelegram {
 
   /** Build a callback query update. */
   makeCallbackUpdate(data: string, opts: { messageId?: number; userId?: number } = {}): TelegramUpdate {
+    const updateId = this.nextUpdateId++
     return {
-      update_id: this.nextUpdateId++,
+      update_id: updateId,
       callback_query: {
-        id: String(this.nextUpdateId),
+        id: String(updateId),
         from: { id: opts.userId ?? 1, is_bot: false, first_name: "Test" },
         data,
         message: opts.messageId

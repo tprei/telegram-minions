@@ -2,38 +2,24 @@ import { spawn, type ChildProcess } from "node:child_process"
 import { createInterface } from "node:readline"
 import fs from "node:fs"
 import path from "node:path"
-import type { GooseConfig, ClaudeConfig, McpConfig, ProviderProfile, AgentDefinitions } from "../config/config-types.js"
 import type { GooseStreamEvent, SessionMeta, SessionState, SessionPort } from "../types.js"
 import { translateClaudeEvents } from "./claude-stream.js"
 import { captureException, setContext, addBreadcrumb } from "../sentry.js"
 import { DEFAULT_TASK_PROMPT, DEFAULT_PLAN_PROMPT, DEFAULT_THINK_PROMPT, DEFAULT_REVIEW_PROMPT, DEFAULT_SHIP_PLAN_PROMPT, DEFAULT_SHIP_VERIFY_PROMPT } from "../config/prompts.js"
 import { createSessionLogger } from "../logger.js"
 import { injectAgentFiles } from "./inject-assets.js"
+import { type SessionConfig, SCREENSHOTS_DIR } from "./session.js"
 
-export const SCREENSHOTS_DIR = ".screenshots"
-
-export type SessionEventCallback = (event: GooseStreamEvent) => void
-export type SessionDoneCallback = (meta: SessionMeta, state: "completed" | "errored") => void
-
-export interface SessionConfig {
-  goose: GooseConfig
-  claude: ClaudeConfig
-  mcp: McpConfig
-  profile?: ProviderProfile
-  /** List of environment variable names to pass through to minion sessions */
-  sessionEnvPassthrough?: string[]
-  /** Agent definitions, skills, and goosehints to inject into workspaces */
-  agentDefs?: AgentDefinitions
-}
+export type SDKSessionEventCallback = (event: GooseStreamEvent) => void
+export type SDKSessionDoneCallback = (meta: SessionMeta, state: "completed" | "errored") => void
 
 const READONLY_DISALLOWED_TOOLS = ["Edit", "Write", "NotebookEdit"]
 
-interface SpawnClaudeOpts {
+interface SpawnOpts {
   task: string
   systemPrompt: string
   model: string
   disallowedTools?: string[]
-  detached?: boolean
 }
 
 type McpServerConfig = {
@@ -50,7 +36,12 @@ type McpHttpServerConfig = {
 
 type McpConfigEntry = McpServerConfig | McpHttpServerConfig
 
-export class SessionHandle implements SessionPort {
+/**
+ * SDK-based session that uses `claude --input-format stream-json` to enable
+ * mid-execution reply injection. User replies are written as NDJSON to stdin
+ * and processed by Claude before the next tool call.
+ */
+export class SDKSessionHandle implements SessionPort {
   private process: ChildProcess | null = null
   private state: SessionState = "spawning"
   private timeoutHandle: ReturnType<typeof setTimeout> | null = null
@@ -61,8 +52,8 @@ export class SessionHandle implements SessionPort {
 
   constructor(
     readonly meta: SessionMeta,
-    private readonly onEvent: SessionEventCallback,
-    private readonly onDone: SessionDoneCallback,
+    private readonly onEvent: SDKSessionEventCallback,
+    private readonly onDone: SDKSessionDoneCallback,
     private readonly timeoutMs: number,
     private readonly inactivityTimeoutMs: number,
     private readonly sessionConfig: SessionConfig,
@@ -73,24 +64,21 @@ export class SessionHandle implements SessionPort {
     })
   }
 
-  private static readonly claudeModeConfigs: Record<string, (cfg: SessionConfig) => Omit<SpawnClaudeOpts, "task">> = {
+  private static readonly claudeModeConfigs: Record<string, (cfg: SessionConfig) => Omit<SpawnOpts, "task">> = {
     plan: (cfg) => ({
       systemPrompt: DEFAULT_PLAN_PROMPT,
       model: cfg.claude.planModel,
       disallowedTools: READONLY_DISALLOWED_TOOLS,
-      detached: true,
     }),
     think: (cfg) => ({
       systemPrompt: DEFAULT_THINK_PROMPT,
       model: cfg.claude.thinkModel,
       disallowedTools: READONLY_DISALLOWED_TOOLS,
-      detached: true,
     }),
     "ship-think": (cfg) => ({
       systemPrompt: DEFAULT_THINK_PROMPT,
       model: cfg.claude.thinkModel,
       disallowedTools: READONLY_DISALLOWED_TOOLS,
-      detached: true,
     }),
     review: (cfg) => ({
       systemPrompt: DEFAULT_REVIEW_PROMPT,
@@ -101,12 +89,10 @@ export class SessionHandle implements SessionPort {
       systemPrompt: DEFAULT_SHIP_PLAN_PROMPT,
       model: cfg.claude.planModel,
       disallowedTools: READONLY_DISALLOWED_TOOLS,
-      detached: true,
     }),
     "ship-verify": (cfg) => ({
       systemPrompt: DEFAULT_SHIP_VERIFY_PROMPT,
       model: cfg.claude.reviewModel,
-      detached: true,
     }),
   }
 
@@ -119,17 +105,121 @@ export class SessionHandle implements SessionPort {
     })
     addBreadcrumb({
       category: "session",
-      message: `Starting ${this.meta.mode} session: ${this.meta.topicName}`,
+      message: `Starting SDK ${this.meta.mode} session: ${this.meta.topicName}`,
       level: "info",
       data: { repo: this.meta.repo, sessionId: this.meta.sessionId },
     })
 
-    const modeConfig = !systemPrompt ? SessionHandle.claudeModeConfigs[this.meta.mode] : undefined
+    const modeConfig = !systemPrompt ? SDKSessionHandle.claudeModeConfigs[this.meta.mode] : undefined
     if (modeConfig) {
       this.spawnClaude({ task, ...modeConfig(this.sessionConfig) })
     } else {
-      this.startGoose(task, systemPrompt)
+      this.spawnClaude({
+        task,
+        systemPrompt: systemPrompt ?? DEFAULT_TASK_PROMPT,
+        model: this.sessionConfig.claude.thinkModel,
+      })
     }
+  }
+
+  /**
+   * Inject a user reply into the running session. The message is written as
+   * NDJSON to Claude's stdin and processed before the next tool call.
+   */
+  injectReply(text: string, images?: string[]): boolean {
+    if (!this.process?.stdin?.writable) {
+      this.log.warn("cannot inject reply: stdin not writable")
+      return false
+    }
+
+    let content: string | Array<{ type: string; text?: string; source?: { type: string; media_type: string; data: string } }>
+    if (images && images.length > 0) {
+      const blocks: Array<{ type: string; text?: string; source?: { type: string; media_type: string; data: string } }> = []
+      for (const imgPath of images) {
+        try {
+          const data = fs.readFileSync(imgPath).toString("base64")
+          const ext = path.extname(imgPath).toLowerCase()
+          const mediaType = ext === ".png" ? "image/png"
+            : ext === ".gif" ? "image/gif"
+            : ext === ".webp" ? "image/webp"
+            : "image/jpeg"
+          blocks.push({
+            type: "image",
+            source: { type: "base64", media_type: mediaType, data },
+          })
+        } catch (err) {
+          this.log.warn({ err, imgPath }, "failed to read image for reply injection")
+        }
+      }
+      blocks.push({ type: "text", text })
+      content = blocks
+    } else {
+      content = text
+    }
+
+    const message = JSON.stringify({
+      type: "user",
+      session_id: "",
+      message: { role: "user", content },
+      parent_tool_use_id: null,
+    })
+
+    this.process.stdin.write(message + "\n", (err) => {
+      if (err) {
+        this.log.warn({ err }, "failed to write reply to stdin")
+      } else {
+        this.log.info({ textLength: text.length, imageCount: images?.length ?? 0 }, "injected reply via stdin")
+      }
+    })
+    return true
+  }
+
+  waitForCompletion(): Promise<"completed" | "errored"> {
+    return this.completionPromise
+  }
+
+  isClosed(): boolean {
+    return this.state === "completed" || this.state === "errored"
+  }
+
+  getState(): SessionState {
+    return this.state
+  }
+
+  isActive(): boolean {
+    return this.state === "spawning" || this.state === "working"
+  }
+
+  interrupt(): void {
+    if (this.process && this.state === "working") {
+      this.killProcessGroup(this.process, "SIGINT")
+    }
+  }
+
+  kill(gracefulMs = 5000): Promise<void> {
+    if (!this.process || !this.isActive()) {
+      return Promise.resolve()
+    }
+
+    return new Promise<void>((resolve) => {
+      const proc = this.process!
+
+      const onExit = () => {
+        clearTimeout(escalation)
+        resolve()
+      }
+
+      proc.once("close", onExit)
+
+      this.killProcessGroup(proc, "SIGINT")
+
+      const escalation = setTimeout(() => {
+        if (this.isActive()) {
+          this.log.warn("SIGINT timeout, sending SIGKILL")
+          this.killProcessGroup(proc, "SIGKILL")
+        }
+      }, gracefulMs)
+    })
   }
 
   private buildMcpServers(): Record<string, McpConfigEntry> {
@@ -198,7 +288,6 @@ export class SessionHandle implements SessionPort {
     }
 
     if (this.sessionConfig.mcp.zaiEnabled && this.sessionConfig.goose.provider === "z-ai") {
-      // Prefer profile.authToken for z-ai, fall back to env var
       const zaiKey = this.sessionConfig.profile?.authToken || process.env["ZAI_API_KEY"]
       if (zaiKey) {
         servers["web-search-prime"] = {
@@ -214,26 +303,6 @@ export class SessionHandle implements SessionPort {
     }
 
     return servers
-  }
-
-  private buildGooseExtensionArgs(): string[] {
-    const args: string[] = []
-    const servers = this.buildMcpServers()
-
-    for (const [, server] of Object.entries(servers)) {
-      // Skip HTTP MCPs - Goose doesn't support HTTP transport
-      if ("type" in server && server.type === "http") {
-        continue
-      }
-      const stdioServer = server as McpServerConfig
-      const envPrefix = stdioServer.env
-        ? Object.entries(stdioServer.env).map(([k, v]) => `${k}=${v}`).join(" ") + " "
-        : ""
-      const cmdWithArgs = envPrefix + [stdioServer.command, ...stdioServer.args].join(" ")
-      args.push("--with-extension", cmdWithArgs)
-    }
-
-    return args
   }
 
   private buildClaudeMcpConfigArgs(): string[] {
@@ -317,8 +386,6 @@ export class SessionHandle implements SessionPort {
       SENTRY_ACCESS_TOKEN: process.env["SENTRY_ACCESS_TOKEN"] ?? "",
       SUPABASE_ACCESS_TOKEN: process.env["SUPABASE_ACCESS_TOKEN"] ?? "",
       ZAI_API_KEY: process.env["ZAI_API_KEY"] ?? "",
-
-      // UV / Python — allow sessions to use uv for Python dependency management
       UV_CACHE_DIR: path.join(sessionHome, ".cache", "uv"),
       UV_PYTHON_PREFERENCE: "only-managed",
       UV_LINK_MODE: "copy",
@@ -328,7 +395,6 @@ export class SessionHandle implements SessionPort {
     if (profile) {
       if (profile.baseUrl) baseEnv["ANTHROPIC_BASE_URL"] = profile.baseUrl
       if (profile.authToken) {
-        // Use authToken for the appropriate provider
         if (this.sessionConfig.goose.provider === "z-ai") {
           baseEnv["ZAI_API_KEY"] = profile.authToken
         } else {
@@ -340,14 +406,12 @@ export class SessionHandle implements SessionPort {
       if (profile.haikuModel) baseEnv["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = profile.haikuModel
     }
 
-    // Inject agent files, skills, and goosehints into the workspace
     try {
       injectAgentFiles(this.meta.cwd, this.sessionConfig.agentDefs)
     } catch (err) {
       this.log.warn({ err }, "failed to inject agent files (non-fatal)")
     }
 
-    // Add passthrough env vars from config
     const passthrough = this.sessionConfig.sessionEnvPassthrough ?? []
     for (const varName of passthrough) {
       const value = process.env[varName]
@@ -359,53 +423,13 @@ export class SessionHandle implements SessionPort {
     return baseEnv
   }
 
-  private startGoose(task: string, systemPrompt?: string): void {
-    const baseEnv = this.buildIsolatedEnv()
-    const env: Record<string, string> = {
-      ...baseEnv,
-      GOOSE_MODE: "auto",
-      GOOSE_MAX_TURNS: "200",
-      GOOSE_CONTEXT_STRATEGY: "summarize",
-      GOOSE_TELEMETRY_ENABLED: "false",
-      GOOSE_CLI_SHOW_COST: "false",
-      CLAUDE_THINKING_TYPE: "enabled",
-      CLAUDE_THINKING_BUDGET: "16000",
-    }
-
-    const prompt = systemPrompt ?? DEFAULT_TASK_PROMPT
-
-    this.process = spawn(
-      "goose",
-      [
-        "run",
-        "--text", task,
-        "--output-format", "stream-json",
-        "--name", this.meta.topicName,
-        "--provider", this.sessionConfig.goose.provider,
-        "--model", this.sessionConfig.goose.model,
-        "--system", prompt,
-        "--no-profile",
-        "--with-builtin", "developer",
-        ...this.buildGooseExtensionArgs(),
-        "--quiet",
-      ],
-      {
-        cwd: this.meta.cwd,
-        env,
-        stdio: ["ignore", "pipe", "pipe"],
-        detached: true,
-      },
-    )
-
-    this.attachProcessHandlers(this.parseGooseLine.bind(this))
-  }
-
-  private spawnClaude(opts: SpawnClaudeOpts): void {
+  private spawnClaude(opts: SpawnOpts): void {
     const env = this.buildIsolatedEnv()
 
     const args = [
       "--print",
       "--output-format", "stream-json",
+      "--input-format", "stream-json",
       "--verbose",
       "--include-partial-messages",
       "--dangerously-skip-permissions",
@@ -414,29 +438,25 @@ export class SessionHandle implements SessionPort {
       ...this.buildClaudeMcpConfigArgs(),
       "--append-system-prompt", opts.systemPrompt,
       "--model", opts.model,
-      opts.task,
     ]
 
     this.process = spawn("claude", args, {
       cwd: this.meta.cwd,
       env,
-      stdio: ["ignore", "pipe", "pipe"],
-      ...(opts.detached ? { detached: true } : {}),
+      stdio: ["pipe", "pipe", "pipe"],
+      detached: true,
     })
 
-    this.attachProcessHandlers(this.parseClaudeLine.bind(this))
-  }
+    // Write the initial task as the first user message to stdin
+    const initialMessage = JSON.stringify({
+      type: "user",
+      session_id: "",
+      message: { role: "user", content: opts.task },
+      parent_tool_use_id: null,
+    })
+    this.process.stdin!.write(initialMessage + "\n")
 
-  private parseGooseLine(trimmed: string): void {
-    try {
-      const event = JSON.parse(trimmed) as GooseStreamEvent
-      if (event.type === "complete") {
-        this.meta.totalTokens = event.total_tokens ?? undefined
-      }
-      this.onEvent(event)
-    } catch {
-      this.log.warn({ line: trimmed.slice(0, 200) }, "invalid JSON line")
-    }
+    this.attachProcessHandlers()
   }
 
   private parseClaudeLine(trimmed: string): void {
@@ -454,7 +474,7 @@ export class SessionHandle implements SessionPort {
     }
   }
 
-  private attachProcessHandlers(parseLine: (line: string) => void): void {
+  private attachProcessHandlers(): void {
     const proc = this.process!
     this.state = "working"
 
@@ -464,7 +484,7 @@ export class SessionHandle implements SessionPort {
       if (this.inactivityHandle !== null) clearTimeout(this.inactivityHandle)
       this.inactivityHandle = setTimeout(() => {
         this.log.warn({ inactivityTimeoutMs: this.inactivityTimeoutMs }, "inactivity timeout — no stdout, killing")
-        captureException(new Error("Session inactivity timeout"), {
+        captureException(new Error("SDK session inactivity timeout"), {
           sessionId: this.meta.sessionId,
           repo: this.meta.repo,
           mode: this.meta.mode,
@@ -479,7 +499,7 @@ export class SessionHandle implements SessionPort {
       const trimmed = line.trim()
       if (!trimmed) return
       resetInactivityTimer()
-      parseLine(trimmed)
+      this.parseClaudeLine(trimmed)
     })
 
     proc.stderr?.on("data", (chunk: Buffer) => {
@@ -488,9 +508,9 @@ export class SessionHandle implements SessionPort {
     })
 
     proc.on("close", (code) => {
-      this.clearTimeout()
+      this.clearTimers()
       if (code !== 0 && code !== null) {
-        captureException(new Error(`Session process exited with code ${code}`), {
+        captureException(new Error(`SDK session process exited with code ${code}`), {
           sessionId: this.meta.sessionId,
           repo: this.meta.repo,
           mode: this.meta.mode,
@@ -510,7 +530,7 @@ export class SessionHandle implements SessionPort {
         repo: this.meta.repo,
         mode: this.meta.mode,
       })
-      this.clearTimeout()
+      this.clearTimers()
       this.state = "errored"
       this.onEvent({ type: "error", error: err.message })
       this.completionResolve?.("errored")
@@ -519,7 +539,7 @@ export class SessionHandle implements SessionPort {
 
     this.timeoutHandle = setTimeout(() => {
       this.log.warn({ timeoutMs: this.timeoutMs }, "session timeout")
-      captureException(new Error("Session timed out"), {
+      captureException(new Error("SDK session timed out"), {
         sessionId: this.meta.sessionId,
         repo: this.meta.repo,
         mode: this.meta.mode,
@@ -527,38 +547,6 @@ export class SessionHandle implements SessionPort {
       })
       this.interrupt()
     }, this.timeoutMs)
-  }
-
-  interrupt(): void {
-    if (this.process && this.state === "working") {
-      this.killProcessGroup(this.process, "SIGINT")
-    }
-  }
-
-  kill(gracefulMs = 5000): Promise<void> {
-    if (!this.process || !this.isActive()) {
-      return Promise.resolve()
-    }
-
-    return new Promise<void>((resolve) => {
-      const proc = this.process!
-
-      const onExit = () => {
-        clearTimeout(escalation)
-        resolve()
-      }
-
-      proc.once("close", onExit)
-
-      this.killProcessGroup(proc, "SIGINT")
-
-      const escalation = setTimeout(() => {
-        if (this.isActive()) {
-          this.log.warn("SIGINT timeout, sending SIGKILL")
-          this.killProcessGroup(proc, "SIGKILL")
-        }
-      }, gracefulMs)
-    })
   }
 
   private killProcessGroup(proc: ChildProcess, signal: NodeJS.Signals): void {
@@ -577,7 +565,7 @@ export class SessionHandle implements SessionPort {
     }
   }
 
-  private clearTimeout(): void {
+  private clearTimers(): void {
     if (this.timeoutHandle !== null) {
       clearTimeout(this.timeoutHandle)
       this.timeoutHandle = null
@@ -586,26 +574,5 @@ export class SessionHandle implements SessionPort {
       clearTimeout(this.inactivityHandle)
       this.inactivityHandle = null
     }
-  }
-
-  injectReply(text: string): boolean {
-    this.log.warn({ textLength: text.length }, "injectReply called on CLI session — stdin not available, reply will be queued for next iteration")
-    return false
-  }
-
-  waitForCompletion(): Promise<"completed" | "errored"> {
-    return this.completionPromise
-  }
-
-  isClosed(): boolean {
-    return this.state === "completed" || this.state === "errored"
-  }
-
-  getState(): SessionState {
-    return this.state
-  }
-
-  isActive(): boolean {
-    return this.state === "spawning" || this.state === "working"
   }
 }
