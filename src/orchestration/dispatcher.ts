@@ -5,8 +5,10 @@ import crypto from "node:crypto"
 import type { TelegramClient } from "../telegram/telegram.js"
 import { captureException } from "../sentry.js"
 import { SessionHandle, type SessionConfig } from "../session/session.js"
+import { SDKSessionHandle } from "../session/sdk-session.js"
+import { ReplyQueue } from "../reply-queue.js"
 import { Observer } from "../telegram/observer.js"
-import type { TelegramUpdate, TelegramCallbackQuery, TelegramPhotoSize, SessionMeta, TopicSession, SessionMode, SessionState, TopicMessage, AutoAdvance } from "../types.js"
+import type { TelegramUpdate, TelegramCallbackQuery, TelegramPhotoSize, GooseStreamEvent, SessionMeta, SessionPort, TopicSession, SessionMode, SessionState, TopicMessage, AutoAdvance } from "../types.js"
 import { generateSlug, taskToLabel } from "../slugs.js"
 import type { MinionConfig, McpConfig } from "../config/config-types.js"
 import type { GitHubTokenProvider } from "../github/index.js"
@@ -66,9 +68,13 @@ const log = loggers.dispatcher
 
 const POLL_TIMEOUT = 30
 
+/** Modes that use Claude CLI (not Goose) and support mid-execution reply injection via SDK */
+const SDK_MODES: Set<SessionMode> = new Set(["plan", "think", "review", "ship-think", "ship-plan", "ship-verify"])
+
 export class Dispatcher {
   private readonly sessions = new Map<number, ActiveSession>()
   private readonly topicSessions = new Map<number, TopicSession>()
+  private readonly replyQueues = new Map<number, ReplyQueue>()
   private readonly pendingTasks = new Map<number, PendingTask>()
   private readonly pendingProfiles = new Map<number, PendingTask>()
   private readonly store: SessionStore
@@ -230,6 +236,10 @@ export class Dispatcher {
         })
         session.interruptedAt = undefined
       }
+
+      this.recoverUndeliveredReplies(session).catch((err) => {
+        log.warn({ err, slug: session.slug }, "failed to recover undelivered replies")
+      })
     }
 
     if (active.size > 0) {
@@ -253,6 +263,24 @@ export class Dispatcher {
     }
 
     this.pinnedMessages.updatePinnedSummary()
+  }
+
+  private async recoverUndeliveredReplies(topicSession: TopicSession): Promise<void> {
+    const queue = this.getReplyQueue(topicSession)
+    const pending = await queue.pending()
+    if (pending.length === 0) return
+
+    log.info({ slug: topicSession.slug, count: pending.length }, "recovering undelivered replies")
+
+    for (const reply of pending) {
+      topicSession.pendingFeedback.push(reply.text)
+      await queue.markDelivered(reply.id)
+    }
+
+    this.telegram.sendMessage(
+      `🔄 Recovered ${pending.length} undelivered ${pending.length === 1 ? "reply" : "replies"} from before the restart.`,
+      topicSession.threadId,
+    ).catch(() => {})
   }
 
   private async reconcileDags(): Promise<void> {
@@ -859,27 +887,40 @@ export class Dispatcher {
       agentDefs: this.config.agentDefs,
     }
 
-    const handle = new SessionHandle(
-      meta,
-      (event) => {
-        this.observer.onEvent(meta, event).catch((err) => {
-          loggers.observer.error({ err, sessionId }, "onEvent error")
-        })
+    const useSDK = SDK_MODES.has(topicSession.mode) && !systemPromptOverride
+    const onEvent = (event: GooseStreamEvent) => {
+      this.observer.onEvent(meta, event).catch((err) => {
+        loggers.observer.error({ err, sessionId }, "onEvent error")
+      })
 
-        if (event.type === "complete" && meta.totalTokens != null && meta.totalTokens > this.config.workspace.sessionTokenBudget) {
-          log.warn({ sessionId, totalTokens: meta.totalTokens, budget: this.config.workspace.sessionTokenBudget }, "session exceeded token budget")
-          this.telegram.sendMessage(
-            formatBudgetWarning(topicSession.slug, meta.totalTokens, this.config.workspace.sessionTokenBudget),
-            topicSession.threadId,
-          ).catch(() => {})
-          handle.interrupt()
-        }
-      },
-      (m, state) => this.handleSessionComplete(topicSession, m, state, sessionId),
-      this.config.workspace.sessionTimeoutMs,
-      this.config.workspace.sessionInactivityTimeoutMs,
-      sessionConfig,
-    )
+      if (event.type === "complete" && meta.totalTokens != null && meta.totalTokens > this.config.workspace.sessionTokenBudget) {
+        log.warn({ sessionId, totalTokens: meta.totalTokens, budget: this.config.workspace.sessionTokenBudget }, "session exceeded token budget")
+        this.telegram.sendMessage(
+          formatBudgetWarning(topicSession.slug, meta.totalTokens, this.config.workspace.sessionTokenBudget),
+          topicSession.threadId,
+        ).catch(() => {})
+        handle.interrupt()
+      }
+    }
+    const onDone = (m: SessionMeta, state: "completed" | "errored") => this.handleSessionComplete(topicSession, m, state, sessionId)
+
+    const handle: SessionPort = useSDK
+      ? new SDKSessionHandle(
+          meta,
+          onEvent,
+          onDone,
+          this.config.workspace.sessionTimeoutMs,
+          this.config.workspace.sessionInactivityTimeoutMs,
+          sessionConfig,
+        )
+      : new SessionHandle(
+          meta,
+          onEvent,
+          onDone,
+          this.config.workspace.sessionTimeoutMs,
+          this.config.workspace.sessionInactivityTimeoutMs,
+          sessionConfig,
+        )
 
     this.sessions.set(topicSession.threadId, { handle, meta, task })
 
@@ -1050,6 +1091,13 @@ export class Dispatcher {
     this.persistTopicSessions().catch(() => {})
     this.cleanBuildArtifacts(topicSession.cwd)
 
+    const queue = this.replyQueues.get(topicSession.threadId)
+    if (queue) {
+      queue.clearDelivered().catch((err) => {
+        log.warn({ err, slug: topicSession.slug }, "failed to clear delivered replies")
+      })
+    }
+
     this.notifyParentOfChildComplete(topicSession, state).catch((err) => {
       log.warn({ err, slug: topicSession.slug }, "parent notify error")
     })
@@ -1145,18 +1193,47 @@ export class Dispatcher {
 
   // ── Feedback & commands that stay in Dispatcher ───────────────────────
 
-  private async handleTopicFeedback(topicSession: TopicSession, feedback: string, photos?: TelegramPhotoSize[]): Promise<void> {
-    if (topicSession.activeSessionId) {
-      topicSession.pendingFeedback.push(feedback)
-      await this.telegram.sendMessage(
-        `📝 Reply queued — will be applied when the current iteration finishes.`,
-        topicSession.threadId,
-      )
-      return
+  private getReplyQueue(topicSession: TopicSession): ReplyQueue {
+    let queue = this.replyQueues.get(topicSession.threadId)
+    if (!queue) {
+      queue = new ReplyQueue(topicSession.cwd)
+      this.replyQueues.set(topicSession.threadId, queue)
     }
+    return queue
+  }
 
+  private async handleTopicFeedback(topicSession: TopicSession, feedback: string, photos?: TelegramPhotoSize[]): Promise<void> {
     const imagePaths = await this.downloadPhotos(photos, topicSession.cwd)
     const fullFeedback = appendImageContext(feedback, imagePaths)
+
+    if (topicSession.activeSessionId) {
+      const activeSession = this.sessions.get(topicSession.threadId)
+      const isSDK = activeSession?.handle instanceof SDKSessionHandle
+
+      const queue = this.getReplyQueue(topicSession)
+      const queued = await queue.push(fullFeedback, imagePaths.length > 0 ? imagePaths : undefined)
+
+      if (isSDK && activeSession) {
+        activeSession.handle.injectReply(fullFeedback, imagePaths.length > 0 ? imagePaths : undefined)
+        await queue.markDelivered(queued.id)
+        this.pushToConversation(topicSession, {
+          role: "user",
+          text: fullFeedback,
+          images: imagePaths.length > 0 ? imagePaths : undefined,
+        })
+        await this.telegram.sendMessage(
+          `💬 Reply injected — agent will see it before its next action.`,
+          topicSession.threadId,
+        )
+      } else {
+        topicSession.pendingFeedback.push(fullFeedback)
+        await this.telegram.sendMessage(
+          `📝 Reply queued — will be applied when the current iteration finishes.`,
+          topicSession.threadId,
+        )
+      }
+      return
+    }
 
     this.pushToConversation(topicSession, {
       role: "user",
@@ -1331,6 +1408,7 @@ export class Dispatcher {
   }
 
   private async closeSingleChild(child: TopicSession): Promise<void> {
+    this.replyQueues.delete(child.threadId)
     const childId = child.threadId
 
     if (child.activeSessionId) {
@@ -1347,6 +1425,7 @@ export class Dispatcher {
 
   private async handleCloseCommandInternal(topicSession: TopicSession): Promise<void> {
     const threadId = topicSession.threadId
+    this.replyQueues.delete(threadId)
 
     await this.closeChildSessions(topicSession)
 
@@ -1443,7 +1522,7 @@ export class Dispatcher {
     return this.sessions.size
   }
 
-  getSessions(): Map<number, { handle: SessionHandle; meta: SessionMeta; task: string }> {
+  getSessions(): Map<number, ActiveSession> {
     return this.sessions
   }
 
@@ -1465,7 +1544,17 @@ export class Dispatcher {
     if (!topicSession) {
       throw new SessionNotFoundError(threadId, Array.from(this.topicSessions.keys()))
     }
-    topicSession.pendingFeedback.push(message)
+
+    const activeSession = this.sessions.get(threadId)
+    if (activeSession && activeSession.handle instanceof SDKSessionHandle) {
+      const queue = this.getReplyQueue(topicSession)
+      const queued = await queue.push(message)
+      activeSession.handle.injectReply(message)
+      await queue.markDelivered(queued.id)
+      this.pushToConversation(topicSession, { role: "user", text: message })
+    } else {
+      topicSession.pendingFeedback.push(message)
+    }
   }
 
   apiStopSession(threadId: number): void {

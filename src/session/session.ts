@@ -3,7 +3,7 @@ import { createInterface } from "node:readline"
 import fs from "node:fs"
 import path from "node:path"
 import type { GooseConfig, ClaudeConfig, McpConfig, ProviderProfile, AgentDefinitions } from "../config/config-types.js"
-import type { GooseStreamEvent, SessionMeta, SessionState } from "../types.js"
+import type { GooseStreamEvent, SessionMeta, SessionState, SessionPort } from "../types.js"
 import { translateClaudeEvents } from "./claude-stream.js"
 import { captureException, setContext, addBreadcrumb } from "../sentry.js"
 import { DEFAULT_TASK_PROMPT, DEFAULT_PLAN_PROMPT, DEFAULT_THINK_PROMPT, DEFAULT_REVIEW_PROMPT, DEFAULT_SHIP_PLAN_PROMPT, DEFAULT_SHIP_VERIFY_PROMPT } from "../config/prompts.js"
@@ -50,11 +50,13 @@ type McpHttpServerConfig = {
 
 type McpConfigEntry = McpServerConfig | McpHttpServerConfig
 
-export class SessionHandle {
+export class SessionHandle implements SessionPort {
   private process: ChildProcess | null = null
   private state: SessionState = "spawning"
   private timeoutHandle: ReturnType<typeof setTimeout> | null = null
   private inactivityHandle: ReturnType<typeof setTimeout> | null = null
+  private completionResolve: ((result: "completed" | "errored") => void) | null = null
+  private completionPromise: Promise<"completed" | "errored">
   private log: ReturnType<typeof createSessionLogger>
 
   constructor(
@@ -66,6 +68,9 @@ export class SessionHandle {
     private readonly sessionConfig: SessionConfig,
   ) {
     this.log = createSessionLogger(this.meta.topicName, this.meta.threadId, this.meta.sessionId)
+    this.completionPromise = new Promise((resolve) => {
+      this.completionResolve = resolve
+    })
   }
 
   private static readonly claudeModeConfigs: Record<string, (cfg: SessionConfig) => Omit<SpawnClaudeOpts, "task">> = {
@@ -494,6 +499,7 @@ export class SessionHandle {
       }
       const finalState: "completed" | "errored" = code === 0 ? "completed" : "errored"
       this.state = finalState
+      this.completionResolve?.(finalState)
       this.onDone(this.meta, finalState)
     })
 
@@ -507,6 +513,7 @@ export class SessionHandle {
       this.clearTimeout()
       this.state = "errored"
       this.onEvent({ type: "error", error: err.message })
+      this.completionResolve?.("errored")
       this.onDone(this.meta, "errored")
     })
 
@@ -579,6 +586,18 @@ export class SessionHandle {
       clearTimeout(this.inactivityHandle)
       this.inactivityHandle = null
     }
+  }
+
+  injectReply(text: string): void {
+    this.log.warn({ textLength: text.length }, "injectReply called on CLI session — stdin not available, reply will be queued for next iteration")
+  }
+
+  waitForCompletion(): Promise<"completed" | "errored"> {
+    return this.completionPromise
+  }
+
+  isClosed(): boolean {
+    return this.state === "completed" || this.state === "errored"
   }
 
   getState(): SessionState {
