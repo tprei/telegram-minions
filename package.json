@@ -30,6 +30,7 @@
     "typecheck": "tsc --noEmit",
     "typecheck:ui": "cd ui && npm run typecheck",
     "test": "vitest run",
+    "test:integration": "vitest run --config vitest.config.integration.ts",
     "test:watch": "vitest",
     "prepare": "git config core.hooksPath .githooks",
     "prepublishOnly": "npm run build"
