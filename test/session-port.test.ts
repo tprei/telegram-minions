@@ -20,8 +20,9 @@ class StubSessionPort implements SessionPort {
     this.state = "working"
   }
 
-  injectReply(text: string, images?: string[]): void {
+  injectReply(text: string, images?: string[]): boolean {
     this.replies.push({ text, images })
+    return true
   }
 
   waitForCompletion(): Promise<"completed" | "errored"> {

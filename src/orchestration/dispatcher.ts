@@ -1214,8 +1214,8 @@ export class Dispatcher {
       const queued = await queue.push(fullFeedback, imagePaths.length > 0 ? imagePaths : undefined)
 
       if (isSDK && activeSession) {
-        activeSession.handle.injectReply(fullFeedback, imagePaths.length > 0 ? imagePaths : undefined)
-        await queue.markDelivered(queued.id)
+        const injected = activeSession.handle.injectReply(fullFeedback, imagePaths.length > 0 ? imagePaths : undefined)
+        if (injected) await queue.markDelivered(queued.id)
         this.pushToConversation(topicSession, {
           role: "user",
           text: fullFeedback,
@@ -1549,8 +1549,8 @@ export class Dispatcher {
     if (activeSession && activeSession.handle instanceof SDKSessionHandle) {
       const queue = this.getReplyQueue(topicSession)
       const queued = await queue.push(message)
-      activeSession.handle.injectReply(message)
-      await queue.markDelivered(queued.id)
+      const injected = activeSession.handle.injectReply(message)
+      if (injected) await queue.markDelivered(queued.id)
       this.pushToConversation(topicSession, { role: "user", text: message })
     } else {
       topicSession.pendingFeedback.push(message)

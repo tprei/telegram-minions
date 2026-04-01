@@ -126,15 +126,15 @@ describe("SDKSessionHandle", () => {
   })
 
   describe("injectReply", () => {
-    it("does not throw when process is not started", () => {
+    it("returns false when process is not started", () => {
       const handle = makeHandle()
-      expect(() => handle.injectReply("hello")).not.toThrow()
+      expect(handle.injectReply("hello")).toBe(false)
     })
 
-    it("logs warning when stdin is not writable", () => {
+    it("logs warning and returns false when stdin is not writable", () => {
       const handle = makeHandle()
-      // Process is null, so stdin is not writable — should warn, not throw
-      handle.injectReply("test message")
+      const result = handle.injectReply("test message")
+      expect(result).toBe(false)
       expect(handle.getState()).toBe("spawning")
     })
   })

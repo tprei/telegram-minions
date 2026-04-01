@@ -588,8 +588,9 @@ export class SessionHandle implements SessionPort {
     }
   }
 
-  injectReply(text: string): void {
+  injectReply(text: string): boolean {
     this.log.warn({ textLength: text.length }, "injectReply called on CLI session — stdin not available, reply will be queued for next iteration")
+    return false
   }
 
   waitForCompletion(): Promise<"completed" | "errored"> {

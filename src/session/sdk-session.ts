@@ -132,10 +132,10 @@ export class SDKSessionHandle implements SessionPort {
    * Inject a user reply into the running session. The message is written as
    * NDJSON to Claude's stdin and processed before the next tool call.
    */
-  injectReply(text: string, images?: string[]): void {
+  injectReply(text: string, images?: string[]): boolean {
     if (!this.process?.stdin?.writable) {
       this.log.warn("cannot inject reply: stdin not writable")
-      return
+      return false
     }
 
     let content: string | Array<{ type: string; text?: string; source?: { type: string; media_type: string; data: string } }>
@@ -177,6 +177,7 @@ export class SDKSessionHandle implements SessionPort {
         this.log.info({ textLength: text.length, imageCount: images?.length ?? 0 }, "injected reply via stdin")
       }
     })
+    return true
   }
 
   waitForCompletion(): Promise<"completed" | "errored"> {

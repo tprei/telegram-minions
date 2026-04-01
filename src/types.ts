@@ -126,7 +126,7 @@ export interface SessionPort {
   start(task: string, systemPrompt?: string): void
 
   /** Inject a user reply into the running session (processed FIFO before the next tool call) */
-  injectReply(text: string, images?: string[]): void
+  injectReply(text: string, images?: string[]): boolean
 
   /** Returns a promise that resolves when the session finishes (completes or errors) */
   waitForCompletion(): Promise<"completed" | "errored">
