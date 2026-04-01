@@ -62,3 +62,5 @@ export { resolveConflictsWithAgent, buildConflictResolutionPrompt } from "./conf
 export { formatLandSkipped, formatLandSummary, formatLandConflictResolution } from "./telegram/format.js"
 export { injectAgentFiles, resolvePackageAssetsDir, type InjectionResult } from "./session/inject-assets.js"
 export { GitHubTokenProvider } from "./github/index.js"
+export { ReplyQueue } from "./reply-queue.js"
+export type { QueuedReply } from "./reply-queue.js"
