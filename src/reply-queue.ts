@@ -23,6 +23,7 @@ interface ReplyFileData {
 
 export class ReplyQueue {
   private readonly queueDir: string
+  private seq = 0
 
   constructor(cwd: string) {
     this.queueDir = path.join(cwd, QUEUE_DIR)
@@ -31,7 +32,8 @@ export class ReplyQueue {
   async push(text: string, images?: string[]): Promise<QueuedReply> {
     await fs.mkdir(this.queueDir, { recursive: true })
     const timestamp = Date.now()
-    const id = `${timestamp}-${randomSuffix()}`
+    const seq = String(this.seq++).padStart(4, "0")
+    const id = `${timestamp}-${seq}-${randomSuffix()}`
     const data: ReplyFileData = { text, timestamp, delivered: false }
     if (images && images.length > 0) {
       data.images = images

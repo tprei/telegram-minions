@@ -23,7 +23,7 @@ describe("ReplyQueue", () => {
       const reply = await queue.push("hello agent")
       expect(reply.text).toBe("hello agent")
       expect(reply.delivered).toBe(false)
-      expect(reply.id).toMatch(/^\d+-[a-z0-9]+$/)
+      expect(reply.id).toMatch(/^\d+-\d{4}-[a-z0-9]+$/)
       expect(reply.timestamp).toBeGreaterThan(0)
       expect(reply.images).toBeUndefined()
     })
