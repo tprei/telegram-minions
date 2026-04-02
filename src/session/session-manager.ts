@@ -588,6 +588,13 @@ function bootstrapPythonProject(
   }
 
   try {
+    execSync("which uv", { stdio: ["ignore", "pipe", "pipe"], timeout: 5_000 })
+  } catch {
+    log.debug({ label }, "uv not found on PATH, skipping Python bootstrap")
+    return
+  }
+
+  try {
     log.debug({ label }, "running uv sync")
     execSync("uv sync", { cwd: pkgDir, stdio, timeout: 300_000 })
 
@@ -650,6 +657,13 @@ function bootstrapPythonRequirements(
   }
 
   try {
+    execSync("which uv", { stdio: ["ignore", "pipe", "pipe"], timeout: 5_000 })
+  } catch {
+    log.debug({ label }, "uv not found on PATH, skipping Python bootstrap")
+    return
+  }
+
+  try {
     log.debug({ label }, "running uv venv + uv pip install")
     execSync("uv venv", { cwd: pkgDir, stdio, timeout: 60_000 })
     execSync("uv pip install -r requirements.txt", { cwd: pkgDir, stdio, timeout: 300_000 })
@@ -675,13 +689,6 @@ export function bootstrapPythonDependencies(
   const hasPyproject = fs.existsSync(path.join(pkgDir, "pyproject.toml"))
   const hasRequirements = fs.existsSync(path.join(pkgDir, "requirements.txt"))
   if (!hasPyproject && !hasRequirements) return
-
-  try {
-    execSync("which uv", { stdio: ["ignore", "pipe", "pipe"], timeout: 5_000 })
-  } catch {
-    log.debug({ label: pkgDir }, "uv not found on PATH, skipping Python bootstrap")
-    return
-  }
 
   if (hasPyproject) {
     bootstrapPythonProject(pkgDir, reposDir, cacheKey, pkgDir)
