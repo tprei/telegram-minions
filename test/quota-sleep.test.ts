@@ -93,7 +93,7 @@ function getPrivate(dispatcher: Dispatcher): {
   sessions: Map<number, unknown>
   quotaEvents: Map<number, { resetAt?: number; rawMessage: string }>
   quotaSleepTimers: Map<number, ReturnType<typeof setTimeout>>
-  handleSessionComplete: (ts: TopicSession, m: SessionMeta, state: "completed" | "errored", sid: string) => void
+  handleSessionComplete: (ts: TopicSession, m: SessionMeta, state: "completed" | "errored" | "quota_exhausted", sid: string) => void
   handleQuotaSleep: (ts: TopicSession, rawMessage: string) => void
   scheduleQuotaResume: (ts: TopicSession, sleepMs: number) => void
   resumeAfterQuotaSleep: (ts: TopicSession) => Promise<void>
@@ -168,7 +168,7 @@ describe("quota sleep in dispatcher", () => {
       mode: "task",
     }
 
-    priv.handleSessionComplete(ts, meta, "errored", "sess-1")
+    priv.handleSessionComplete(ts, meta, "quota_exhausted", "sess-1")
 
     expect(ts.lastState).toBe("quota_exhausted")
     expect(ts.quotaRetryCount).toBe(1)
@@ -243,7 +243,7 @@ describe("quota sleep in dispatcher", () => {
       mode: "task",
     }
 
-    priv.handleSessionComplete(ts, meta, "errored", "sess-1")
+    priv.handleSessionComplete(ts, meta, "quota_exhausted", "sess-1")
 
     expect(ts.lastState).toBe("quota_exhausted")
     expect(ts.quotaRetryCount).toBe(2)

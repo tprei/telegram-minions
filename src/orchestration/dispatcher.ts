@@ -979,7 +979,7 @@ export class Dispatcher {
       slug: topicSession.slug,
       repo: topicSession.repo,
       mode: topicSession.mode,
-      state,
+      state: state === "quota_exhausted" ? "errored" : state,
       durationMs,
       totalTokens: m.totalTokens ?? 0,
       timestamp: Date.now(),
@@ -987,14 +987,15 @@ export class Dispatcher {
 
     // Quota exhaustion — sleep and retry
     const quotaEvent = this.quotaEvents.get(topicSession.threadId)
-    if (quotaEvent && state === "errored") {
+    if (quotaEvent && state === "quota_exhausted") {
       this.quotaEvents.delete(topicSession.threadId)
-      this.observer.onSessionComplete(m, state, durationMs).catch(() => {})
-      writeSessionLog(topicSession, m, state, durationMs)
+      this.observer.onSessionComplete(m, "errored", durationMs).catch(() => {})
+      writeSessionLog(topicSession, m, "errored", durationMs)
       this.handleQuotaSleep(topicSession, quotaEvent.rawMessage)
       return
     }
     this.quotaEvents.delete(topicSession.threadId)
+    if (state === "quota_exhausted") return
 
     // Ship auto-advance
     if (topicSession.autoAdvance && (topicSession.mode === "ship-think" || topicSession.mode === "ship-plan" || topicSession.mode === "ship-verify")) {
