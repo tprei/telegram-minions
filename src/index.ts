@@ -65,3 +65,5 @@ export { injectAgentFiles, resolvePackageAssetsDir, type InjectionResult } from 
 export { GitHubTokenProvider } from "./github/index.js"
 export { ReplyQueue } from "./reply-queue.js"
 export type { QueuedReply } from "./reply-queue.js"
+export { EventBus } from "./events/index.js"
+export type { EventHandler, DomainEvent, DomainEventMap, DomainEventType, AnyDomainEvent } from "./events/index.js"
