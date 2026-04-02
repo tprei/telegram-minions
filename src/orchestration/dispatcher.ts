@@ -1129,11 +1129,12 @@ export class Dispatcher {
         }
       }).catch((err) => {
         loggers.observer.error({ err, sessionId }, "flushAndComplete error")
+      }).finally(() => {
+        this.cleanBuildArtifacts(topicSession.cwd)
       })
     }
 
     this.persistTopicSessions().catch(() => {})
-    this.cleanBuildArtifacts(topicSession.cwd)
 
     const queue = this.replyQueues.get(topicSession.threadId)
     if (queue) {

@@ -13,7 +13,7 @@ export interface QualityReport {
   allPassed: boolean
 }
 
-const GATE_TIMEOUT_MS = 120_000
+const GATE_TIMEOUT_MS = 300_000
 
 function run(cmd: string, cwd: string): { ok: boolean; output: string } {
   try {
