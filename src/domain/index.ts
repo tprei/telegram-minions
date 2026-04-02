@@ -1,7 +1,3 @@
-// Re-export shim — all types now live in domain/ modules.
-// Import from domain/ directly for new code. This file will be removed
-// once all imports are migrated.
-
 export type {
   TelegramUser,
   TelegramPhotoSize,
@@ -9,7 +5,7 @@ export type {
   TelegramCallbackQuery,
   TelegramUpdate,
   TelegramForumTopic,
-} from "./domain/telegram-types.js"
+} from "./telegram-types.js"
 
 export type {
   GooseContentType,
@@ -21,7 +17,7 @@ export type {
   GooseNotificationContent,
   GooseMessage,
   GooseStreamEvent,
-} from "./domain/goose-types.js"
+} from "./goose-types.js"
 
 export type {
   SessionDoneState,
@@ -32,7 +28,7 @@ export type {
   TopicMessage,
   TopicSession,
   PendingDagItem,
-} from "./domain/session-types.js"
+} from "./session-types.js"
 
 export type {
   ShipPhase,
@@ -42,4 +38,4 @@ export type {
   VerificationCheck,
   VerificationRound,
   VerificationState,
-} from "./domain/workflow-types.js"
+} from "./workflow-types.js"
