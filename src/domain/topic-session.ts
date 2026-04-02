@@ -5,7 +5,7 @@ import type {
   AutoAdvance,
   VerificationState,
   PendingDagItem,
-} from "../types.js"
+} from "./session-types.js"
 import { truncateConversation } from "../conversation-limits.js"
 
 /**
