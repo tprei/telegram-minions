@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest"
 import {
+  formatLandComplete,
   formatLandSkipped,
   formatLandSummary,
   formatLandConflictResolution,
@@ -16,6 +17,19 @@ describe("formatLandSkipped", () => {
   it("formats a closed PR", () => {
     const result = formatLandSkipped("Fix bug", "CLOSED")
     expect(result).toContain("already closed")
+  })
+})
+
+describe("formatLandComplete", () => {
+  it("uses provided baseBranch name", () => {
+    const result = formatLandComplete(3, 3, "master")
+    expect(result).toContain("merged to master")
+    expect(result).not.toContain("merged to main")
+  })
+
+  it("defaults to main when baseBranch omitted", () => {
+    const result = formatLandComplete(3, 3)
+    expect(result).toContain("merged to main")
   })
 })
 
@@ -53,6 +67,12 @@ describe("formatLandSummary", () => {
     const result = formatLandSummary(0, 1, 0, 1, ["<script>alert(1)</script>"])
     expect(result).toContain("&lt;script&gt;")
     expect(result).not.toContain("<script>")
+  })
+
+  it("uses provided baseBranch name", () => {
+    const result = formatLandSummary(2, 1, 0, 3, ["Task A"], "master")
+    expect(result).toContain("merged to master")
+    expect(result).not.toContain("merged to main")
   })
 })
 

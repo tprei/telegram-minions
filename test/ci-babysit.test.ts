@@ -293,6 +293,18 @@ describe("buildMergeConflictPrompt", () => {
     expect(prompt).toContain("Run local quality gates")
     expect(prompt).toContain("tests pass locally")
   })
+
+  it("uses custom baseBranch in git commands", () => {
+    const prompt = buildMergeConflictPrompt(
+      "https://github.com/org/repo/pull/1",
+      1,
+      2,
+      "master",
+    )
+    expect(prompt).toContain("git fetch origin master")
+    expect(prompt).toContain("origin/master")
+    expect(prompt).not.toContain("origin/main")
+  })
 })
 
 describe("checkPRMergeability", () => {

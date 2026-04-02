@@ -229,6 +229,12 @@ describe("buildDagChildPrompt", () => {
     const prompt = buildDagChildPrompt(conversation, node, [node], [], false, [])
     expect(prompt).not.toContain("Merge conflicts to resolve first")
   })
+
+  it("uses custom defaultBranch as PR target for non-stack DAGs", () => {
+    const node: DagInput = { id: "a", title: "A", description: "Do A", dependsOn: [] }
+    const prompt = buildDagChildPrompt(conversation, node, [node], [], false, [], "master")
+    expect(prompt).toContain("targeting `master`")
+  })
 })
 
 describe("extractDagItems profile environment", () => {

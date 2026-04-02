@@ -23,6 +23,11 @@ describe("buildConflictResolutionPrompt", () => {
     expect(prompt).toContain("Do NOT run `git rebase --continue`")
   })
 
+  it("includes typecheck instruction", () => {
+    const prompt = buildConflictResolutionPrompt("feat", "main", ["file.ts"])
+    expect(prompt).toContain("npx tsc --noEmit")
+  })
+
   it("lists all conflict files", () => {
     const files = ["a.ts", "b.ts", "c.ts"]
     const prompt = buildConflictResolutionPrompt("feat", "main", files)
@@ -30,5 +35,21 @@ describe("buildConflictResolutionPrompt", () => {
     for (const f of files) {
       expect(prompt).toContain(f)
     }
+  })
+
+  it("includes file contents when provided", () => {
+    const contents = new Map([
+      ["src/auth.ts", "<<<<<<< HEAD\nimport { foo } from './old'\n=======\nimport { foo } from './new'\n>>>>>>>"],
+    ])
+    const prompt = buildConflictResolutionPrompt("feat", "main", ["src/auth.ts"], contents)
+
+    expect(prompt).toContain("Current file contents")
+    expect(prompt).toContain("<<<<<<< HEAD")
+    expect(prompt).toContain("import { foo } from './new'")
+  })
+
+  it("omits file contents section when not provided", () => {
+    const prompt = buildConflictResolutionPrompt("feat", "main", ["src/auth.ts"])
+    expect(prompt).not.toContain("Current file contents")
   })
 })

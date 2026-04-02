@@ -313,6 +313,7 @@ export function buildMergeConflictPrompt(
   prUrl: string,
   attempt: number,
   maxAttempts: number,
+  baseBranch = "main",
 ): string {
   const lines: string[] = [
     "## Merge conflict resolution",
@@ -324,8 +325,8 @@ export function buildMergeConflictPrompt(
     "",
     "### Instructions",
     "",
-    "1. Fetch the latest base branch: `git fetch origin main` (or master)",
-    "2. Merge or rebase onto the base branch: `git merge origin/main` or `git rebase origin/main`",
+    `1. Fetch the latest base branch: \`git fetch origin ${baseBranch}\``,
+    `2. Merge or rebase onto the base branch: \`git merge origin/${baseBranch}\` or \`git rebase origin/${baseBranch}\``,
     "3. Resolve any conflicts in the affected files",
     "4. Run local quality gates (tests, lint, typecheck) to verify the resolution didn't break anything",
     "5. Push the resolved changes",

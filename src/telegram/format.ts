@@ -1030,8 +1030,8 @@ export function formatLandProgress(title: string, prUrl: string, index: number, 
   return `🛬 <b>${index + 1}/${total}</b> Merged: ${esc(title)} — <a href="${esc(prUrl)}">PR</a>`
 }
 
-export function formatLandComplete(succeeded: number, total: number): string {
-  return `🛬 <b>Landing complete</b>: ${succeeded}/${total} PRs merged to main`
+export function formatLandComplete(succeeded: number, total: number, baseBranch = "main"): string {
+  return `🛬 <b>Landing complete</b>: ${succeeded}/${total} PRs merged to ${esc(baseBranch)}`
 }
 
 export function formatLandError(title: string, error: string): string {
@@ -1042,8 +1042,8 @@ export function formatLandSkipped(title: string, state: string): string {
   return `⏭ <b>Skipped</b>: ${esc(title)} (already ${esc(state.toLowerCase())})`
 }
 
-export function formatLandSummary(succeeded: number, failed: number, skipped: number, total: number, failedTitles: string[]): string {
-  const parts = [`🛬 <b>Landing complete</b>: ${succeeded}/${total} PRs merged to main`]
+export function formatLandSummary(succeeded: number, failed: number, skipped: number, total: number, failedTitles: string[], baseBranch = "main"): string {
+  const parts = [`🛬 <b>Landing complete</b>: ${succeeded}/${total} PRs merged to ${esc(baseBranch)}`]
   if (skipped > 0) parts.push(`⏭ ${skipped} skipped (already merged/closed)`)
   if (failed > 0) {
     parts.push(`❌ ${failed} failed:`)

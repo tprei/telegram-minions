@@ -197,6 +197,7 @@ export function buildDagChildPrompt(
   upstreamBranches: string[],
   isStack: boolean,
   conflictFiles: string[] = [],
+  defaultBranch = "main",
 ): string {
   const originalRequest = parentConversation[0]?.text ?? ""
 
@@ -293,7 +294,7 @@ export function buildDagChildPrompt(
 
   const targetBranch = isStack && upstreamBranches.length > 0
     ? upstreamBranches[upstreamBranches.length - 1]
-    : "main"
+    : defaultBranch
 
   lines.push("## Deliverable")
   lines.push("")

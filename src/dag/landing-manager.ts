@@ -101,13 +101,7 @@ export class LandingManager {
       topicSession.threadId,
     )
 
-    let baseBranch: string
-    try {
-      const repoFlag = repo ? ["--repo", repo] : []
-      baseBranch = ghSync(["repo", "view", ...repoFlag, "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name"])
-    } catch {
-      baseBranch = "main"
-    }
+    const baseBranch = this.detectBaseBranch(repo, topicSession, graph)
 
     let succeeded = 0
     let skipped = 0
@@ -267,12 +261,12 @@ export class LandingManager {
 
     if (failedTitles.length === 0 && skipped === 0) {
       await this.ctx.telegram.sendMessage(
-        formatLandComplete(succeeded, prNodes.length),
+        formatLandComplete(succeeded, prNodes.length, baseBranch),
         topicSession.threadId,
       )
     } else {
       await this.ctx.telegram.sendMessage(
-        formatLandSummary(succeeded, failedTitles.length, skipped, prNodes.length, failedTitles),
+        formatLandSummary(succeeded, failedTitles.length, skipped, prNodes.length, failedTitles, baseBranch),
         topicSession.threadId,
       )
     }
@@ -421,6 +415,27 @@ export class LandingManager {
     }
 
     return undefined
+  }
+
+  private detectBaseBranch(repo: string | undefined, topicSession: TopicSession, graph?: DagGraph): string {
+    try {
+      const repoFlag = repo ? ["--repo", repo] : []
+      return ghSync(["repo", "view", ...repoFlag, "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name"])
+    } catch {
+      // gh api unavailable — detect from local git refs
+    }
+
+    const cwd = this.findValidCwd(topicSession, graph)
+    if (cwd) {
+      for (const name of ["main", "master"]) {
+        try {
+          gitSync(["rev-parse", "--verify", `origin/${name}`], { cwd, timeout: 10_000 })
+          return name
+        } catch { /* try next */ }
+      }
+    }
+
+    return "main"
   }
 
   private findWorktreePathForBranch(node: DagNode): string | undefined {

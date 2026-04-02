@@ -1,31 +1,67 @@
 import { spawn, execFileSync } from "node:child_process"
+import { readFileSync } from "node:fs"
+import path from "node:path"
 import { loggers } from "./logger.js"
 
 const log = loggers.conflictResolver
 
 const CONFLICT_TIMEOUT_MS = 120_000
+const MAX_FILE_PREVIEW_BYTES = 8_000
+
+function readFilePreview(cwd: string, file: string): string | null {
+  try {
+    const content = readFileSync(path.join(cwd, file), "utf-8")
+    if (content.length > MAX_FILE_PREVIEW_BYTES) {
+      return content.slice(0, MAX_FILE_PREVIEW_BYTES) + "\n... (truncated)"
+    }
+    return content
+  } catch {
+    return null
+  }
+}
 
 export function buildConflictResolutionPrompt(
   branch: string,
   targetBranch: string,
   conflictFiles: string[],
+  fileContents?: Map<string, string>,
 ): string {
-  return [
+  const lines = [
     `You are resolving merge conflicts during a rebase of branch \`${branch}\` onto \`${targetBranch}\`.`,
     "",
-    "The following files have conflicts:",
+    `${conflictFiles.length} file(s) have conflicts:`,
     ...conflictFiles.map((f) => `- ${f}`),
     "",
-    "Your task:",
-    "1. Read each conflicted file to understand the conflict markers (<<<<<<< / ======= / >>>>>>>)",
+  ]
+
+  if (fileContents && fileContents.size > 0) {
+    lines.push("## Current file contents (with conflict markers)")
+    lines.push("")
+    for (const [file, content] of fileContents) {
+      lines.push(`### ${file}`)
+      lines.push("```")
+      lines.push(content)
+      lines.push("```")
+      lines.push("")
+    }
+  }
+
+  lines.push(
+    "## Resolution steps",
+    "",
+    "1. Read each conflicted file (if not shown above) to understand the conflict markers (<<<<<<< / ======= / >>>>>>>)",
     "2. Resolve each conflict by choosing the correct combination of changes",
-    "3. Stage each resolved file with `git add <file>`",
+    "3. For import path conflicts: check which module actually exists and use that path",
+    "4. Stage each resolved file with `git add <file>`",
+    "5. Run `npx tsc --noEmit` to verify the resolution compiles — if it fails, fix the type errors and re-stage",
     "",
     `Prefer incoming changes (from ${branch}) for new features. Prefer target changes (from ${targetBranch}) for infrastructure/structural code.`,
     "",
     "Do NOT run `git rebase --continue` — that will be handled externally.",
     "Do NOT create new files or make unrelated changes.",
-  ].join("\n")
+  )
+
+  return lines.join("\n")
 }
 
 export async function resolveConflictsWithAgent(
@@ -43,7 +79,13 @@ export async function resolveConflictsWithAgent(
 
   if (conflictFiles.length === 0) return false
 
-  const prompt = buildConflictResolutionPrompt(branch, targetBranch, conflictFiles)
+  const fileContents = new Map<string, string>()
+  for (const file of conflictFiles) {
+    const content = readFilePreview(cwd, file)
+    if (content) fileContents.set(file, content)
+  }
+
+  const prompt = buildConflictResolutionPrompt(branch, targetBranch, conflictFiles, fileContents)
   log.info({ branch, targetBranch, conflictFiles }, "spawning conflict resolution agent")
 
   const proc = spawn("claude", [
