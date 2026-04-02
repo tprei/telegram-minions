@@ -484,6 +484,30 @@ function ensureDevtoolsFallback(workspaceRoot: string): void {
   if (srcVersion) fs.writeFileSync(versionDst, srcVersion)
 }
 
+export function rebootstrapDependencies(cwd: string, workspaceRoot: string): void {
+  const needsNode = fs.existsSync(path.join(cwd, "package.json")) &&
+    !fs.existsSync(path.join(cwd, "node_modules"))
+  const needsPython = (
+    fs.existsSync(path.join(cwd, "pyproject.toml")) ||
+    fs.existsSync(path.join(cwd, "requirements.txt"))
+  ) && !fs.existsSync(path.join(cwd, ".venv"))
+
+  if (!needsNode && !needsPython) return
+
+  try {
+    const reposDir = path.join(workspaceRoot, ".repos")
+    const remoteUrl = execSync("git remote get-url origin", {
+      cwd,
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 5_000,
+    }).toString().trim()
+    const repoName = extractRepoName(remoteUrl)
+    bootstrapDependencies(cwd, reposDir, repoName)
+  } catch (err) {
+    log.warn({ err, cwd }, "rebootstrap failed (non-fatal)")
+  }
+}
+
 export function bootstrapDependencies(workDir: string, reposDir: string, repoName: string): void {
   if (fs.existsSync(path.join(workDir, "package.json"))) {
     bootstrapOnePackage(workDir, reposDir, repoName, workDir)

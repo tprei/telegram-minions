@@ -75,6 +75,9 @@ export interface DispatcherContext {
   /** Clean build artifacts from a workspace. */
   cleanBuildArtifacts(cwd: string): void
 
+  /** Re-install dependencies if missing (e.g. after cleanBuildArtifacts). */
+  rebootstrapDependencies(cwd: string): void
+
   /** Prepare a fan-in branch by merging multiple upstream branches. */
   prepareFanInBranch(slug: string, repoUrl: string, upstreamBranches: string[]): Promise<string | null>
 

@@ -52,6 +52,7 @@ import {
   type ActiveSession, type PendingTask,
   buildContextPrompt,
   prepareWorkspace, removeWorkspace, cleanBuildArtifacts,
+  rebootstrapDependencies,
   downloadPhotos, prepareFanInBranch, mergeUpstreamBranches,
 } from "../session/session-manager.js"
 import { buildSplitChildPrompt } from "./split.js"
@@ -150,6 +151,7 @@ export class Dispatcher {
       prepareWorkspace: (slug, repo, branch) => this.prepareWorkspace(slug, repo, branch),
       removeWorkspace: (ts) => this.removeWorkspace(ts),
       cleanBuildArtifacts: (cwd) => this.cleanBuildArtifacts(cwd),
+      rebootstrapDependencies: (cwd) => this.rebootstrapDependencies(cwd),
       prepareFanInBranch: (slug, repo, branches) => this.prepareFanInBranch(slug, repo, branches),
       mergeUpstreamBranches: (dir, branches) => this.mergeUpstreamBranches(dir, branches),
       downloadPhotos: (photos, cwd) => this.downloadPhotos(photos, cwd),
@@ -874,6 +876,7 @@ export class Dispatcher {
   // ── Agent spawning ────────────────────────────────────────────────────
 
   private async spawnTopicAgent(topicSession: TopicSession, task: string, mcpOverrides?: Partial<McpConfig>, systemPromptOverride?: string): Promise<void> {
+    this.rebootstrapDependencies(topicSession.cwd)
     await this.tokenProvider?.refreshEnv()
     if (this.sessions.size >= this.config.workspace.maxConcurrentSessions) {
       await this.telegram.sendMessage(
@@ -1326,6 +1329,7 @@ export class Dispatcher {
       this.topicSessions.delete(meta.threadId)
       this.persistTopicSessions().catch(() => {})
     }
+    this.rebootstrapDependencies(topicSession.cwd)
     await this.observer.onSessionStart(meta, task, undefined, onDeadThread)
     handle.start(task, DEFAULT_CI_FIX_PROMPT)
   }
@@ -1654,6 +1658,10 @@ export class Dispatcher {
 
   private cleanBuildArtifacts(cwd: string): void {
     cleanBuildArtifacts(cwd)
+  }
+
+  private rebootstrapDependencies(cwd: string): void {
+    rebootstrapDependencies(cwd, this.config.workspace.root)
   }
 
   private async prepareFanInBranch(slug: string, repoUrl: string, upstreamBranches: string[]): Promise<string | null> {

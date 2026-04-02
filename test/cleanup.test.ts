@@ -5,7 +5,7 @@ import path from "node:path"
 
 import { execSync } from "node:child_process"
 import crypto from "node:crypto"
-import { cleanBuildArtifacts, dirSizeBytes, bootstrapDependencies } from "../src/session/session-manager.js"
+import { cleanBuildArtifacts, dirSizeBytes, bootstrapDependencies, rebootstrapDependencies } from "../src/session/session-manager.js"
 
 let tmpDir: string
 
@@ -275,6 +275,62 @@ describe("cleanBuildArtifacts - nested", () => {
     cleanBuildArtifacts(workDir)
 
     expect(fs.existsSync(path.join(workDir, "ui", "node_modules"))).toBe(false)
+  })
+})
+
+describe("rebootstrapDependencies", () => {
+  it("restores node_modules after cleanBuildArtifacts", () => {
+    const workspaceRoot = tmpDir
+    const reposDir = path.join(workspaceRoot, ".repos")
+    fs.mkdirSync(reposDir, { recursive: true })
+    const workDir = path.join(workspaceRoot, "test-slug")
+    fs.mkdirSync(workDir)
+
+    fs.writeFileSync(path.join(workDir, "package.json"), '{"name":"test"}')
+    const lockContent = '{"lockfileVersion":3}'
+    fs.writeFileSync(path.join(workDir, "package-lock.json"), lockContent)
+
+    const hash = crypto.createHash("sha256").update(lockContent).digest("hex")
+    const cacheDir = path.join(reposDir, "v2-test-repo-node_modules")
+    fs.mkdirSync(path.join(cacheDir, "some-pkg"), { recursive: true })
+    fs.writeFileSync(path.join(cacheDir, "some-pkg", "index.js"), "module.exports = 1")
+    fs.writeFileSync(path.join(reposDir, "v2-test-repo-lock.hash"), hash)
+
+    bootstrapDependencies(workDir, reposDir, "test-repo")
+    expect(fs.existsSync(path.join(workDir, "node_modules"))).toBe(true)
+
+    cleanBuildArtifacts(workDir)
+    expect(fs.existsSync(path.join(workDir, "node_modules"))).toBe(false)
+
+    execSync(`git init --bare ${JSON.stringify(path.join(reposDir, "test-repo.git"))}`, { stdio: "ignore" })
+    execSync("git init", { cwd: workDir, stdio: "ignore" })
+    execSync("git remote add origin https://github.com/org/test-repo.git", { cwd: workDir, stdio: "ignore" })
+
+    rebootstrapDependencies(workDir, workspaceRoot)
+
+    expect(fs.existsSync(path.join(workDir, "node_modules", "some-pkg", "index.js"))).toBe(true)
+  })
+
+  it("is a no-op when node_modules already exists", () => {
+    const workspaceRoot = tmpDir
+    const workDir = path.join(workspaceRoot, "test-slug")
+    fs.mkdirSync(workDir)
+    fs.writeFileSync(path.join(workDir, "package.json"), '{"name":"test"}')
+    fs.mkdirSync(path.join(workDir, "node_modules"))
+
+    rebootstrapDependencies(workDir, workspaceRoot)
+
+    expect(fs.existsSync(path.join(workDir, "node_modules"))).toBe(true)
+  })
+
+  it("is a no-op when no package.json exists", () => {
+    const workspaceRoot = tmpDir
+    const workDir = path.join(workspaceRoot, "test-slug")
+    fs.mkdirSync(workDir)
+
+    rebootstrapDependencies(workDir, workspaceRoot)
+
+    expect(fs.existsSync(path.join(workDir, "node_modules"))).toBe(false)
   })
 })
 
