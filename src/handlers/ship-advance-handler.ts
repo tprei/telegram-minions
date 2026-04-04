@@ -45,7 +45,11 @@ export class ShipAdvanceHandler implements CompletionHandler {
     if (state === "completed") {
       try {
         await this.observer.flushAndComplete(meta, state, durationMs)
-        writeSessionLog(topicSession, meta, state, durationMs)
+      } catch (err) {
+        loggers.ship.warn({ err, slug: topicSession.slug }, "flushAndComplete failed, continuing with ship advance")
+      }
+      writeSessionLog(topicSession, meta, state, durationMs)
+      try {
         await this.shipPipeline.handleShipAdvance(topicSession)
       } catch (err) {
         loggers.ship.error({ err, slug: topicSession.slug }, "ship advance error")
