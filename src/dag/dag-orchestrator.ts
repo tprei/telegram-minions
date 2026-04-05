@@ -461,7 +461,7 @@ export class DagOrchestrator {
 
         if (parent.autoAdvance?.phase === "dag") {
           if (totalFailed > 0) {
-            parent.autoAdvance.phase = "done"
+            parent.autoAdvance.phase = "dag"
             await this.ctx.updateTopicTitle(parent, "⚠️")
             await this.ctx.telegram.sendMessage(
               `🚢 Ship pipeline halted: ${totalFailed} DAG node(s) failed. Use <code>/retry</code> to fix failed nodes.`,
