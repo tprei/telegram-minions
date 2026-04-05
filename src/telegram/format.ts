@@ -614,6 +614,7 @@ export function formatHelp(): string {
     `<code>/judge [directive]</code> — run a judge arena to debate design options (plan/think mode)`,
     `<code>/done</code> — merge the PR, close the thread, and wipe workspace`,
     `<code>/land</code> — merge completed stack/DAG PRs to main in order`,
+    `<code>/doctor</code> — diagnose coordination failures and propose a fix`,
     `<code>/retry [node-id]</code> — retry failed DAG nodes`,
     `<code>/stop</code> — stop the running agent but keep the thread and data`,
     `<code>/close</code> — stop the session, wipe data, and delete the topic`,

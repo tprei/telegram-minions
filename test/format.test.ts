@@ -579,6 +579,12 @@ describe("formatHelp", () => {
     expect(msg).toContain("/judge")
     expect(msg).toContain("judge arena")
   })
+
+  it("includes /doctor command", () => {
+    const msg = formatHelp()
+    expect(msg).toContain("/doctor")
+    expect(msg).toContain("diagnose coordination failures")
+  })
 })
 
 describe("formatSplitAnalyzing", () => {

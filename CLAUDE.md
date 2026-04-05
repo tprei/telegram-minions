@@ -125,6 +125,16 @@ npm run build            # compile to dist/
 4. Failed nodes skip all transitive dependents
 5. Send `/land` to merge completed PRs in topological order
 
+### Doctor (diagnose coordination failures)
+```
+/doctor
+```
+1. Can be run in any thread (task, plan, ship, dag, stack)
+2. Gathers evidence from parent/child threads, logs, errors, and CI failures
+3. Analyzes what went wrong (e.g., parent didn't advance after child succeeded)
+4. Creates a new planning thread with the diagnosis and proposed fix
+5. Accept the fix with `/execute` or refine it with `/reply`
+
 ### Land (merge stack/DAG PRs)
 ```
 /land
