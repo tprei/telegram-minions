@@ -250,6 +250,46 @@ describe("gatherDiagnosticEvidence", () => {
     expect(evidence.dagStatus).toBeUndefined()
     expect(evidence.dagFailedNodes).toEqual([])
   })
+
+  it("includes ci-failed nodes in dagFailedNodes", () => {
+    const graph = makeDag({
+      nodes: [
+        { id: "a", title: "Build", description: "...", dependsOn: [], status: "done" },
+        { id: "b", title: "Deploy", description: "...", dependsOn: ["a"], status: "ci-failed", error: "lint failed" },
+      ],
+    })
+    const session = makeSession({ dagId: "dag-1" })
+
+    const evidence = gatherDiagnosticEvidence(buildOpts({
+      currentSession: session,
+      getDag: (id) => id === "dag-1" ? graph : undefined,
+    }))
+
+    expect(evidence.dagFailedNodes).toHaveLength(1)
+    expect(evidence.dagFailedNodes[0].id).toBe("b")
+    expect(evidence.dagFailedNodes[0].status).toBe("ci-failed")
+    expect(evidence.dagFailedNodes[0].error).toBe("lint failed")
+  })
+
+  it("passes chatId through to evidence", () => {
+    const evidence = gatherDiagnosticEvidence(buildOpts({
+      chatId: -1009999,
+    }))
+
+    expect(evidence.chatId).toBe(-1009999)
+  })
+
+  it("skips missing child sessions gracefully", () => {
+    const parent = makeSession({ threadId: 1, slug: "parent", childThreadIds: [10, 20, 30] })
+
+    const evidence = gatherDiagnosticEvidence(buildOpts({
+      currentSession: parent,
+      getSession: (id) => id === 10 ? makeSession({ threadId: 10, slug: "only-child", parentThreadId: 1 }) : undefined,
+    }))
+
+    expect(evidence.childThreads).toHaveLength(1)
+    expect(evidence.childThreads[0].slug).toBe("only-child")
+  })
 })
 
 describe("buildDoctorPrompt", () => {
@@ -328,6 +368,25 @@ describe("buildDoctorPrompt", () => {
 
     const prompt = buildDoctorPrompt(evidence)
     expect(prompt).toContain("https://t.me/c/")
+  })
+
+  it("formats failed node errors without error field", () => {
+    const graph = makeDag({
+      nodes: [
+        { id: "x", title: "Broken", description: "...", dependsOn: [], status: "skipped" },
+      ],
+    })
+    const evidence = gatherDiagnosticEvidence({
+      currentSession: makeSession({ dagId: "dag-1" }),
+      isCurrentActive: false,
+      getSession: () => undefined,
+      isSessionActive: () => false,
+      getDag: (id) => id === "dag-1" ? graph : undefined,
+    })
+    const prompt = buildDoctorPrompt(evidence)
+
+    expect(prompt).toContain("**x** (Broken): status=skipped")
+    expect(prompt).not.toContain("error:")
   })
 
   it("produces well-structured markdown", () => {
