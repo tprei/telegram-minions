@@ -150,6 +150,7 @@ export class ShipPipeline {
 
       if (retryResult.items.length === 0) {
         log.warn({ slug: topicSession.slug }, "DAG extraction retry also yielded 0 items")
+        topicSession.autoAdvance!.phase = "plan"
         await this.ctx.telegram.sendMessage(
           `⚠️ Still no work items after retry.\n\nYou can:\n• <code>/dag</code> — try again\n• <code>/execute</code> — run as a single task\n• <code>/split</code> — extract parallel items\n• <code>/close</code> — cancel`,
           topicSession.threadId,

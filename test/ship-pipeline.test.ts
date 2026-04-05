@@ -320,7 +320,7 @@ describe("ShipPipeline", () => {
       expect(ctx.handleExecuteCommand).not.toHaveBeenCalled()
     })
 
-    it("prompts user with options when retry also yields no items", async () => {
+    it("prompts user with options when retry also yields no items and resets phase to plan", async () => {
       mockExtractDagItems
         .mockResolvedValueOnce({ items: [] })
         .mockResolvedValueOnce({ items: [] })
@@ -331,6 +331,7 @@ describe("ShipPipeline", () => {
 
       await pipeline.shipAdvanceToDag(session)
 
+      expect(session.autoAdvance!.phase).toBe("plan")
       expect(mockExtractDagItems).toHaveBeenCalledTimes(2)
       expect(ctx.handleExecuteCommand).not.toHaveBeenCalled()
       expect(ctx.startDag).not.toHaveBeenCalled()
