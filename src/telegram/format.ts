@@ -380,9 +380,11 @@ export function formatShipComplete(
   total: number,
 ): string {
   const icon = failed === 0 ? "✅" : "⚠️"
-  const summary = failed === 0
-    ? `All ${total} node(s) verified.`
-    : `${passed}/${total} node(s) passed, ${failed} failed.`
+  const summary = total === 0
+    ? "No nodes were eligible for verification."
+    : failed === 0
+      ? `All ${total} node(s) verified.`
+      : `${passed}/${total} node(s) passed, ${failed} failed.`
   return [
     `${icon} <b>Ship complete</b>  ·  🏷 <code>${esc(slug)}</code>`,
     ``,

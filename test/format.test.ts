@@ -723,6 +723,13 @@ describe("formatShipComplete", () => {
     expect(msg).toContain("1 failed")
     expect(msg).toContain("\u26a0\ufe0f")
   })
+
+  it("shows no-eligible message when total is zero", () => {
+    const msg = formatShipComplete("cool-slug", 0, 0, 0)
+    expect(msg).toContain("Ship complete")
+    expect(msg).toContain("No nodes were eligible for verification.")
+    expect(msg).toContain("\u2705")
+  })
 })
 
 describe("formatStatus (review mode)", () => {
