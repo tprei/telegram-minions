@@ -400,6 +400,7 @@ export class DagOrchestrator {
             }
           } else {
             node.status = "done"
+            await this.ctx.persistDags()
 
             const progress = dagProgress(graph)
             await this.ctx.telegram.sendMessage(

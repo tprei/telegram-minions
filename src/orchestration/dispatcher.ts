@@ -248,10 +248,10 @@ export class Dispatcher {
         { cleanBuildArtifacts: (cwd) => this.cleanBuildArtifacts(cwd) },
         [qualityGateHandler, digestHandler, ciBabysitHandler],
       ))
-      .register(new ParentNotifyHandler(
+      .registerPostChain(new ParentNotifyHandler(
         { notifyParentOfChildComplete: (cs, s) => this.notifyParentOfChildComplete(cs, s) },
       ))
-      .register(new PendingFeedbackHandler(
+      .registerPostChain(new PendingFeedbackHandler(
         { handleTopicFeedback: (ts, fb) => this.handleTopicFeedback(ts, fb) },
       ))
 

@@ -42,6 +42,7 @@ export interface ReplyQueueManager {
  */
 export class CompletionHandlerChain {
   private handlers: CompletionHandler[] = []
+  private postChainHandlers: CompletionHandler[] = []
 
   constructor(
     private readonly topicSessions: TopicSessionProvider,
@@ -54,6 +55,12 @@ export class CompletionHandlerChain {
 
   register(handler: CompletionHandler): this {
     this.handlers.push(handler)
+    return this
+  }
+
+  /** Register a handler that always runs after the chain, regardless of ctx.handled. */
+  registerPostChain(handler: CompletionHandler): this {
+    this.postChainHandlers.push(handler)
     return this
   }
 
@@ -100,6 +107,15 @@ export class CompletionHandlerChain {
     }
 
     await this.run(ctx)
+
+    // Post-chain handlers (always run regardless of ctx.handled)
+    for (const handler of this.postChainHandlers) {
+      try {
+        await handler.handle(ctx)
+      } catch (err) {
+        log.error({ err, handler: handler.name, slug: ctx.topicSession.slug }, "post-chain handler threw")
+      }
+    }
 
     // Post-chain bookkeeping (always runs after handlers)
     this.sessionPersister.persistTopicSessions().catch(() => {})

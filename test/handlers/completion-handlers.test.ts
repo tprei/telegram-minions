@@ -740,6 +740,52 @@ describe("CompletionHandlerChain", () => {
     expect(handled).not.toHaveBeenCalled()
   })
 
+  it("runs post-chain handlers even when ctx.handled is true", async () => {
+    const deps = makeChainDeps()
+    const chain = new CompletionHandlerChain(
+      deps.topicSessions, deps.sessions, deps.broadcaster,
+      deps.pinnedSummary, deps.sessionPersister, deps.replyQueues,
+    )
+
+    const order: string[] = []
+    chain.register({
+      name: "early-exit",
+      handle: async (ctx) => { order.push("early-exit"); ctx.handled = true },
+    })
+    chain.register({
+      name: "skipped",
+      handle: async () => { order.push("skipped") },
+    })
+    chain.registerPostChain({
+      name: "always-runs",
+      handle: async () => { order.push("always-runs") },
+    })
+
+    await chain.run(makeCtx())
+
+    // run() only runs chain handlers, not post-chain
+    expect(order).toEqual(["early-exit"])
+
+    // Full integration: post-chain handlers run via onSessionCompleted
+    order.length = 0
+    const ts = makeTopicSession()
+    deps.topicSessions.get.mockReturnValue(ts)
+
+    const bus = new EventBus()
+    chain.subscribe(bus)
+
+    await bus.emit({
+      type: "session.completed",
+      timestamp: Date.now(),
+      meta: makeMeta(),
+      state: "completed",
+    })
+
+    expect(order).toContain("early-exit")
+    expect(order).not.toContain("skipped")
+    expect(order).toContain("always-runs")
+  })
+
   it("clears delivered replies after chain completes", async () => {
     const deps = makeChainDeps()
     const ts = makeTopicSession()
