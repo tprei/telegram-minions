@@ -105,16 +105,15 @@ export class LandingManager {
       return
     }
 
-    await this.removeChildWorktrees(topicSession, graph)
-
     const repo = prNodes.find((n) => n.prUrl)?.prUrl ? repoFromPrUrl(prNodes.find((n) => n.prUrl)!.prUrl!) : undefined
+    const baseBranch = await this.detectBaseBranch(repo, topicSession, graph)
+
+    await this.removeChildWorktrees(topicSession, graph)
 
     await this.ctx.telegram.sendMessage(
       formatLandStart(topicSession.slug, prNodes.length),
       topicSession.threadId,
     )
-
-    const baseBranch = await this.detectBaseBranch(repo, topicSession, graph)
 
     let succeeded = 0
     let skipped = 0
@@ -464,8 +463,8 @@ export class LandingManager {
     try {
       const repoFlag = repo ? ["--repo", repo] : []
       return await gh(["repo", "view", ...repoFlag, "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name"])
-    } catch {
-      // gh api unavailable — detect from local git refs
+    } catch (err) {
+      log.warn({ err, repo }, "gh repo view failed — falling back to local git ref detection")
     }
 
     const cwd = this.findValidCwd(topicSession, graph)
@@ -478,6 +477,7 @@ export class LandingManager {
       }
     }
 
+    log.warn({ repo }, "could not detect default branch — falling back to 'main'")
     return "main"
   }
 
