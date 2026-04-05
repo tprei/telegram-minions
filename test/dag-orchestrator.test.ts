@@ -574,11 +574,31 @@ describe("DagOrchestrator", () => {
 
       await orchestrator.onDagChildComplete(child, "errored")
 
-      expect(parent.autoAdvance.phase).toBe("done")
+      expect(parent.autoAdvance.phase).toBe("dag")
       expect(ctx.telegram.sendMessage).toHaveBeenCalledWith(
         expect.stringContaining("Ship pipeline halted"),
         parent.threadId,
       )
+    })
+
+    it("advances to verification after retry succeeds on previously failed DAG", async () => {
+      const { parent, child, graph } = setupDag()
+      graph.nodes = [graph.nodes[0]]
+      graph.nodes[0].status = "failed"
+      parent.autoAdvance = { phase: "dag", featureDescription: "test feature" }
+
+      await orchestrator.onDagChildComplete(child, "errored")
+
+      expect(parent.autoAdvance.phase).toBe("dag")
+      expect(ctx.shipAdvanceToVerification).not.toHaveBeenCalled()
+
+      graph.nodes[0].status = "running"
+      vi.mocked(ctx.extractPRFromConversation).mockReturnValue("https://github.com/org/repo/pull/42")
+      vi.mocked(ctx.telegram.sendMessage).mockClear()
+
+      await orchestrator.onDagChildComplete(child, "completed")
+
+      expect(ctx.shipAdvanceToVerification).toHaveBeenCalledWith(parent, graph)
     })
 
     it("ignores sessions with no dagId", async () => {
