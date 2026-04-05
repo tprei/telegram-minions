@@ -277,7 +277,14 @@ export class ShipPipeline {
         }
         this.ctx.observer.onSessionStart(meta, verifyTask, onTextCapture, onDeadThread)
           .then(() => handle.start(verifyTask))
-          .catch((err) => { log.error({ err }, "verify session start failed"); failed++; nodeResults.set(node.id, false); resolve() })
+          .catch((err) => {
+            log.error({ err }, "verify session start failed")
+            this.ctx.sessions.delete(childSession.threadId)
+            childSession.activeSessionId = undefined
+            failed++
+            nodeResults.set(node.id, false)
+            resolve()
+          })
       })
     }
 

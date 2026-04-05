@@ -388,6 +388,45 @@ describe("ShipPipeline", () => {
       )
     })
 
+    it("cleans up session state when onSessionStart rejects", async () => {
+      const childSession = makeSession({
+        threadId: 200,
+        slug: "child-slug",
+        repo: "org/repo",
+        repoUrl: "https://github.com/org/repo",
+        cwd: "/tmp/child-workspace",
+        childThreadIds: [],
+      })
+      ctx.topicSessions.set(200, childSession)
+
+      const session = makeSession({
+        autoAdvance: makeAutoAdvance({ phase: "dag" }),
+        dagId: "dag-1",
+        childThreadIds: [200],
+      })
+      const graph: DagGraph = {
+        id: "dag-1",
+        parentThreadId: 100,
+        repoUrl: "https://github.com/org/repo",
+        nodes: [
+          { id: "a", title: "Task A", description: "Do A", dependsOn: [], status: "done", prUrl: "https://github.com/org/repo/pull/1", branch: "feat-a", threadId: 200 } as DagNode,
+        ],
+        isStack: false,
+      }
+
+      // Make onSessionStart reject to trigger the catch path
+      ;(ctx.observer.onSessionStart as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("session start boom"))
+
+      await pipeline.shipAdvanceToVerification(session, graph)
+
+      // Session map entry should be cleaned up
+      expect(ctx.sessions.has(200)).toBe(false)
+      // activeSessionId should be reset
+      expect(childSession.activeSessionId).toBeUndefined()
+      // Should still finalize (phase goes to done)
+      expect(session.autoAdvance!.phase).toBe("done")
+    })
+
     it("skips child without matching session and decrements pending count", async () => {
       const session = makeSession({
         autoAdvance: makeAutoAdvance({ phase: "dag" }),
