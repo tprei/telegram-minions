@@ -962,6 +962,10 @@ export function formatDagAnalyzing(slug: string): string {
   return `🔗 <b>Analyzing conversation</b>  ·  🏷 <code>${esc(slug)}</code>\nExtracting work items with dependencies…`
 }
 
+export function formatDoctorAnalyzing(slug: string): string {
+  return `🩺 <b>Diagnosing</b>  ·  🏷 <code>${esc(slug)}</code>\nGathering evidence from threads, logs, and DAG state…`
+}
+
 export function formatDagStart(
   slug: string,
   children: { slug: string; title: string; dependsOn: string[] }[],

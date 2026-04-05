@@ -20,7 +20,9 @@ import {
   formatConfigHelp,
   formatDagAnalyzing,
   formatPlanExecuting,
+  formatDoctorAnalyzing,
 } from "../telegram/format.js"
+import { gatherDiagnosticEvidence, buildDoctorPrompt } from "./doctor.js"
 import { fetchClaudeUsage } from "../claude-usage.js"
 import { buildExecutionPrompt } from "../session/session-manager.js"
 import { loggers } from "../logger.js"
@@ -447,6 +449,43 @@ export class CommandHandler {
     }
 
     await this.ctx.startDag(topicSession, result.items, false)
+  }
+
+  async handleDoctorCommand(topicSession: TopicSession, directive?: string): Promise<void> {
+    // Kill any active session in this thread — doctor replaces it
+    if (topicSession.activeSessionId) {
+      const activeSession = this.ctx.sessions.get(topicSession.threadId)
+      if (activeSession) await activeSession.handle.kill()
+      this.ctx.sessions.delete(topicSession.threadId)
+      topicSession.activeSessionId = undefined
+    }
+
+    await this.ctx.telegram.sendMessage(
+      formatDoctorAnalyzing(topicSession.slug),
+      topicSession.threadId,
+    )
+
+    const evidence = gatherDiagnosticEvidence({
+      currentSession: topicSession,
+      isCurrentActive: false, // we just killed it above
+      getSession: (threadId) => this.ctx.topicSessions.get(threadId),
+      isSessionActive: (threadId) => this.ctx.sessions.has(threadId),
+      getDag: (dagId) => this.ctx.dags.get(dagId),
+      chatId: this.ctx.config.telegram.chatId,
+    })
+
+    let prompt = buildDoctorPrompt(evidence)
+    if (directive) {
+      prompt += `\n## User note\n\n${directive}\n`
+    }
+
+    // Start a new plan-mode session with the diagnostic prompt
+    await this.ctx.startWithProfileSelection(
+      topicSession.repoUrl,
+      prompt,
+      "plan",
+      topicSession.threadId,
+    )
   }
 
   async handleDoneCommand(topicSession: TopicSession): Promise<void> {

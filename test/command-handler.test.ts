@@ -6,16 +6,21 @@ vi.mock("../src/dag/dag-extract.js", () => ({
   extractDagItems: vi.fn(),
 }))
 
-vi.mock("../src/telegram/format.js", () => ({
-  formatStatus: vi.fn(() => "status"),
-  formatStats: vi.fn(() => "stats"),
-  formatUsage: vi.fn(() => "usage"),
-  formatHelp: vi.fn(() => "help"),
-  formatProfileList: vi.fn(() => "profiles"),
-  formatConfigHelp: vi.fn(() => "config help"),
-  formatDagAnalyzing: vi.fn((slug: string) => `dag analyzing ${slug}`),
-  formatPlanExecuting: vi.fn(() => "executing"),
-}))
+vi.mock("../src/telegram/format.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/telegram/format.js")>()
+  return {
+    ...actual,
+    formatStatus: vi.fn(() => "status"),
+    formatStats: vi.fn(() => "stats"),
+    formatUsage: vi.fn(() => "usage"),
+    formatHelp: vi.fn(() => "help"),
+    formatProfileList: vi.fn(() => "profiles"),
+    formatConfigHelp: vi.fn(() => "config help"),
+    formatDagAnalyzing: vi.fn((slug: string) => `dag analyzing ${slug}`),
+    formatPlanExecuting: vi.fn(() => "executing"),
+    formatDoctorAnalyzing: vi.fn((slug: string) => `doctor analyzing ${slug}`),
+  }
+})
 
 vi.mock("../src/claude-usage.js", () => ({
   fetchClaudeUsage: vi.fn().mockResolvedValue(null),
@@ -354,6 +359,80 @@ describe("CommandHandler", () => {
       await handler.handleDagCommand(session)
 
       expect(ctx.startDag).toHaveBeenCalledWith(session, expect.any(Array), false)
+    })
+  })
+
+  describe("handleDoctorCommand", () => {
+    it("kills active session and starts plan-mode diagnostic", async () => {
+      const session = makeSession({ activeSessionId: "abc" })
+      const mockHandle = { kill: vi.fn().mockResolvedValue(undefined) }
+      ctx.sessions.set(100, { handle: mockHandle } as any)
+
+      await handler.handleDoctorCommand(session)
+
+      expect(mockHandle.kill).toHaveBeenCalled()
+      expect(ctx.sessions.has(100)).toBe(false)
+      expect(session.activeSessionId).toBeUndefined()
+      expect(ctx.telegram.sendMessage).toHaveBeenCalledWith(
+        expect.stringContaining("doctor analyzing"),
+        100,
+      )
+      expect(ctx.startWithProfileSelection).toHaveBeenCalledWith(
+        session.repoUrl,
+        expect.stringContaining("Diagnostic report"),
+        "plan",
+        100,
+      )
+    })
+
+    it("works when no active session exists", async () => {
+      const session = makeSession({ activeSessionId: undefined })
+
+      await handler.handleDoctorCommand(session)
+
+      expect(ctx.telegram.sendMessage).toHaveBeenCalledWith(
+        expect.stringContaining("doctor analyzing"),
+        100,
+      )
+      expect(ctx.startWithProfileSelection).toHaveBeenCalledWith(
+        session.repoUrl,
+        expect.stringContaining("Diagnostic report"),
+        "plan",
+        100,
+      )
+    })
+
+    it("appends user directive to prompt", async () => {
+      const session = makeSession()
+
+      await handler.handleDoctorCommand(session, "The DAG is stuck on node B")
+
+      expect(ctx.startWithProfileSelection).toHaveBeenCalledWith(
+        session.repoUrl,
+        expect.stringContaining("The DAG is stuck on node B"),
+        "plan",
+        100,
+      )
+    })
+
+    it("includes DAG evidence when dagId is present", async () => {
+      const session = makeSession({ dagId: "dag-1" })
+      const graph = {
+        id: "dag-1",
+        nodes: [
+          { id: "a", title: "Task A", description: "...", dependsOn: [], status: "failed", error: "Timeout" },
+        ],
+        parentThreadId: 100,
+        repo: "org/repo",
+        createdAt: Date.now(),
+      }
+      ctx.dags.set("dag-1", graph as any)
+
+      await handler.handleDoctorCommand(session)
+
+      const prompt = (ctx.startWithProfileSelection as ReturnType<typeof vi.fn>).mock.calls[0][1] as string
+      expect(prompt).toContain("Diagnostic report")
+      expect(prompt).toContain("Failed/problematic nodes")
     })
   })
 

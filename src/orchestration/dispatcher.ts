@@ -624,6 +624,7 @@ export class Dispatcher {
       case "stack": return this.splitOrchestrator.handleStackCommand(topicSession!, routed.directive)
       case "dag": return this.commandHandler.handleDagCommand(topicSession!, routed.directive)
       case "judge": return this.judgeOrchestrator.handleJudgeCommand(topicSession!, routed.directive)
+      case "doctor": return this.commandHandler.handleDoctorCommand(topicSession!, routed.directive)
       case "done": return this.commandHandler.handleDoneCommand(topicSession!)
       case "land": return this.landingManager.handleLandCommand(topicSession!)
       case "retry": return this.dagOrchestrator.handleRetryCommand(topicSession!, routed.nodeId)
