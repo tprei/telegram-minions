@@ -4,7 +4,7 @@ import {
   TASK_PREFIX, TASK_SHORT, PLAN_PREFIX, THINK_PREFIX, REVIEW_PREFIX,
   EXECUTE_CMD, STATUS_CMD, STATS_CMD, REPLY_PREFIX, REPLY_SHORT,
   CLOSE_CMD, STOP_CMD, HELP_CMD, CLEAN_CMD, USAGE_CMD, CONFIG_CMD,
-  SPLIT_CMD, STACK_CMD, DAG_CMD, JUDGE_CMD, LAND_CMD, RETRY_CMD, FORCE_CMD, DONE_CMD, SHIP_PREFIX,
+  SPLIT_CMD, STACK_CMD, DAG_CMD, JUDGE_CMD, LAND_CMD, RETRY_CMD, FORCE_CMD, DONE_CMD, DOCTOR_CMD, SHIP_PREFIX,
 } from "./command-parser.js"
 
 export type RoutedCommand =
@@ -30,6 +30,7 @@ export type RoutedCommand =
   | { type: "done"; threadId: number }
   | { type: "retry"; threadId: number; nodeId?: string }
   | { type: "force"; threadId: number; nodeId?: string }
+  | { type: "doctor"; threadId: number; directive?: string }
   | { type: "reply"; threadId: number; text: string; photos?: TelegramPhotoSize[] }
 
 /**
@@ -88,6 +89,9 @@ export function routeCommand(
   if (threadId !== undefined && hasSession) {
     if (text === CLOSE_CMD) return { type: "close", threadId }
     if (text === STOP_CMD) return { type: "stop", threadId }
+    if (text === DOCTOR_CMD || text?.startsWith(DOCTOR_CMD + " ")) {
+      return { type: "doctor", threadId, directive: text!.slice(DOCTOR_CMD.length).trim() || undefined }
+    }
 
     const isPlanLike = sessionMode === "plan" || sessionMode === "think" || sessionMode === "ship-plan" || sessionMode === "ship-think"
     const isExecutable = isPlanLike || sessionMode === "review"
