@@ -246,6 +246,31 @@ describe("routeCommand", () => {
       })
     })
 
+    it("routes /doctor in any session mode", () => {
+      expect(routeCommand("/doctor", 10, "task", true)).toEqual({ type: "doctor", threadId: 10, directive: undefined })
+      expect(routeCommand("/doctor", 10, "plan", true)).toEqual({ type: "doctor", threadId: 10, directive: undefined })
+      expect(routeCommand("/doctor", 10, "think", true)).toEqual({ type: "doctor", threadId: 10, directive: undefined })
+      expect(routeCommand("/doctor", 10, "review", true)).toEqual({ type: "doctor", threadId: 10, directive: undefined })
+      expect(routeCommand("/doctor", 10, "ship-plan", true)).toEqual({ type: "doctor", threadId: 10, directive: undefined })
+      expect(routeCommand("/doctor", 10, "ship-think", true)).toEqual({ type: "doctor", threadId: 10, directive: undefined })
+    })
+
+    it("routes /doctor with directive", () => {
+      expect(routeCommand("/doctor child stuck on node-2", 10, "plan", true)).toEqual({
+        type: "doctor",
+        threadId: 10,
+        directive: "child stuck on node-2",
+      })
+    })
+
+    it("does not route /doctor without a session", () => {
+      expect(routeCommand("/doctor", 10, undefined, false)).toBeNull()
+    })
+
+    it("does not route /doctor in main chat", () => {
+      expect(routeCommand("/doctor", undefined, undefined, false)).toBeNull()
+    })
+
     it("routes /land", () => {
       expect(routeCommand("/land", 10, "plan", true)).toEqual({ type: "land", threadId: 10 })
     })

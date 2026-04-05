@@ -28,6 +28,7 @@ export const RETRY_CMD = "/retry"
 export const FORCE_CMD = "/force"
 export const JUDGE_CMD = "/judge"
 export const DONE_CMD = "/done"
+export const DOCTOR_CMD = "/doctor"
 export const SHIP_PREFIX = "/ship"
 
 /**
