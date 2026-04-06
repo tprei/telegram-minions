@@ -149,7 +149,7 @@ export class DagOrchestrator {
     graph: DagGraph,
     node: DagNode,
     isStack: boolean,
-  ): Promise<number | null> {
+  ): Promise<string | null> {
     const sessionId = crypto.randomUUID()
     const slug = generateSlug(sessionId)
     const repo = parent.repo
@@ -164,7 +164,7 @@ export class DagOrchestrator {
       return null
     }
 
-    const threadId = topic.message_thread_id
+    const threadId = String(topic.message_thread_id)
 
     const upstreamBranches = getUpstreamBranches(graph, node.id)
     let startBranch: string | undefined

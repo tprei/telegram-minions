@@ -223,7 +223,7 @@ export class TelegramClient {
 
   private async sendOne(
     html: string,
-    threadId?: number,
+    threadId?: string,
     replyToMessageId?: number,
   ): Promise<number | null> {
     const sanitized = sanitizeText(html)
@@ -233,7 +233,7 @@ export class TelegramClient {
         text: sanitized,
         parse_mode: "HTML",
       }
-      if (threadId !== undefined) body.message_thread_id = threadId
+      if (threadId !== undefined) body.message_thread_id = Number(threadId)
       if (replyToMessageId !== undefined) body.reply_to_message_id = replyToMessageId
 
       const result = await this.call<{ message_id: number }>("sendMessage", body)
@@ -250,7 +250,7 @@ export class TelegramClient {
 
   async sendMessage(
     html: string,
-    threadId?: number,
+    threadId?: string,
     replyToMessageId?: number,
   ): Promise<{ ok: boolean; messageId: number | null }> {
     const chunks = splitMessage(html)
@@ -270,7 +270,7 @@ export class TelegramClient {
   async editMessage(
     messageId: number,
     html: string,
-    threadId?: number,
+    threadId?: string,
   ): Promise<boolean> {
     const sanitized = sanitizeText(html)
     try {
@@ -280,7 +280,7 @@ export class TelegramClient {
         text: sanitized,
         parse_mode: "HTML",
       }
-      if (threadId !== undefined) body.message_thread_id = threadId
+      if (threadId !== undefined) body.message_thread_id = Number(threadId)
 
       await this.call("editMessageText", body, String(messageId))
       return true
@@ -299,10 +299,10 @@ export class TelegramClient {
     })
   }
 
-  async editForumTopic(threadId: number, name: string): Promise<void> {
+  async editForumTopic(threadId: string, name: string): Promise<void> {
     await this.call("editForumTopic", {
       chat_id: this.chatId,
-      message_thread_id: threadId,
+      message_thread_id: Number(threadId),
       name: name.slice(0, 128),
     })
   }
@@ -319,11 +319,11 @@ export class TelegramClient {
     }
   }
 
-  async closeForumTopic(threadId: number): Promise<void> {
+  async closeForumTopic(threadId: string): Promise<void> {
     try {
       await this.call("closeForumTopic", {
         chat_id: this.chatId,
-        message_thread_id: threadId,
+        message_thread_id: Number(threadId),
       })
     } catch (err) {
       log.warn({ err, method: "closeForumTopic" }, "closeForumTopic failed")
@@ -333,7 +333,7 @@ export class TelegramClient {
   async sendMessageWithKeyboard(
     html: string,
     keyboard: { text: string; callback_data: string }[][],
-    threadId?: number,
+    threadId?: string,
   ): Promise<number | null> {
     try {
       const body: Record<string, unknown> = {
@@ -342,7 +342,7 @@ export class TelegramClient {
         parse_mode: "HTML",
         reply_markup: { inline_keyboard: keyboard },
       }
-      if (threadId !== undefined) body.message_thread_id = threadId
+      if (threadId !== undefined) body.message_thread_id = Number(threadId)
       const result = await this.call<{ message_id: number }>("sendMessage", body)
       return result.message_id
     } catch (err) {
@@ -372,11 +372,11 @@ export class TelegramClient {
     }
   }
 
-  async deleteForumTopic(threadId: number): Promise<void> {
+  async deleteForumTopic(threadId: string): Promise<void> {
     try {
       await this.call("deleteForumTopic", {
         chat_id: this.chatId,
-        message_thread_id: threadId,
+        message_thread_id: Number(threadId),
       })
     } catch (err) {
       log.warn({ err, method: "deleteForumTopic" }, "deleteForumTopic failed")
@@ -385,7 +385,7 @@ export class TelegramClient {
 
   async sendPhoto(
     photoPath: string,
-    threadId?: number,
+    threadId?: string,
     caption?: string,
   ): Promise<number | null> {
     try {
@@ -401,7 +401,7 @@ export class TelegramClient {
   async sendPhotoBuffer(
     buffer: Buffer,
     filename: string,
-    threadId?: number,
+    threadId?: string,
     caption?: string,
   ): Promise<number | null> {
     try {
@@ -416,7 +416,7 @@ export class TelegramClient {
   private sendPhotoBlob(
     blob: Blob,
     filename: string,
-    threadId?: number,
+    threadId?: string,
     caption?: string,
   ): Promise<number | null> {
     return this.enqueue(() => this.sendPhotoBlobDirect(blob, filename, threadId, caption))
@@ -425,7 +425,7 @@ export class TelegramClient {
   private async sendPhotoBlobDirect(
     blob: Blob,
     filename: string,
-    threadId?: number,
+    threadId?: string,
     caption?: string,
   ): Promise<number | null> {
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {

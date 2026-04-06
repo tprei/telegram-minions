@@ -306,7 +306,7 @@ export class ShipPipeline {
     await this.shipFinalize(topicSession)
   }
 
-  private findChildSession(parent: TopicSession, threadId?: number): TopicSession | undefined {
+  private findChildSession(parent: TopicSession, threadId?: string): TopicSession | undefined {
     if (!threadId) return undefined
     return this.ctx.topicSessions.get(threadId)
   }

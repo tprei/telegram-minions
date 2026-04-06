@@ -11,7 +11,7 @@ import { createLogger } from "../logger.js"
 const log = createLogger({ component: "digest-handler" })
 
 export interface TopicSessionStore {
-  get(threadId: number): TopicSession | undefined
+  get(threadId: string): TopicSession | undefined
 }
 
 export interface ProfileStore {

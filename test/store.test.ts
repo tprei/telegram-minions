@@ -6,7 +6,7 @@ import { SessionStore } from "../src/store.js"
 import type { TopicSession } from "../src/domain/session-types.js"
 function makeSession(overrides: Partial<TopicSession> = {}): TopicSession {
   return {
-    threadId: 100,
+    threadId: "100",
     repo: "test-repo",
     cwd: "/tmp/test",
     slug: "bold-arc",
@@ -31,38 +31,38 @@ describe("SessionStore", () => {
 
   it("saves and loads sessions", async () => {
     const store = new SessionStore(tmpDir)
-    const sessions = new Map<number, TopicSession>()
-    sessions.set(100, makeSession())
+    const sessions = new Map<string, TopicSession>()
+    sessions.set("100", makeSession())
 
     await store.save(sessions)
 
     const { active } = await store.load()
     expect(active.size).toBe(1)
-    expect(active.get(100)?.slug).toBe("bold-arc")
-    expect(active.get(100)?.repo).toBe("test-repo")
+    expect(active.get("100")?.slug).toBe("bold-arc")
+    expect(active.get("100")?.repo).toBe("test-repo")
   })
 
   it("clears activeSessionId on load", async () => {
     const store = new SessionStore(tmpDir)
-    const sessions = new Map<number, TopicSession>()
-    sessions.set(100, makeSession({ activeSessionId: "some-uuid" }))
+    const sessions = new Map<string, TopicSession>()
+    sessions.set("100", makeSession({ activeSessionId: "some-uuid" }))
 
     await store.save(sessions)
     const { active } = await store.load()
-    expect(active.get(100)?.activeSessionId).toBeUndefined()
+    expect(active.get("100")?.activeSessionId).toBeUndefined()
   })
 
   it("filters out sessions older than TTL", async () => {
     const store = new SessionStore(tmpDir, 1000)
-    const sessions = new Map<number, TopicSession>()
-    sessions.set(100, makeSession({ lastActivityAt: Date.now() - 2000 }))
-    sessions.set(200, makeSession({ threadId: 200, lastActivityAt: Date.now() }))
+    const sessions = new Map<string, TopicSession>()
+    sessions.set("100", makeSession({ lastActivityAt: Date.now() - 2000 }))
+    sessions.set("200", makeSession({ threadId: "200", lastActivityAt: Date.now() }))
 
     await store.save(sessions)
     const { active, expired } = await store.load()
     expect(active.size).toBe(1)
-    expect(active.has(200)).toBe(true)
-    expect(expired.has(100)).toBe(true)
+    expect(active.has("200")).toBe(true)
+    expect(expired.has("100")).toBe(true)
   })
 
   it("returns empty result when no file exists", async () => {
@@ -95,32 +95,32 @@ describe("SessionStore", () => {
         { role: "user", text: "thanks, now adjust X" },
       ],
     })
-    const sessions = new Map<number, TopicSession>()
-    sessions.set(100, session)
+    const sessions = new Map<string, TopicSession>()
+    sessions.set("100", session)
 
     await store.save(sessions)
     const { active } = await store.load()
-    expect(active.get(100)?.conversation).toHaveLength(3)
-    expect(active.get(100)?.conversation[1].text).toBe("done!")
+    expect(active.get("100")?.conversation).toHaveLength(3)
+    expect(active.get("100")?.conversation[1].text).toBe("done!")
   })
 
   it("preserves pending feedback through save/load", async () => {
     const store = new SessionStore(tmpDir)
     const session = makeSession({ pendingFeedback: ["feedback 1", "feedback 2"] })
-    const sessions = new Map<number, TopicSession>()
-    sessions.set(100, session)
+    const sessions = new Map<string, TopicSession>()
+    sessions.set("100", session)
 
     await store.save(sessions)
     const { active } = await store.load()
-    expect(active.get(100)?.pendingFeedback).toEqual(["feedback 1", "feedback 2"])
+    expect(active.get("100")?.pendingFeedback).toEqual(["feedback 1", "feedback 2"])
   })
 
   it("handles multiple sessions", async () => {
     const store = new SessionStore(tmpDir)
-    const sessions = new Map<number, TopicSession>()
-    sessions.set(100, makeSession({ threadId: 100, slug: "bold-arc" }))
-    sessions.set(200, makeSession({ threadId: 200, slug: "calm-bay" }))
-    sessions.set(300, makeSession({ threadId: 300, slug: "deep-fjord" }))
+    const sessions = new Map<string, TopicSession>()
+    sessions.set("100", makeSession({ threadId: "100", slug: "bold-arc" }))
+    sessions.set("200", makeSession({ threadId: "200", slug: "calm-bay" }))
+    sessions.set("300", makeSession({ threadId: "300", slug: "deep-fjord" }))
 
     await store.save(sessions)
     const { active } = await store.load()
@@ -129,8 +129,8 @@ describe("SessionStore", () => {
 
   it("saves and restores the update offset", async () => {
     const store = new SessionStore(tmpDir)
-    const sessions = new Map<number, TopicSession>()
-    sessions.set(100, makeSession())
+    const sessions = new Map<string, TopicSession>()
+    sessions.set("100", makeSession())
 
     await store.save(sessions, 42)
     const { offset } = await store.load()
@@ -139,8 +139,8 @@ describe("SessionStore", () => {
 
   it("defaults offset to 0 when not present", async () => {
     const store = new SessionStore(tmpDir)
-    const sessions = new Map<number, TopicSession>()
-    sessions.set(100, makeSession())
+    const sessions = new Map<string, TopicSession>()
+    sessions.set("100", makeSession())
 
     await store.save(sessions)
     const { offset } = await store.load()
@@ -149,8 +149,8 @@ describe("SessionStore", () => {
 
   it("uses atomic write (no .tmp file left after save)", async () => {
     const store = new SessionStore(tmpDir)
-    const sessions = new Map<number, TopicSession>()
-    sessions.set(100, makeSession())
+    const sessions = new Map<string, TopicSession>()
+    sessions.set("100", makeSession())
 
     await store.save(sessions)
 
@@ -173,47 +173,47 @@ describe("SessionStore", () => {
     const store = new SessionStore(tmpDir)
     const { active, offset } = await store.load()
     expect(active.size).toBe(1)
-    expect(active.get(100)?.slug).toBe("bold-arc")
+    expect(active.get("100")?.slug).toBe("bold-arc")
     expect(offset).toBe(0)
   })
 
   it("uses interruptedAt for TTL when session was interrupted", async () => {
     const store = new SessionStore(tmpDir, 1000)
-    const sessions = new Map<number, TopicSession>()
+    const sessions = new Map<string, TopicSession>()
     // Session has recent lastActivityAt but was interrupted long ago
-    sessions.set(100, makeSession({
+    sessions.set("100", makeSession({
       lastActivityAt: Date.now(),
       interruptedAt: Date.now() - 2000,
     }))
     // Session was interrupted recently
-    sessions.set(200, makeSession({
-      threadId: 200,
+    sessions.set("200", makeSession({
+      threadId: "200",
       lastActivityAt: Date.now() - 2000,
       interruptedAt: Date.now(),
     }))
 
     await store.save(sessions)
     const { active, expired } = await store.load()
-    expect(expired.has(100)).toBe(true)
-    expect(active.has(200)).toBe(true)
+    expect(expired.has("100")).toBe(true)
+    expect(active.has("200")).toBe(true)
   })
 
   it("clears interruptedAt on expired sessions", async () => {
     const store = new SessionStore(tmpDir, 1000)
-    const sessions = new Map<number, TopicSession>()
-    sessions.set(100, makeSession({
+    const sessions = new Map<string, TopicSession>()
+    sessions.set("100", makeSession({
       lastActivityAt: Date.now() - 2000,
       interruptedAt: Date.now() - 2000,
     }))
 
     await store.save(sessions)
     const { expired } = await store.load()
-    expect(expired.get(100)?.interruptedAt).toBeUndefined()
+    expect(expired.get("100")?.interruptedAt).toBeUndefined()
   })
 
   it("round-trips an empty sessions map", async () => {
     const store = new SessionStore(tmpDir)
-    const sessions = new Map<number, TopicSession>()
+    const sessions = new Map<string, TopicSession>()
 
     await store.save(sessions, 99)
     const { active, expired, offset } = await store.load()
@@ -224,27 +224,27 @@ describe("SessionStore", () => {
 
   it("second save overwrites the first", async () => {
     const store = new SessionStore(tmpDir)
-    const sessions1 = new Map<number, TopicSession>()
-    sessions1.set(100, makeSession({ slug: "first-save" }))
+    const sessions1 = new Map<string, TopicSession>()
+    sessions1.set("100", makeSession({ slug: "first-save" }))
     await store.save(sessions1, 10)
 
-    const sessions2 = new Map<number, TopicSession>()
-    sessions2.set(200, makeSession({ threadId: 200, slug: "second-save" }))
+    const sessions2 = new Map<string, TopicSession>()
+    sessions2.set("200", makeSession({ threadId: "200", slug: "second-save" }))
     await store.save(sessions2, 20)
 
     const { active, offset } = await store.load()
     expect(active.size).toBe(1)
-    expect(active.has(100)).toBe(false)
-    expect(active.get(200)?.slug).toBe("second-save")
+    expect(active.has("100")).toBe(false)
+    expect(active.get("200")?.slug).toBe("second-save")
     expect(offset).toBe(20)
   })
 
   it("preserves parent/child thread IDs and DAG fields", async () => {
     const store = new SessionStore(tmpDir)
-    const sessions = new Map<number, TopicSession>()
-    sessions.set(100, makeSession({
-      parentThreadId: 50,
-      childThreadIds: [200, 300],
+    const sessions = new Map<string, TopicSession>()
+    sessions.set("100", makeSession({
+      parentThreadId: "50",
+      childThreadIds: ["200", "300"],
       splitLabel: "auth-refactor",
       dagId: "dag-123",
       dagNodeId: "node-1",
@@ -259,9 +259,9 @@ describe("SessionStore", () => {
 
     await store.save(sessions)
     const { active } = await store.load()
-    const loaded = active.get(100)!
-    expect(loaded.parentThreadId).toBe(50)
-    expect(loaded.childThreadIds).toEqual([200, 300])
+    const loaded = active.get("100")!
+    expect(loaded.parentThreadId).toBe("50")
+    expect(loaded.childThreadIds).toEqual(["200", "300"])
     expect(loaded.splitLabel).toBe("auth-refactor")
     expect(loaded.dagId).toBe("dag-123")
     expect(loaded.dagNodeId).toBe("node-1")
@@ -273,25 +273,25 @@ describe("SessionStore", () => {
 
   it("preserves lastState through save/load", async () => {
     const store = new SessionStore(tmpDir)
-    const sessions = new Map<number, TopicSession>()
-    sessions.set(100, makeSession({ lastState: "completed" }))
-    sessions.set(200, makeSession({ threadId: 200, lastState: "errored" }))
+    const sessions = new Map<string, TopicSession>()
+    sessions.set("100", makeSession({ lastState: "completed" }))
+    sessions.set("200", makeSession({ threadId: "200", lastState: "errored" }))
 
     await store.save(sessions)
     const { active } = await store.load()
-    expect(active.get(100)?.lastState).toBe("completed")
-    expect(active.get(200)?.lastState).toBe("errored")
+    expect(active.get("100")?.lastState).toBe("completed")
+    expect(active.get("200")?.lastState).toBe("errored")
   })
 
   it("handles old data without lastState gracefully", async () => {
     const store = new SessionStore(tmpDir)
-    const sessions = new Map<number, TopicSession>()
-    sessions.set(100, makeSession())
+    const sessions = new Map<string, TopicSession>()
+    sessions.set("100", makeSession())
     // Explicitly no lastState — simulates old persisted data
 
     await store.save(sessions)
     const { active } = await store.load()
-    expect(active.get(100)?.lastState).toBeUndefined()
+    expect(active.get("100")?.lastState).toBeUndefined()
   })
 
   it("handles valid JSON with missing sessions field gracefully", async () => {
@@ -332,16 +332,16 @@ describe("SessionStore", () => {
 
   it("save error does not corrupt existing file", async () => {
     const store = new SessionStore(tmpDir)
-    const sessions = new Map<number, TopicSession>()
-    sessions.set(100, makeSession({ slug: "original" }))
+    const sessions = new Map<string, TopicSession>()
+    sessions.set("100", makeSession({ slug: "original" }))
     await store.save(sessions, 1)
 
     // Make .tmp path a directory so the next save's writeFile fails
     const tmpPath = path.join(tmpDir, ".sessions.json.tmp")
     fs.mkdirSync(tmpPath)
 
-    const sessions2 = new Map<number, TopicSession>()
-    sessions2.set(200, makeSession({ threadId: 200, slug: "should-fail" }))
+    const sessions2 = new Map<string, TopicSession>()
+    sessions2.set("200", makeSession({ threadId: "200", slug: "should-fail" }))
 
     // Capture stderr to suppress expected error
     const origWrite = process.stderr.write
@@ -357,7 +357,75 @@ describe("SessionStore", () => {
 
     // Original file should still be intact
     const { active, offset } = await store.load()
-    expect(active.get(100)?.slug).toBe("original")
+    expect(active.get("100")?.slug).toBe("original")
     expect(offset).toBe(1)
+  })
+
+  it("migrates legacy numeric threadId keys to strings on load", async () => {
+    const store = new SessionStore(tmpDir)
+
+    // Write legacy format with numeric keys directly to disk
+    const legacyData = {
+      sessions: [
+        [42, {
+          threadId: 42,
+          repo: "test-repo",
+          cwd: "/tmp/test",
+          slug: "legacy-session",
+          conversation: [],
+          pendingFeedback: [],
+          mode: "task",
+          lastActivityAt: Date.now(),
+          parentThreadId: 10,
+          childThreadIds: [200, 300],
+        }],
+      ],
+      offset: 5,
+    }
+
+    const filePath = path.join(tmpDir, ".sessions.json")
+    fs.writeFileSync(filePath, JSON.stringify(legacyData))
+
+    const { active, offset } = await store.load()
+
+    // Keys should be strings now
+    expect(active.has("42")).toBe(true)
+    expect(active.has(42 as unknown as string)).toBe(false)
+
+    const session = active.get("42")!
+    expect(session.threadId).toBe("42")
+    expect(session.parentThreadId).toBe("10")
+    expect(session.childThreadIds).toEqual(["200", "300"])
+    expect(session.slug).toBe("legacy-session")
+    expect(offset).toBe(5)
+  })
+
+  it("migrates legacy numeric threadId keys without parent/child fields", async () => {
+    const store = new SessionStore(tmpDir)
+
+    const legacyData = {
+      sessions: [
+        [999, {
+          threadId: 999,
+          repo: "test-repo",
+          cwd: "/tmp/test",
+          slug: "simple-session",
+          conversation: [],
+          pendingFeedback: [],
+          mode: "task",
+          lastActivityAt: Date.now(),
+        }],
+      ],
+      offset: 0,
+    }
+
+    const filePath = path.join(tmpDir, ".sessions.json")
+    fs.writeFileSync(filePath, JSON.stringify(legacyData))
+
+    const { active } = await store.load()
+    const session = active.get("999")!
+    expect(session.threadId).toBe("999")
+    expect(session.parentThreadId).toBeUndefined()
+    expect(session.childThreadIds).toBeUndefined()
   })
 })

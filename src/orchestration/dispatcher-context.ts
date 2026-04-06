@@ -31,17 +31,17 @@ export interface DispatcherContext {
 
   // ── Shared mutable state ───────────────────────────────────────────
   /** Active running sessions keyed by threadId. */
-  readonly sessions: Map<number, ActiveSession>
+  readonly sessions: Map<string, ActiveSession>
   /** All topic sessions (active + idle) keyed by threadId. */
-  readonly topicSessions: Map<number, TopicSession>
+  readonly topicSessions: Map<string, TopicSession>
   /** DAG graphs keyed by dagId. */
   readonly dags: Map<string, DagGraph>
   /** Pending task selections waiting for repo/profile keyboard callbacks. */
-  readonly pendingTasks: Map<number, PendingTask>
+  readonly pendingTasks: Map<string, PendingTask>
 
   // ── Abort management ───────────────────────────────────────────────
   /** Map of threadId → AbortController for cancellable long-running operations. */
-  readonly abortControllers: Map<number, AbortController>
+  readonly abortControllers: Map<string, AbortController>
 
   // ── Token management ───────────────────────────────────────────────
 
@@ -152,7 +152,7 @@ export interface DispatcherContext {
     repoUrl: string | undefined,
     task: string,
     mode: "task" | "plan" | "think" | "review" | "ship-think",
-    replyThreadId?: number,
+    replyThreadId?: string,
     photos?: TelegramPhotoSize[],
     autoAdvance?: import("../domain/workflow-types.js").AutoAdvance,
   ): Promise<void>
@@ -173,7 +173,7 @@ export interface DispatcherContext {
   handleExecuteCommand(topicSession: TopicSession, directive?: string): Promise<void>
 
   /** Run deferred CI babysitting for a parent's children. */
-  runDeferredBabysit(parentThreadId: number): Promise<void>
+  runDeferredBabysit(parentThreadId: string): Promise<void>
 
   /** Babysit a PR's CI checks (used by CIBabysitter). */
   babysitPR(topicSession: TopicSession, prUrl: string, initialQualityReport?: QualityReport): Promise<void>
@@ -192,7 +192,7 @@ export interface DispatcherContext {
     parent: TopicSession,
     item: { title: string; description: string },
     allItems: { title: string; description: string }[],
-  ): Promise<number | null>
+  ): Promise<string | null>
 
   /** Spawn a DAG child session. Returns the child threadId or null. */
   spawnDagChild(
@@ -200,5 +200,5 @@ export interface DispatcherContext {
     graph: DagGraph,
     node: DagNode,
     isStack: boolean,
-  ): Promise<number | null>
+  ): Promise<string | null>
 }

@@ -16,7 +16,7 @@ const log = loggers.dispatcher
 
 export interface PinnedMessageDeps {
   readonly telegram: TelegramClient
-  readonly topicSessions: Map<number, TopicSession>
+  readonly topicSessions: Map<string, TopicSession>
   readonly workspaceRoot: string
   readonly chatId?: number | string
 }
@@ -53,7 +53,7 @@ export class PinnedMessageManager {
     if (sessions.length === 0) return "No active minion sessions."
 
     const chatId = this.deps.chatId
-    const childSet = new Set<number>()
+    const childSet = new Set<string>()
     for (const s of sessions) {
       if (s.parentThreadId != null) childSet.add(s.threadId)
     }
@@ -139,7 +139,7 @@ export class PinnedMessageManager {
   async updatePinnedSplitStatus(parent: TopicSession): Promise<void> {
     if (!parent.childThreadIds || parent.childThreadIds.length === 0) return
 
-    const children: { slug: string; label: string; prUrl?: string; threadId?: number; status: "running" | "done" | "failed" }[] = []
+    const children: { slug: string; label: string; prUrl?: string; threadId?: string; status: "running" | "done" | "failed" }[] = []
 
     for (const id of parent.childThreadIds) {
       const child = this.deps.topicSessions.get(id)

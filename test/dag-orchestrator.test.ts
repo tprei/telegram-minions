@@ -22,7 +22,7 @@ const mockFindPRByBranch = vi.mocked(findPRByBranch)
 
 function makeSession(overrides: Partial<TopicSession> = {}): TopicSession {
   return {
-    threadId: 100,
+    threadId: "100",
     repo: "org/repo",
     repoUrl: "https://github.com/org/repo",
     cwd: "/tmp/workspace",
@@ -167,7 +167,7 @@ describe("DagOrchestrator", () => {
     function makeGraph(nodes: Partial<DagNode>[]): DagGraph {
       return {
         id: "dag-test",
-        parentThreadId: 100,
+        parentThreadId: "100",
         repo: "org/repo",
         nodes: nodes.map(n => ({
           id: n.id ?? "node",
@@ -244,7 +244,7 @@ describe("DagOrchestrator", () => {
     function makeGraph(): DagGraph {
       return {
         id: "dag-test",
-        parentThreadId: 100,
+        parentThreadId: "100",
         repo: "org/repo",
         nodes: [
           { id: "a", title: "Task A", description: "Do A", dependsOn: [], status: "running" },
@@ -259,13 +259,13 @@ describe("DagOrchestrator", () => {
 
       const threadId = await orchestrator.spawnDagChild(parent, graph, node, false)
 
-      expect(threadId).toBe(200)
+      expect(threadId).toBe("200")
       expect(ctx.telegram.createForumTopic).toHaveBeenCalled()
       expect(ctx.prepareWorkspace).toHaveBeenCalled()
       expect(ctx.spawnTopicAgent).toHaveBeenCalled()
-      expect(ctx.topicSessions.has(200)).toBe(true)
+      expect(ctx.topicSessions.has("200")).toBe(true)
 
-      const childSession = ctx.topicSessions.get(200)!
+      const childSession = ctx.topicSessions.get("200")!
       expect(childSession.dagId).toBe("dag-test")
       expect(childSession.dagNodeId).toBe("a")
       expect(childSession.mode).toBe("task")
@@ -306,14 +306,14 @@ describe("DagOrchestrator", () => {
 
       const threadId = await orchestrator.spawnDagChild(parent, graph, node, false)
       expect(threadId).toBeNull()
-      expect(ctx.telegram.deleteForumTopic).toHaveBeenCalledWith(200)
+      expect(ctx.telegram.deleteForumTopic).toHaveBeenCalledWith("200")
     })
 
     it("handles fan-in with multiple upstream branches", async () => {
       const parent = makeSession()
       const graph: DagGraph = {
         id: "dag-test",
-        parentThreadId: 100,
+        parentThreadId: "100",
         repo: "org/repo",
         nodes: [
           { id: "a", title: "A", description: "", dependsOn: [], status: "done", branch: "minion/a", prUrl: "https://github.com/org/repo/pull/1" },
@@ -334,7 +334,7 @@ describe("DagOrchestrator", () => {
       const parent = makeSession()
       const graph: DagGraph = {
         id: "dag-test",
-        parentThreadId: 100,
+        parentThreadId: "100",
         repo: "org/repo",
         nodes: [
           { id: "a", title: "A", description: "", dependsOn: [], status: "done", branch: "minion/a", prUrl: "https://github.com/org/repo/pull/1" },
@@ -353,7 +353,7 @@ describe("DagOrchestrator", () => {
       const parent = makeSession()
       const graph: DagGraph = {
         id: "dag-test",
-        parentThreadId: 100,
+        parentThreadId: "100",
         repo: "org/repo",
         nodes: [
           { id: "a", title: "A", description: "", dependsOn: [], status: "done", branch: "minion/a", prUrl: "https://github.com/org/repo/pull/1" },
@@ -366,7 +366,7 @@ describe("DagOrchestrator", () => {
       vi.mocked(ctx.mergeUpstreamBranches).mockReturnValue({ ok: false, conflictFiles: ["test/format.test.ts"] })
 
       const threadId = await orchestrator.spawnDagChild(parent, graph, graph.nodes[2], false)
-      expect(threadId).toBe(200)
+      expect(threadId).toBe("200")
       expect(ctx.spawnTopicAgent).toHaveBeenCalled()
       const taskPrompt = vi.mocked(ctx.spawnTopicAgent).mock.calls[0][1]
       expect(taskPrompt).toContain("Merge conflicts to resolve first")
@@ -377,7 +377,7 @@ describe("DagOrchestrator", () => {
       const parent = makeSession()
       const graph: DagGraph = {
         id: "dag-test",
-        parentThreadId: 100,
+        parentThreadId: "100",
         repo: "org/repo",
         nodes: [
           { id: "a", title: "A", description: "", dependsOn: [], status: "done", branch: "minion/a", prUrl: "https://github.com/org/repo/pull/1" },
@@ -396,10 +396,10 @@ describe("DagOrchestrator", () => {
 
   describe("onDagChildComplete", () => {
     function setupDag(): { parent: TopicSession; child: TopicSession; graph: DagGraph } {
-      const parent = makeSession({ threadId: 100 })
+      const parent = makeSession({ threadId: "100" })
       const graph: DagGraph = {
         id: "dag-test",
-        parentThreadId: 100,
+        parentThreadId: "100",
         repo: "org/repo",
         nodes: [
           { id: "a", title: "Task A", description: "", dependsOn: [], status: "running", branch: "minion/child-slug" },
@@ -408,17 +408,17 @@ describe("DagOrchestrator", () => {
       } as DagGraph
 
       ctx.dags.set("dag-test", graph)
-      ctx.topicSessions.set(100, parent)
+      ctx.topicSessions.set("100", parent)
 
       const child = makeSession({
-        threadId: 200,
+        threadId: "200",
         slug: "child-slug",
         dagId: "dag-test",
         dagNodeId: "a",
-        parentThreadId: 100,
+        parentThreadId: "100",
         conversation: [{ role: "assistant", text: "Opened PR https://github.com/org/repo/pull/42" }],
       })
-      ctx.topicSessions.set(200, child)
+      ctx.topicSessions.set("200", child)
 
       return { parent, child, graph }
     }
@@ -457,7 +457,7 @@ describe("DagOrchestrator", () => {
       expect(ctx.spawnTopicAgent).toHaveBeenCalled()
       expect(ctx.telegram.sendMessage).toHaveBeenCalledWith(
         expect.stringContaining("recovery session"),
-        100,
+        "100",
       )
     })
 
@@ -716,7 +716,7 @@ describe("DagOrchestrator", () => {
       const session = makeSession({ dagId: "dag-test" })
       ctx.dags.set("dag-test", {
         id: "dag-test",
-        parentThreadId: 100,
+        parentThreadId: "100",
         nodes: [{ id: "a", title: "A", status: "done", dependsOn: [] }],
       } as DagGraph)
 
@@ -732,17 +732,17 @@ describe("DagOrchestrator", () => {
       const session = makeSession({ dagId: "dag-test" })
       const graph: DagGraph = {
         id: "dag-test",
-        parentThreadId: 100,
+        parentThreadId: "100",
         nodes: [{ id: "a", title: "Task A", description: "", status: "failed", dependsOn: [], error: "Session errored" }],
       } as DagGraph
       ctx.dags.set("dag-test", graph)
 
       const childSession = makeSession({
-        threadId: 200,
+        threadId: "200",
         dagId: "dag-test",
         dagNodeId: "a",
       })
-      ctx.topicSessions.set(200, childSession)
+      ctx.topicSessions.set("200", childSession)
 
       await orchestrator.handleRetryCommand(session)
 
@@ -758,7 +758,7 @@ describe("DagOrchestrator", () => {
       const session = makeSession({ dagId: "dag-test" })
       const graph: DagGraph = {
         id: "dag-test",
-        parentThreadId: 100,
+        parentThreadId: "100",
         nodes: [
           { id: "a", title: "Task A", status: "failed", dependsOn: [] },
           { id: "b", title: "Task B", status: "failed", dependsOn: [] },
@@ -766,8 +766,8 @@ describe("DagOrchestrator", () => {
       } as DagGraph
       ctx.dags.set("dag-test", graph)
 
-      const childA = makeSession({ threadId: 201, dagId: "dag-test", dagNodeId: "a" })
-      ctx.topicSessions.set(201, childA)
+      const childA = makeSession({ threadId: "201", dagId: "dag-test", dagNodeId: "a" })
+      ctx.topicSessions.set("201", childA)
 
       await orchestrator.handleRetryCommand(session, "a")
 
@@ -792,7 +792,7 @@ describe("DagOrchestrator", () => {
       const session = makeSession({ dagId: "dag-test" })
       ctx.dags.set("dag-test", {
         id: "dag-test",
-        parentThreadId: 100,
+        parentThreadId: "100",
         nodes: [{ id: "a", title: "A", status: "done", dependsOn: [] }],
       } as DagGraph)
 
@@ -808,7 +808,7 @@ describe("DagOrchestrator", () => {
       const session = makeSession({ dagId: "dag-test" })
       const graph: DagGraph = {
         id: "dag-test",
-        parentThreadId: 100,
+        parentThreadId: "100",
         nodes: [
           { id: "a", title: "Task A", status: "ci-failed", dependsOn: [], error: "CI checks failed" },
           { id: "b", title: "Task B", status: "pending", dependsOn: ["a"] },
@@ -827,10 +827,10 @@ describe("DagOrchestrator", () => {
 })
 
 function setupCompleteDag(ctx: DispatcherContext) {
-  const parent = makeSession({ threadId: 100 })
+  const parent = makeSession({ threadId: "100" })
   const graph: DagGraph = {
     id: "dag-test",
-    parentThreadId: 100,
+    parentThreadId: "100",
     repo: "org/repo",
     nodes: [
       { id: "a", title: "Task A", description: "", dependsOn: [], status: "running", branch: "minion/child-slug" },
@@ -839,16 +839,16 @@ function setupCompleteDag(ctx: DispatcherContext) {
   } as DagGraph
 
   ctx.dags.set("dag-test", graph)
-  ctx.topicSessions.set(100, parent)
+  ctx.topicSessions.set("100", parent)
 
   const child = makeSession({
-    threadId: 200,
+    threadId: "200",
     slug: "child-slug",
     dagId: "dag-test",
     dagNodeId: "a",
-    parentThreadId: 100,
+    parentThreadId: "100",
   })
-  ctx.topicSessions.set(200, child)
+  ctx.topicSessions.set("200", child)
 
   return { parent, child, graph }
 }

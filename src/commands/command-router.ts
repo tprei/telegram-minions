@@ -14,24 +14,24 @@ export type RoutedCommand =
   | { type: "clean" }
   | { type: "help" }
   | { type: "config"; args: string }
-  | { type: "review"; args: string; threadId?: number }
-  | { type: "think"; args: string; threadId?: number; photos?: TelegramPhotoSize[] }
-  | { type: "plan"; args: string; threadId?: number; photos?: TelegramPhotoSize[] }
-  | { type: "ship"; args: string; threadId?: number }
-  | { type: "task"; args: string; threadId?: number; photos?: TelegramPhotoSize[] }
-  | { type: "close"; threadId: number }
-  | { type: "stop"; threadId: number }
-  | { type: "execute"; threadId: number; directive?: string }
-  | { type: "split"; threadId: number; directive?: string }
-  | { type: "stack"; threadId: number; directive?: string }
-  | { type: "dag"; threadId: number; directive?: string }
-  | { type: "judge"; threadId: number; directive?: string }
-  | { type: "land"; threadId: number }
-  | { type: "done"; threadId: number }
-  | { type: "retry"; threadId: number; nodeId?: string }
-  | { type: "force"; threadId: number; nodeId?: string }
-  | { type: "doctor"; threadId: number; directive?: string }
-  | { type: "reply"; threadId: number; text: string; photos?: TelegramPhotoSize[] }
+  | { type: "review"; args: string; threadId?: string }
+  | { type: "think"; args: string; threadId?: string; photos?: TelegramPhotoSize[] }
+  | { type: "plan"; args: string; threadId?: string; photos?: TelegramPhotoSize[] }
+  | { type: "ship"; args: string; threadId?: string }
+  | { type: "task"; args: string; threadId?: string; photos?: TelegramPhotoSize[] }
+  | { type: "close"; threadId: string }
+  | { type: "stop"; threadId: string }
+  | { type: "execute"; threadId: string; directive?: string }
+  | { type: "split"; threadId: string; directive?: string }
+  | { type: "stack"; threadId: string; directive?: string }
+  | { type: "dag"; threadId: string; directive?: string }
+  | { type: "judge"; threadId: string; directive?: string }
+  | { type: "land"; threadId: string }
+  | { type: "done"; threadId: string }
+  | { type: "retry"; threadId: string; nodeId?: string }
+  | { type: "force"; threadId: string; nodeId?: string }
+  | { type: "doctor"; threadId: string; directive?: string }
+  | { type: "reply"; threadId: string; text: string; photos?: TelegramPhotoSize[] }
 
 /**
  * Pure routing function: parses a text message into a structured command.
@@ -46,7 +46,7 @@ export type RoutedCommand =
  */
 export function routeCommand(
   text: string | undefined,
-  threadId: number | undefined,
+  threadId: string | undefined,
   sessionMode: SessionMode | undefined,
   hasSession: boolean,
   photos?: TelegramPhotoSize[],

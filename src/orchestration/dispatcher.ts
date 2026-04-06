@@ -81,24 +81,24 @@ const POLL_TIMEOUT = 30
 const SDK_MODES: Set<SessionMode> = new Set(["plan", "think", "review", "ship-think", "ship-plan", "ship-verify"])
 
 export class Dispatcher {
-  private readonly sessions = new Map<number, ActiveSession>()
-  private readonly topicSessions = new Map<number, TopicSession>()
-  private readonly replyQueues = new Map<number, ReplyQueue>()
-  private readonly pendingTasks = new Map<number, PendingTask>()
-  private readonly pendingProfiles = new Map<number, PendingTask>()
+  private readonly sessions = new Map<string, ActiveSession>()
+  private readonly topicSessions = new Map<string, TopicSession>()
+  private readonly replyQueues = new Map<string, ReplyQueue>()
+  private readonly pendingTasks = new Map<string, PendingTask>()
+  private readonly pendingProfiles = new Map<string, PendingTask>()
   private readonly store: SessionStore
   private readonly dagStore: DagStore
   private readonly profileStore: ProfileStore
   private readonly dags = new Map<string, DagGraph>()
-  private readonly abortControllers = new Map<number, AbortController>()
+  private readonly abortControllers = new Map<string, AbortController>()
   private readonly broadcaster?: StateBroadcaster
   private offset = 0
   private running = false
   private cleanupTimer: ReturnType<typeof setInterval> | null = null
   private readonly stats: StatsTracker
 
-  private readonly quotaEvents = new Map<number, { resetAt?: number; rawMessage: string }>()
-  private readonly quotaSleepTimers = new Map<number, ReturnType<typeof setTimeout>>()
+  private readonly quotaEvents = new Map<string, { resetAt?: number; rawMessage: string }>()
+  private readonly quotaSleepTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
   private readonly ciBabysitter: CIBabysitter
   private readonly landingManager: LandingManager
@@ -443,7 +443,7 @@ export class Dispatcher {
 
   // ── Public command handlers (called by tests and external API) ────────
 
-  async handleReplyCommand(threadId: number, text: string): Promise<void> {
+  async handleReplyCommand(threadId: string, text: string): Promise<void> {
     const topicSession = this.topicSessions.get(threadId)
     if (!topicSession) {
       await this.telegram.sendMessage(`❌ Thread ${threadId} not found or no active session`, threadId)
@@ -456,7 +456,7 @@ export class Dispatcher {
     await this.handleTopicFeedback(topicSession, text)
   }
 
-  async handleStopCommand(threadId: number): Promise<void> {
+  async handleStopCommand(threadId: string): Promise<void> {
     const topicSession = this.topicSessions.get(threadId)
     if (!topicSession) {
       await this.telegram.sendMessage(`❌ Thread ${threadId} not found or no active session`, threadId)
@@ -465,7 +465,7 @@ export class Dispatcher {
     await this.handleStopCommandInternal(topicSession)
   }
 
-  async handleCloseCommand(threadId: number): Promise<void> {
+  async handleCloseCommand(threadId: string): Promise<void> {
     const topicSession = this.topicSessions.get(threadId)
     if (!topicSession) {
       await this.telegram.sendMessage(`❌ Thread ${threadId} not found or no active session`, threadId)
@@ -501,7 +501,7 @@ export class Dispatcher {
   private async cleanupStaleSessions(): Promise<void> {
     const now = Date.now()
     const staleTtlMs = this.config.workspace.staleTtlMs
-    const stale: [number, TopicSession][] = []
+    const stale: [string, TopicSession][] = []
 
     for (const [threadId, session] of this.topicSessions) {
       if (session.activeSessionId) continue
@@ -532,7 +532,7 @@ export class Dispatcher {
   }
 
   private async persistTopicSessions(markInterrupted = false): Promise<void> {
-    const toSave = new Map<number, TopicSession>()
+    const toSave = new Map<string, TopicSession>()
     const now = Date.now()
     for (const [threadId, session] of this.topicSessions) {
       if (markInterrupted && session.activeSessionId) {
@@ -590,7 +590,7 @@ export class Dispatcher {
     const photos = message.photo
     if (!text && !photos) return
 
-    const threadId = message.message_thread_id
+    const threadId = message.message_thread_id !== undefined ? String(message.message_thread_id) : undefined
     const topicSession = threadId !== undefined ? this.topicSessions.get(threadId) : undefined
 
     const routed = routeCommand(text, threadId, topicSession?.mode, !!topicSession, photos)
@@ -679,9 +679,9 @@ export class Dispatcher {
     const messageId = query.message?.message_id
 
     if (messageId) {
-      const pending = this.pendingTasks.get(messageId)
+      const pending = messageId ? this.pendingTasks.get(String(messageId)) : undefined
       if (pending) {
-        this.pendingTasks.delete(messageId)
+        this.pendingTasks.delete(String(messageId!))
         await this.telegram.answerCallbackQuery(query.id, `Selected: ${repoSlug}`)
         await this.telegram.deleteMessage(messageId)
 
@@ -705,7 +705,7 @@ export class Dispatcher {
               pending.threadId,
             )
             if (msgId) {
-              this.pendingProfiles.set(msgId, pending)
+              this.pendingProfiles.set(String(msgId), pending)
             }
           } else {
             await this.startTopicSession(repoUrl, pending.task, pending.mode, undefined, undefined, pending.autoAdvance)
@@ -727,9 +727,9 @@ export class Dispatcher {
 
     const messageId = query.message?.message_id
     if (messageId) {
-      const pending = this.pendingProfiles.get(messageId)
+      const pending = messageId ? this.pendingProfiles.get(String(messageId)) : undefined
       if (pending) {
-        this.pendingProfiles.delete(messageId)
+        this.pendingProfiles.delete(String(messageId!))
         await this.telegram.answerCallbackQuery(query.id, `Selected: ${profile.name}`)
         await this.telegram.deleteMessage(messageId)
         await this.startTopicSession(pending.repoUrl, pending.task, pending.mode, undefined, profileId, pending.autoAdvance)
@@ -742,7 +742,7 @@ export class Dispatcher {
 
   // ── Session-creating commands ─────────────────────────────────────────
 
-  private async handlePlanCommand(args: string, replyThreadId?: number, photos?: TelegramPhotoSize[]): Promise<void> {
+  private async handlePlanCommand(args: string, replyThreadId?: string, photos?: TelegramPhotoSize[]): Promise<void> {
     const { repoUrl, task } = parseTaskArgs(this.config.repos, args)
 
     if (!task) {
@@ -762,7 +762,7 @@ export class Dispatcher {
           replyThreadId,
         )
         if (msgId) {
-          this.pendingTasks.set(msgId, { task, threadId: replyThreadId, mode: "plan" })
+          this.pendingTasks.set(String(msgId), { task, threadId: replyThreadId, mode: "plan" })
         }
         return
       }
@@ -771,7 +771,7 @@ export class Dispatcher {
     await this.startWithProfileSelection(repoUrl, task, "plan", replyThreadId, photos)
   }
 
-  private async handleThinkCommand(args: string, replyThreadId?: number, photos?: TelegramPhotoSize[]): Promise<void> {
+  private async handleThinkCommand(args: string, replyThreadId?: string, photos?: TelegramPhotoSize[]): Promise<void> {
     const { repoUrl, task } = parseTaskArgs(this.config.repos, args)
 
     if (!task) {
@@ -791,7 +791,7 @@ export class Dispatcher {
           replyThreadId,
         )
         if (msgId) {
-          this.pendingTasks.set(msgId, { task, threadId: replyThreadId, mode: "think" })
+          this.pendingTasks.set(String(msgId), { task, threadId: replyThreadId, mode: "think" })
         }
         return
       }
@@ -800,7 +800,7 @@ export class Dispatcher {
     await this.startWithProfileSelection(repoUrl, task, "think", replyThreadId, photos)
   }
 
-  private async handleShipCommand(args: string, replyThreadId?: number): Promise<void> {
+  private async handleShipCommand(args: string, replyThreadId?: string): Promise<void> {
     const { repoUrl, task } = parseTaskArgs(this.config.repos, args)
 
     if (!task) {
@@ -825,7 +825,7 @@ export class Dispatcher {
           replyThreadId,
         )
         if (msgId) {
-          this.pendingTasks.set(msgId, { task, threadId: replyThreadId, mode: "ship-think", autoAdvance })
+          this.pendingTasks.set(String(msgId), { task, threadId: replyThreadId, mode: "ship-think", autoAdvance })
         }
         return
       }
@@ -838,7 +838,7 @@ export class Dispatcher {
     repoUrl: string | undefined,
     task: string,
     mode: "task" | "plan" | "think" | "review" | "ship-think",
-    replyThreadId?: number,
+    replyThreadId?: string,
     photos?: TelegramPhotoSize[],
     autoAdvance?: AutoAdvance,
   ): Promise<void> {
@@ -858,7 +858,7 @@ export class Dispatcher {
         replyThreadId,
       )
       if (msgId) {
-        this.pendingProfiles.set(msgId, { task, threadId: replyThreadId, repoUrl, mode, autoAdvance })
+        this.pendingProfiles.set(String(msgId), { task, threadId: replyThreadId, repoUrl, mode, autoAdvance })
       }
       return
     }
@@ -901,7 +901,7 @@ export class Dispatcher {
       return
     }
 
-    const threadId = topic.message_thread_id
+    const threadId = String(topic.message_thread_id)
 
     const cwd = await this.prepareWorkspace(slug, repoUrl)
     if (!cwd) {
@@ -1138,7 +1138,7 @@ export class Dispatcher {
     this.persistTopicSessions().catch(() => {})
   }
 
-  private clearQuotaSleepTimer(threadId: number): void {
+  private clearQuotaSleepTimer(threadId: string): void {
     const timer = this.quotaSleepTimers.get(threadId)
     if (timer) {
       clearTimeout(timer)
@@ -1315,7 +1315,7 @@ export class Dispatcher {
     parent: TopicSession,
     item: { title: string; description: string },
     allItems: { title: string; description: string }[],
-  ): Promise<number | null> {
+  ): Promise<string | null> {
     const sessionId = crypto.randomUUID()
     const slug = generateSlug(sessionId)
     const repo = parent.repo
@@ -1332,7 +1332,7 @@ export class Dispatcher {
       return null
     }
 
-    const threadId = topic.message_thread_id
+    const threadId = String(topic.message_thread_id)
 
     const cwd = await this.prepareWorkspace(slug, parent.repoUrl)
     if (!cwd) {
@@ -1383,7 +1383,7 @@ export class Dispatcher {
   // ── Child session management ──────────────────────────────────────────
 
   private async closeChildSessions(parent: TopicSession): Promise<void> {
-    const childrenToClose = new Map<number, TopicSession>()
+    const childrenToClose = new Map<string, TopicSession>()
 
     if (parent.childThreadIds) {
       for (const childId of parent.childThreadIds) {
@@ -1550,11 +1550,11 @@ export class Dispatcher {
     return this.sessions.size
   }
 
-  getSessions(): Map<number, ActiveSession> {
+  getSessions(): Map<string, ActiveSession> {
     return this.sessions
   }
 
-  getTopicSessions(): Map<number, TopicSession> {
+  getTopicSessions(): Map<string, TopicSession> {
     return this.topicSessions
   }
 
@@ -1562,12 +1562,12 @@ export class Dispatcher {
     return this.dags
   }
 
-  getSessionState(threadId: number): SessionState | undefined {
+  getSessionState(threadId: string): SessionState | undefined {
     const session = this.sessions.get(threadId)
     return session?.handle.getState()
   }
 
-  async apiSendReply(threadId: number, message: string): Promise<void> {
+  async apiSendReply(threadId: string, message: string): Promise<void> {
     const topicSession = this.topicSessions.get(threadId)
     if (!topicSession) {
       throw new SessionNotFoundError(threadId, Array.from(this.topicSessions.keys()))
@@ -1585,14 +1585,14 @@ export class Dispatcher {
     }
   }
 
-  apiStopSession(threadId: number): void {
+  apiStopSession(threadId: string): void {
     const session = this.sessions.get(threadId)
     if (session) {
       session.handle.interrupt()
     }
   }
 
-  async apiCloseSession(threadId: number): Promise<void> {
+  async apiCloseSession(threadId: string): Promise<void> {
     const topicSession = this.topicSessions.get(threadId)
     if (!topicSession) {
       throw new SessionNotFoundError(threadId, Array.from(this.topicSessions.keys()))

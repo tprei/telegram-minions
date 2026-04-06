@@ -424,20 +424,20 @@ export function formatFollowUpIteration(slug: string, iteration: number): string
  * Chat IDs like -1001234567890 become 1234567890 in the t.me/c/ URL.
  * Returns undefined if chatId or threadId is missing.
  */
-export function threadLink(chatId: number | string | undefined, threadId: number | undefined): string | undefined {
+export function threadLink(chatId: number | string | undefined, threadId: string | undefined): string | undefined {
   if (chatId == null || threadId == null) return undefined
   const raw = String(chatId).replace(/^-100/, "")
   return `https://t.me/c/${raw}/${threadId}`
 }
 
 export interface StatusTaskSession {
-  meta: { topicName: string; repo: string; startedAt: number; mode: string; threadId?: number }
+  meta: { topicName: string; repo: string; startedAt: number; mode: string; threadId?: string }
   task: string
   handle: { isActive(): boolean; getState(): string }
 }
 
 export interface StatusTopicSession {
-  threadId?: number
+  threadId?: string
   slug: string
   repo: string
   mode?: string
@@ -445,8 +445,8 @@ export interface StatusTopicSession {
   activeSessionId?: string
   prUrl?: string
   lastState?: "completed" | "errored" | "quota_exhausted"
-  parentThreadId?: number
-  childThreadIds?: number[]
+  parentThreadId?: string
+  childThreadIds?: string[]
   splitLabel?: string
 }
 
@@ -477,25 +477,25 @@ export function formatStatus(
   }
 
   // Build lookup: threadId → topicSession for child resolution
-  const topicByThread = new Map<number, StatusTopicSession>()
+  const topicByThread = new Map<string, StatusTopicSession>()
   for (const ts of topicSessions) {
     if (ts.threadId != null) topicByThread.set(ts.threadId, ts)
   }
 
   // Build set of child threadIds so we can skip them at top level
-  const childSet = new Set<number>()
+  const childSet = new Set<string>()
   for (const ts of topicSessions) {
     if (ts.parentThreadId != null && ts.threadId != null) childSet.add(ts.threadId)
   }
 
   // Build lookup: threadId → active task session
-  const activeByThread = new Map<number, StatusTaskSession>()
+  const activeByThread = new Map<string, StatusTaskSession>()
   for (const s of taskSessions) {
     if (s.meta.threadId != null) activeByThread.set(s.meta.threadId, s)
   }
 
   // Render active task sessions as top-level items
-  const renderedThreads = new Set<number>()
+  const renderedThreads = new Set<string>()
 
   for (const { meta, task, handle } of taskSessions) {
     // Skip children — they'll be rendered under their parent
@@ -561,9 +561,9 @@ export function formatStatus(
 
 function renderChildTree(
   lines: string[],
-  childThreadIds: number[],
-  topicByThread: Map<number, StatusTopicSession>,
-  activeByThread: Map<number, StatusTaskSession>,
+  childThreadIds: string[],
+  topicByThread: Map<string, StatusTopicSession>,
+  activeByThread: Map<string, StatusTaskSession>,
   chatId?: number | string,
 ): void {
   const children = childThreadIds
@@ -877,7 +877,7 @@ export function formatSplitStart(
   return lines.join("\n")
 }
 
-export function formatSplitChildComplete(slug: string, state: string, label: string, prUrl?: string, threadId?: number, chatId?: number | string): string {
+export function formatSplitChildComplete(slug: string, state: string, label: string, prUrl?: string, threadId?: string, chatId?: number | string): string {
   const emoji = state === "errored" ? "❌" : "✅"
   const prSuffix = prUrl ? ` — <a href="${esc(prUrl)}">PR</a>` : ""
   const link = threadLink(chatId, threadId)
@@ -994,7 +994,7 @@ export function formatDagStart(
   return lines.join("\n")
 }
 
-export function formatDagNodeStarting(nodeTitle: string, nodeId: string, slug: string, threadId?: number, chatId?: number | string): string {
+export function formatDagNodeStarting(nodeTitle: string, nodeId: string, slug: string, threadId?: string, chatId?: number | string): string {
   const link = threadLink(chatId, threadId)
   const slugHtml = link ? `<a href="${link}">${esc(slug)}</a>` : `<code>${esc(slug)}</code>`
   return `⚡ <b>Starting</b>: ${esc(nodeTitle)} (<code>${esc(nodeId)}</code>)  ·  🏷 ${slugHtml}`
@@ -1006,7 +1006,7 @@ export function formatDagNodeComplete(
   nodeTitle: string,
   prUrl?: string,
   progress?: { done: number; total: number; running: number },
-  threadId?: number,
+  threadId?: string,
   chatId?: number | string,
 ): string {
   const emoji = (state === "errored" || state === "failed") ? "❌" : "✅"
@@ -1131,7 +1131,7 @@ export function formatPinnedStatus(
 export function formatPinnedSplitStatus(
   parentSlug: string,
   repo: string,
-  children: { slug: string; label: string; prUrl?: string; threadId?: number; status: "running" | "done" | "failed" }[],
+  children: { slug: string; label: string; prUrl?: string; threadId?: string; status: "running" | "done" | "failed" }[],
   chatId?: number | string,
 ): string {
   const lines: string[] = [
@@ -1167,7 +1167,7 @@ export interface PinnedDagNode {
   title: string
   dependsOn: string[]
   prUrl?: string
-  threadId?: number
+  threadId?: string
   status: "pending" | "ready" | "running" | "done" | "failed" | "skipped"
 }
 

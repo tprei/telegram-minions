@@ -12,7 +12,7 @@ import {
 
 export class SplitOrchestrator {
   private readonly ctx: DispatcherContext
-  private readonly drainingParents = new Set<number>()
+  private readonly drainingParents = new Set<string>()
 
   constructor(ctx: DispatcherContext) {
     this.ctx = ctx

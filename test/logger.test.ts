@@ -27,7 +27,7 @@ describe("Logger", () => {
 
   describe("createSessionLogger", () => {
     it("creates a session-scoped logger", () => {
-      const logger = createSessionLogger("test-slug", 123, "session-456")
+      const logger = createSessionLogger("test-slug", "123", "session-456")
       expect(logger).toBeDefined()
     })
   })
