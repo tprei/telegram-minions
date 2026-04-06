@@ -944,7 +944,7 @@ export class Dispatcher {
 
   // ── Agent spawning ────────────────────────────────────────────────────
 
-  private async spawnTopicAgent(topicSession: TopicSession, task: string, mcpOverrides?: Partial<McpConfig>, systemPromptOverride?: string): Promise<void> {
+  private async spawnTopicAgent(topicSession: TopicSession, task: string, mcpOverrides?: Partial<McpConfig>, systemPromptOverride?: string): Promise<boolean> {
     this.rebootstrapDependencies(topicSession.cwd)
     await this.tokenProvider?.refreshEnv()
     if (this.sessions.size >= this.config.workspace.maxConcurrentSessions) {
@@ -952,7 +952,7 @@ export class Dispatcher {
         `⚠️ Max concurrent sessions reached. Try again later.`,
         topicSession.threadId,
       )
-      return
+      return false
     }
 
     const sessionId = crypto.randomUUID()
@@ -1035,6 +1035,7 @@ export class Dispatcher {
     await this.observer.onSessionStart(meta, task, onTextCapture, onDeadThread)
     const systemPrompt = systemPromptOverride ?? (topicSession.mode === "task" ? prompts.task : undefined)
     handle.start(task, systemPrompt)
+    return true
   }
 
   private handleSessionComplete(topicSession: TopicSession, m: SessionMeta, state: SessionDoneState): void {

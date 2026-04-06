@@ -57,7 +57,7 @@ function makeContext(overrides: Partial<DispatcherContext> = {}): DispatcherCont
     dags: new Map(),
     abortControllers: new Map(),
     refreshGitToken: vi.fn().mockResolvedValue(undefined),
-    spawnTopicAgent: vi.fn().mockResolvedValue(undefined),
+    spawnTopicAgent: vi.fn().mockResolvedValue(true),
     spawnCIFixAgent: vi.fn().mockResolvedValue(undefined),
     prepareWorkspace: vi.fn().mockResolvedValue("/tmp/child-workspace"),
     removeWorkspace: vi.fn().mockResolvedValue(undefined),
@@ -461,6 +461,31 @@ describe("DagOrchestrator", () => {
       )
     })
 
+    it("marks node failed when recovery spawn is rejected", async () => {
+      ctx = makeContext({
+        ...ctx,
+        spawnTopicAgent: vi.fn().mockResolvedValue(false),
+      })
+      orchestrator = new DagOrchestrator(ctx)
+      const { parent, child, graph } = setupDag()
+      ctx.dags.set("dag-test", graph)
+      ctx.topicSessions.set(100, parent)
+      ctx.topicSessions.set(200, child)
+
+      vi.mocked(ctx.extractPRFromConversation).mockReturnValue(null)
+      mockFindPRByBranch.mockResolvedValue(null)
+
+      await orchestrator.onDagChildComplete(child, "completed")
+
+      expect(graph.nodes[0].recoveryAttempted).toBe(true)
+      expect(graph.nodes[0].status).toBe("failed")
+      expect(graph.nodes[0].error).toBe("Recovery blocked: max sessions reached")
+      expect(ctx.telegram.sendMessage).toHaveBeenCalledWith(
+        expect.stringContaining("Recovery for"),
+        100,
+      )
+    })
+
     it("fails node after recovery attempt still has no PR", async () => {
       const { child, graph } = setupDag()
       graph.nodes[0].recoveryAttempted = true
@@ -750,6 +775,73 @@ describe("DagOrchestrator", () => {
       expect(ctx.spawnTopicAgent).toHaveBeenCalled()
       expect(ctx.telegram.sendMessage).toHaveBeenCalledWith(
         expect.stringContaining("Retrying"),
+        session.threadId,
+      )
+    })
+
+    it("respects concurrency limits when retrying", async () => {
+      const session = makeSession({ dagId: "dag-test" })
+      ctx = makeContext({
+        ...ctx,
+        config: {
+          ...ctx.config,
+          workspace: { ...ctx.config.workspace, maxDagConcurrency: 1 },
+        } as any,
+      })
+      orchestrator = new DagOrchestrator(ctx)
+
+      const graph: DagGraph = {
+        id: "dag-test",
+        parentThreadId: 100,
+        nodes: [
+          { id: "a", title: "Task A", status: "running", dependsOn: [] },
+          { id: "b", title: "Task B", status: "failed", dependsOn: [], error: "Session errored" },
+          { id: "c", title: "Task C", status: "failed", dependsOn: [], error: "Session errored" },
+        ],
+      } as DagGraph
+      ctx.dags.set("dag-test", graph)
+
+      const childB = makeSession({ threadId: 201, dagId: "dag-test", dagNodeId: "b" })
+      const childC = makeSession({ threadId: 202, dagId: "dag-test", dagNodeId: "c" })
+      ctx.topicSessions.set(201, childB)
+      ctx.topicSessions.set(202, childC)
+
+      await orchestrator.handleRetryCommand(session)
+
+      expect(ctx.spawnTopicAgent).not.toHaveBeenCalled()
+      expect(graph.nodes[1].status).toBe("ready")
+      expect(graph.nodes[2].status).toBe("ready")
+      expect(ctx.telegram.sendMessage).toHaveBeenCalledWith(
+        expect.stringContaining("deferred"),
+        session.threadId,
+      )
+    })
+
+    it("reverts node to ready when spawn returns false", async () => {
+      const session = makeSession({ dagId: "dag-test" })
+      ctx = makeContext({
+        ...ctx,
+        spawnTopicAgent: vi.fn().mockResolvedValue(false),
+      })
+      orchestrator = new DagOrchestrator(ctx)
+
+      const graph: DagGraph = {
+        id: "dag-test",
+        parentThreadId: 100,
+        nodes: [
+          { id: "a", title: "Task A", status: "failed", dependsOn: [], error: "Session errored" },
+        ],
+      } as DagGraph
+      ctx.dags.set("dag-test", graph)
+
+      const childA = makeSession({ threadId: 201, dagId: "dag-test", dagNodeId: "a" })
+      ctx.topicSessions.set(201, childA)
+
+      await orchestrator.handleRetryCommand(session)
+
+      expect(graph.nodes[0].status).toBe("ready")
+      expect(ctx.telegram.sendMessage).toHaveBeenCalledWith(
+        expect.stringContaining("deferred"),
         session.threadId,
       )
     })

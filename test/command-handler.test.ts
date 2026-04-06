@@ -86,7 +86,7 @@ function makeContext(overrides: Partial<DispatcherContext> = {}): DispatcherCont
     abortControllers: new Map(),
     pendingTasks: new Map(),
     refreshGitToken: vi.fn().mockResolvedValue(undefined),
-    spawnTopicAgent: vi.fn().mockResolvedValue(undefined),
+    spawnTopicAgent: vi.fn().mockResolvedValue(true),
     spawnCIFixAgent: vi.fn().mockImplementation(async (_s, _t, cb) => cb()),
     prepareWorkspace: vi.fn().mockResolvedValue("/tmp"),
     removeWorkspace: vi.fn().mockResolvedValue(undefined),

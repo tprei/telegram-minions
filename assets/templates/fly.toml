@@ -20,5 +20,6 @@ primary_region = "iad"
 
 [[vm]]
   size = "shared-cpu-4x"
-  memory = "4gb"
+  # Each session uses ~1.5 GB; set memory >= (MAX_DAG_CONCURRENCY + 1) * 1.5 GB
+  memory = "8gb"
   auto_stop = false

@@ -328,12 +328,30 @@ export class DagOrchestrator {
           ].join("\n")
 
           childSession.conversation = [{ role: "user", text: recoveryTask }]
-          await this.ctx.spawnTopicAgent(childSession, recoveryTask, undefined, DEFAULT_RECOVERY_PROMPT)
-          await this.ctx.persistTopicSessions()
-          return
+          const spawned = await this.ctx.spawnTopicAgent(childSession, recoveryTask, undefined, DEFAULT_RECOVERY_PROMPT)
+          if (!spawned) {
+            const skipped = failNode(graph, node.id)
+            node.error = "Recovery blocked: max sessions reached"
+            await this.ctx.telegram.sendMessage(
+              `❌ Recovery for <b>${esc(childSession.slug)}</b> blocked — max sessions reached.`,
+              parent.threadId,
+            )
+            for (const skippedId of skipped) {
+              const skippedNode = graph.nodes.find((n) => n.id === skippedId)!
+              await this.ctx.telegram.sendMessage(
+                formatDagNodeSkipped(skippedNode.title, `upstream "${node.id}" recovery blocked`),
+                parent.threadId,
+              )
+            }
+          } else {
+            await this.ctx.persistTopicSessions()
+            return
+          }
         }
 
-        if (!resolvedPrUrl) {
+        if (node.status === "failed") {
+          // Already handled (e.g. recovery spawn was rejected) — skip to completion checks
+        } else if (!resolvedPrUrl) {
           const skipped = failNode(graph, node.id)
           node.error = "Completed without opening a PR"
 
@@ -580,12 +598,23 @@ export class DagOrchestrator {
 
     for (const node of failedNodes) {
       resetFailedNode(graph, node.id)
+    }
 
+    let deferred = 0
+    for (const node of failedNodes) {
       const childSession = [...this.ctx.topicSessions.values()].find(
         (s) => s.dagId === graph.id && s.dagNodeId === node.id,
       )
 
       if (childSession) {
+        const runningDagNodes = graph.nodes.filter(n => n.status === "running").length
+        const dagSlots = this.ctx.config.workspace.maxDagConcurrency - runningDagNodes
+        const globalSlots = this.ctx.config.workspace.maxConcurrentSessions - this.ctx.sessions.size
+        if (Math.min(dagSlots, globalSlots) <= 0) {
+          deferred++
+          continue
+        }
+
         const retryTask = [
           `## Retry task`,
           `Previous attempt failed: ${node.error ?? "unknown reason"}`,
@@ -596,7 +625,13 @@ export class DagOrchestrator {
 
         childSession.conversation = [{ role: "user", text: retryTask }]
         node.status = "running"
-        await this.ctx.spawnTopicAgent(childSession, retryTask, undefined, DEFAULT_RECOVERY_PROMPT)
+        const spawned = await this.ctx.spawnTopicAgent(childSession, retryTask, undefined, DEFAULT_RECOVERY_PROMPT)
+
+        if (!spawned) {
+          node.status = "ready"
+          deferred++
+          continue
+        }
 
         await this.ctx.telegram.sendMessage(
           `🔄 Retrying <b>${esc(node.title)}</b> (<code>${esc(node.id)}</code>)`,
@@ -607,6 +642,13 @@ export class DagOrchestrator {
           graph.nodes.every((n, i) => i === 0 || n.dependsOn.length === 1)
         await this.scheduleDagNodes(topicSession, graph, isStack)
       }
+    }
+
+    if (deferred > 0) {
+      await this.ctx.telegram.sendMessage(
+        `⏳ ${deferred} node(s) deferred — will start when a session slot opens.`,
+        topicSession.threadId,
+      )
     }
 
     await this.updateDagPRDescriptions(graph, topicSession.cwd)

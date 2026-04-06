@@ -333,7 +333,7 @@ describe("quota sleep in dispatcher", () => {
     priv.topicSessions.set(100, ts)
 
     // Mock spawnTopicAgent to prevent actual process spawning
-    const spawnSpy = vi.fn().mockResolvedValue(undefined)
+    const spawnSpy = vi.fn().mockResolvedValue(true)
     ;(dispatcher as unknown as { spawnTopicAgent: typeof spawnSpy }).spawnTopicAgent = spawnSpy
 
     priv.scheduleQuotaResume(ts, 60_000)
@@ -355,7 +355,7 @@ describe("quota sleep in dispatcher", () => {
     const ts = makeTopicSession({ conversation: [], quotaRetryCount: 1 })
     priv.topicSessions.set(100, ts)
 
-    const spawnSpy = vi.fn().mockResolvedValue(undefined)
+    const spawnSpy = vi.fn().mockResolvedValue(true)
     ;(dispatcher as unknown as { spawnTopicAgent: typeof spawnSpy }).spawnTopicAgent = spawnSpy
 
     await priv.resumeAfterQuotaSleep(ts)
@@ -375,7 +375,7 @@ describe("quota sleep in dispatcher", () => {
     })
     priv.topicSessions.set(100, ts)
 
-    const spawnSpy = vi.fn().mockResolvedValue(undefined)
+    const spawnSpy = vi.fn().mockResolvedValue(true)
     ;(dispatcher as unknown as { spawnTopicAgent: typeof spawnSpy }).spawnTopicAgent = spawnSpy
 
     await priv.resumeAfterQuotaSleep(ts)
@@ -391,7 +391,7 @@ describe("quota sleep in dispatcher", () => {
     priv.sessions.set(200, {})
     priv.sessions.set(300, {})
 
-    const spawnSpy = vi.fn().mockResolvedValue(undefined)
+    const spawnSpy = vi.fn().mockResolvedValue(true)
     ;(dispatcher as unknown as { spawnTopicAgent: typeof spawnSpy }).spawnTopicAgent = spawnSpy
 
     await priv.resumeAfterQuotaSleep(ts)
@@ -408,7 +408,7 @@ describe("quota sleep in dispatcher", () => {
     const ts = makeTopicSession({ quotaRetryCount: 1 })
     // Deliberately NOT adding to topicSessions — simulates /close during sleep
 
-    const spawnSpy = vi.fn().mockResolvedValue(undefined)
+    const spawnSpy = vi.fn().mockResolvedValue(true)
     ;(dispatcher as unknown as { spawnTopicAgent: typeof spawnSpy }).spawnTopicAgent = spawnSpy
 
     await priv.resumeAfterQuotaSleep(ts)
@@ -424,7 +424,7 @@ describe("quota sleep in dispatcher", () => {
     const ts = makeTopicSession({ quotaRetryCount: 4 }) // exceeds retryMax but resume doesn't check
     priv.topicSessions.set(100, ts)
 
-    const spawnSpy = vi.fn().mockResolvedValue(undefined)
+    const spawnSpy = vi.fn().mockResolvedValue(true)
     ;(dispatcher as unknown as { spawnTopicAgent: typeof spawnSpy }).spawnTopicAgent = spawnSpy
 
     await priv.resumeAfterQuotaSleep(ts)
@@ -466,7 +466,7 @@ describe("quota sleep in dispatcher", () => {
     priv.quotaEvents.set(100, { rawMessage: "Usage limit reached. Resets in 30 minutes.", resetAt: undefined })
 
     // Mock spawnTopicAgent
-    const spawnSpy = vi.fn().mockResolvedValue(undefined)
+    const spawnSpy = vi.fn().mockResolvedValue(true)
     ;(dispatcher as unknown as { spawnTopicAgent: typeof spawnSpy }).spawnTopicAgent = spawnSpy
 
     const meta: SessionMeta = {
@@ -545,7 +545,7 @@ describe("quota sleep persistence", () => {
     const priv = getPrivate(dispatcher)
 
     // Mock spawnTopicAgent
-    const spawnSpy = vi.fn().mockResolvedValue(undefined)
+    const spawnSpy = vi.fn().mockResolvedValue(true)
     ;(dispatcher as unknown as { spawnTopicAgent: typeof spawnSpy }).spawnTopicAgent = spawnSpy
 
     const expiredSession = makeTopicSession({
@@ -592,7 +592,7 @@ describe("quota sleep persistence", () => {
     const observer = new Observer(telegram, "1")
     const dispatcher = new Dispatcher(telegram, observer, config, new EventBus())
 
-    const spawnSpy = vi.fn().mockResolvedValue(undefined)
+    const spawnSpy = vi.fn().mockResolvedValue(true)
     ;(dispatcher as unknown as { spawnTopicAgent: typeof spawnSpy }).spawnTopicAgent = spawnSpy
 
     const session = makeTopicSession({

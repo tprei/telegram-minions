@@ -50,13 +50,13 @@ export interface DispatcherContext {
 
   // ── Session lifecycle ──────────────────────────────────────────────
 
-  /** Spawn a new agent session in an existing topic. */
+  /** Spawn a new agent session in an existing topic. Returns false if rejected (e.g. max sessions). */
   spawnTopicAgent(
     topicSession: TopicSession,
     task: string,
     mcpOverrides?: Partial<McpConfig>,
     systemPromptOverride?: string,
-  ): Promise<void>
+  ): Promise<boolean>
 
   /** Spawn a CI-fix agent session with a completion callback. */
   spawnCIFixAgent(
