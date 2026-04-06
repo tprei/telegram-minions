@@ -73,6 +73,7 @@ import { CIBabysitHandler } from "../handlers/ci-babysit-handler.js"
 import { DigestHandler } from "../handlers/digest-handler.js"
 import { ParentNotifyHandler } from "../handlers/parent-notify-handler.js"
 import { PendingFeedbackHandler } from "../handlers/pending-feedback-handler.js"
+import { LoopCompletionHandler } from "../handlers/loop-completion-handler.js"
 import { extractPRUrl } from "../ci/ci-babysit.js"
 import { writeSessionLog } from "../session/session-log.js"
 
@@ -247,6 +248,7 @@ export class Dispatcher {
         this.observer,
         this.pinnedMessages,
       ))
+      .register(new LoopCompletionHandler({ get: () => this.loopScheduler }, this.telegram))
       .register(new TaskCompletionHandler(
         this.telegram,
         this.observer,
