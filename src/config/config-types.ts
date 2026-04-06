@@ -89,6 +89,11 @@ export interface QuotaConfig {
   sleepBufferMs: number
 }
 
+export interface LoopConfig {
+  maxConcurrentLoops: number
+  reservedInteractiveSlots: number
+}
+
 export interface MinionConfig {
   telegram: TelegramConfig
   telegramQueue: TelegramQueueConfig
@@ -109,6 +114,8 @@ export interface MinionConfig {
   quota: QuotaConfig
   /** HTTP API server configuration */
   api?: ApiServerConfig
+  /** Loop scheduler configuration */
+  loops?: LoopConfig
 }
 
 export interface ApiServerConfig {

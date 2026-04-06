@@ -131,6 +131,10 @@ export function configFromEnv(overrides?: Partial<MinionConfig>): MinionConfig {
       defaultSleepMs: optionalNumber("QUOTA_DEFAULT_SLEEP_MS", 3600_000),
       sleepBufferMs: optionalNumber("QUOTA_SLEEP_BUFFER_MS", 60_000),
     },
+    loops: {
+      maxConcurrentLoops: optionalNumber("MAX_CONCURRENT_LOOPS", 3),
+      reservedInteractiveSlots: optionalNumber("RESERVED_INTERACTIVE_SLOTS", 2),
+    },
     sentry: {
       dsn: process.env["SENTRY_DSN"] ?? undefined,
     },

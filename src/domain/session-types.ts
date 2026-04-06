@@ -75,6 +75,7 @@ export interface TopicSession {
   quotaSleepUntil?: number
   autoAdvance?: AutoAdvance
   verificationState?: VerificationState
+  loopId?: string
 }
 
 export interface PendingDagItem {
