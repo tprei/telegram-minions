@@ -25,6 +25,8 @@ import {
   formatQuotaSleep,
   formatQuotaResume,
   formatQuotaExhausted,
+  formatLoopStatus,
+  type LoopStatusEntry,
 } from "../telegram/format.js"
 import { StatsTracker } from "../stats.js"
 import { truncateConversation } from "../conversation-limits.js"
@@ -59,6 +61,9 @@ import { routeCommand } from "../commands/command-router.js"
 import { CommandHandler } from "../commands/command-handler.js"
 import { parseResetTime } from "../session/quota-detection.js"
 import type { EventBus } from "../events/event-bus.js"
+import { LoopScheduler, type LoopSchedulerConfig } from "../loops/loop-scheduler.js"
+import type { LoopDefinition, LoopState } from "../loops/domain-types.js"
+import { LoopStore } from "../loops/loop-store.js"
 import { CompletionHandlerChain } from "../handlers/completion-handler-chain.js"
 import { StatsHandler } from "../handlers/stats-handler.js"
 import { QuotaHandler } from "../handlers/quota-handler.js"
@@ -70,6 +75,7 @@ import { CIBabysitHandler } from "../handlers/ci-babysit-handler.js"
 import { DigestHandler } from "../handlers/digest-handler.js"
 import { ParentNotifyHandler } from "../handlers/parent-notify-handler.js"
 import { PendingFeedbackHandler } from "../handlers/pending-feedback-handler.js"
+import { LoopCompletionHandler } from "../handlers/loop-completion-handler.js"
 import { extractPRUrl } from "../ci/ci-babysit.js"
 import { writeSessionLog } from "../session/session-log.js"
 
@@ -98,6 +104,8 @@ export class Dispatcher {
   private readonly stats: StatsTracker
 
   private readonly quotaEvents = new Map<number, { resetAt?: number; rawMessage: string }>()
+  private readonly loopStore: LoopStore
+  private loopScheduler: LoopScheduler | null = null
   private readonly quotaSleepTimers = new Map<number, ReturnType<typeof setTimeout>>()
 
   private readonly ciBabysitter: CIBabysitter
@@ -123,6 +131,7 @@ export class Dispatcher {
     this.eventBus = eventBus
     this.store = new SessionStore(this.config.workspace.root)
     this.dagStore = new DagStore(this.config.workspace.root)
+    this.loopStore = new LoopStore(this.config.workspace.root)
     this.profileStore = new ProfileStore(this.config.workspace.root)
     this.stats = new StatsTracker(this.config.workspace.root)
     this.pinnedMessages = new PinnedMessageManager({
@@ -241,6 +250,7 @@ export class Dispatcher {
         this.observer,
         this.pinnedMessages,
       ))
+      .register(new LoopCompletionHandler({ get: () => this.loopScheduler }, this.telegram))
       .register(new TaskCompletionHandler(
         this.telegram,
         this.observer,
@@ -429,6 +439,7 @@ export class Dispatcher {
 
   stop(): void {
     this.running = false
+    this.loopScheduler?.stop()
     this.stopCleanupTimer()
     for (const timer of this.quotaSleepTimers.values()) {
       clearTimeout(timer)
@@ -472,6 +483,213 @@ export class Dispatcher {
       return
     }
     await this.handleCloseCommandInternal(topicSession)
+  }
+
+  // ── Loop scheduler ──────────────────────────────────────────────────────
+
+  async startLoops(definitions: LoopDefinition[]): Promise<void> {
+    if (definitions.length === 0) return
+
+    const loopsConfig = this.config.loops ?? { maxConcurrentLoops: 3, reservedInteractiveSlots: 2 }
+    const schedulerConfig: LoopSchedulerConfig = {
+      maxConcurrentLoops: loopsConfig.maxConcurrentLoops,
+      reservedInteractiveSlots: loopsConfig.reservedInteractiveSlots,
+      maxConcurrentSessions: this.config.workspace.maxConcurrentSessions,
+    }
+
+    this.loopScheduler = new LoopScheduler(this.loopStore, schedulerConfig, {
+      getActiveSessionCount: () => this.sessions.size,
+      startLoopSession: (loopId, def, state) => this.startLoopSession(loopId, def, state),
+      isQuotaSleeping: () => this.quotaSleepTimers.size > 0,
+    })
+
+    await this.loopScheduler.start(definitions)
+  }
+
+  getLoopScheduler(): LoopScheduler | null {
+    return this.loopScheduler
+  }
+
+  async handleLoopsCommand(args: string): Promise<void> {
+    const scheduler = this.loopScheduler
+    if (!scheduler) {
+      await this.telegram.sendMessage("🔄 <b>Loops</b>\n\nNo loops configured.")
+      return
+    }
+
+    const parts = args.split(/\s+/).filter(Boolean)
+    const subcommand = parts[0]
+
+    if (!subcommand) {
+      const entries = this.buildLoopStatusEntries(scheduler)
+      await this.telegram.sendMessage(formatLoopStatus(entries))
+      return
+    }
+
+    if (subcommand === "enable" || subcommand === "disable") {
+      const loopId = parts[1]
+      if (!loopId) {
+        await this.telegram.sendMessage(`Usage: <code>/loops ${subcommand} &lt;id&gt;</code>`)
+        return
+      }
+      const ok = subcommand === "enable"
+        ? scheduler.enableLoop(loopId)
+        : scheduler.disableLoop(loopId)
+      if (ok) {
+        await this.telegram.sendMessage(`✅ Loop <code>${escapeHtml(loopId)}</code> ${subcommand}d.`)
+      } else {
+        await this.telegram.sendMessage(`❌ Loop <code>${escapeHtml(loopId)}</code> not found.`)
+      }
+      return
+    }
+
+    if (subcommand === "fire") {
+      const loopId = parts[1]
+      if (!loopId) {
+        await this.telegram.sendMessage(`Usage: <code>/loops fire &lt;id&gt;</code>`)
+        return
+      }
+      const defs = scheduler.getDefinitions()
+      const states = scheduler.getStates()
+      const def = defs.get(loopId)
+      const state = states.get(loopId)
+      if (!def || !state) {
+        await this.telegram.sendMessage(`❌ Loop <code>${escapeHtml(loopId)}</code> not found.`)
+        return
+      }
+      await this.telegram.sendMessage(`🔄 Firing loop <code>${escapeHtml(loopId)}</code>…`)
+      const threadId = await this.startLoopSession(loopId, def, state)
+      if (threadId != null) {
+        scheduler.getActiveLoopThreads().set(loopId, threadId)
+      } else {
+        await this.telegram.sendMessage(`❌ Failed to start loop <code>${escapeHtml(loopId)}</code>.`)
+      }
+      return
+    }
+
+    if (subcommand === "interval") {
+      const loopId = parts[1]
+      const hours = parts[2] ? parseFloat(parts[2]) : NaN
+      if (!loopId || isNaN(hours) || hours <= 0) {
+        await this.telegram.sendMessage(`Usage: <code>/loops interval &lt;id&gt; &lt;hours&gt;</code>`)
+        return
+      }
+      const defs = scheduler.getDefinitions()
+      const def = defs.get(loopId)
+      if (!def) {
+        await this.telegram.sendMessage(`❌ Loop <code>${escapeHtml(loopId)}</code> not found.`)
+        return
+      }
+      def.intervalMs = hours * 3_600_000
+      await this.telegram.sendMessage(`✅ Loop <code>${escapeHtml(loopId)}</code> interval set to ${hours}h.`)
+      return
+    }
+
+    await this.telegram.sendMessage(
+      [
+        `<b>Loop commands</b>`,
+        ``,
+        `<code>/loops</code> — show all loops and their status`,
+        `<code>/loops enable &lt;id&gt;</code> — enable a loop`,
+        `<code>/loops disable &lt;id&gt;</code> — disable a loop`,
+        `<code>/loops fire &lt;id&gt;</code> — trigger a loop immediately`,
+        `<code>/loops interval &lt;id&gt; &lt;hours&gt;</code> — change loop interval`,
+      ].join("\n"),
+    )
+  }
+
+  private buildLoopStatusEntries(scheduler: LoopScheduler): LoopStatusEntry[] {
+    const defs = scheduler.getDefinitions()
+    const states = scheduler.getStates()
+    const entries: LoopStatusEntry[] = []
+
+    for (const [id, def] of defs) {
+      const state = states.get(id)
+      entries.push({
+        id,
+        name: def.name,
+        enabled: state?.enabled ?? def.enabled,
+        running: scheduler.isLoopActive(id),
+        totalRuns: state?.totalRuns ?? 0,
+        consecutiveFailures: state?.consecutiveFailures ?? 0,
+        lastRunAt: state?.lastRunAt,
+        nextRunAt: state?.nextRunAt,
+        lastPrUrl: state?.lastPrUrl,
+        intervalMs: def.intervalMs,
+      })
+    }
+
+    return entries
+  }
+
+  private async startLoopSession(loopId: string, def: LoopDefinition, state: LoopState): Promise<number | null> {
+    const sessionId = crypto.randomUUID()
+    const slug = generateSlug(sessionId)
+    const repo = def.repo ? extractRepoName(def.repo) : "local"
+    const repoUrl = def.repo || undefined
+    const topicHandle = `🔄 ${slug}/${def.name}`
+
+    let topic: { message_thread_id: number }
+    try {
+      topic = await this.telegram.createForumTopic(topicHandle)
+    } catch (err) {
+      log.error({ err, loopId }, "failed to create loop topic")
+      captureException(err, { operation: "createLoopTopic", loopId })
+      return null
+    }
+
+    const threadId = topic.message_thread_id
+
+    const cwd = await this.prepareWorkspace(slug, repoUrl)
+    if (!cwd) {
+      await this.telegram.sendMessage(`❌ Failed to prepare workspace for loop.`, threadId)
+      await this.telegram.deleteForumTopic(threadId)
+      return null
+    }
+
+    const shouldSkip = await this.loopScheduler?.checkDuplicatePR(loopId, cwd)
+    if (shouldSkip) {
+      await this.telegram.sendMessage(`⏭️ Skipping — previous PR still open.`, threadId)
+      await this.telegram.deleteForumTopic(threadId)
+      await this.removeWorkspace({ cwd, slug, threadId, repo, conversation: [], pendingFeedback: [], mode: "task", lastActivityAt: 0 })
+      this.loopScheduler?.recordOutcome(loopId, {
+        runNumber: state.totalRuns + 1,
+        startedAt: Date.now(),
+        finishedAt: Date.now(),
+        result: "skipped_duplicate",
+        threadId,
+      })
+      return null
+    }
+
+    const topicSession: TopicSession = {
+      threadId,
+      repo,
+      repoUrl,
+      cwd,
+      slug,
+      topicHandle,
+      conversation: [{ role: "user", text: def.prompt }],
+      pendingFeedback: [],
+      mode: "task",
+      lastActivityAt: Date.now(),
+      branch: repoUrl ? `minion/${slug}` : undefined,
+      loopId,
+    }
+
+    this.topicSessions.set(threadId, topicSession)
+    this.broadcastSession(topicSession, "session_created")
+    this.pinnedMessages.updatePinnedSummary()
+
+    const spawned = await this.spawnTopicAgent(topicSession, def.prompt)
+    if (!spawned) {
+      this.topicSessions.delete(threadId)
+      await this.telegram.deleteForumTopic(threadId)
+      await this.removeWorkspace(topicSession)
+      return null
+    }
+
+    return threadId
   }
 
   // ── Cleanup timer ─────────────────────────────────────────────────────
@@ -612,6 +830,7 @@ export class Dispatcher {
       case "clean": return this.commandHandler.handleCleanCommand()
       case "help": return this.commandHandler.handleHelpCommand()
       case "config": return this.commandHandler.handleConfigCommand(routed.args)
+      case "loops": return this.handleLoopsCommand(routed.args)
       case "task": return this.commandHandler.handleTaskCommand(routed.args, routed.threadId, routed.photos)
       case "plan": return this.handlePlanCommand(routed.args, routed.threadId, routed.photos)
       case "think": return this.handleThinkCommand(routed.args, routed.threadId, routed.photos)

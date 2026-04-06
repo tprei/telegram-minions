@@ -47,6 +47,8 @@ import {
   formatAdvocateArgument,
   formatJudgeVerdict,
   formatJudgeError,
+  formatLoopStatus,
+  type LoopStatusEntry,
 } from "../src/telegram/format.js"
 import type { ClaudeUsageResponse } from "../src/claude-usage.js"
 import type { AggregateStats, SessionRecord, ModeBreakdown } from "../src/stats.js"
@@ -1685,6 +1687,99 @@ describe("formatPinnedDagStatus", () => {
       const longErr = "e".repeat(500)
       const result = formatJudgeError("s", longErr)
       expect(result).toContain("…")
+    })
+  })
+
+  describe("formatLoopStatus", () => {
+    it("shows 'no loops configured' when empty", () => {
+      const result = formatLoopStatus([])
+      expect(result).toContain("No loops configured")
+    })
+
+    it("shows loop count header", () => {
+      const entries: LoopStatusEntry[] = [
+        { id: "lint", name: "Lint Sweep", enabled: true, running: false, totalRuns: 5, consecutiveFailures: 0, intervalMs: 3_600_000 },
+        { id: "tests", name: "Test Fixer", enabled: false, running: false, totalRuns: 2, consecutiveFailures: 1, intervalMs: 7_200_000 },
+      ]
+      const result = formatLoopStatus(entries)
+      expect(result).toContain("2 defined")
+    })
+
+    it("shows running icon for active loop", () => {
+      const entries: LoopStatusEntry[] = [
+        { id: "lint", name: "Lint Sweep", enabled: true, running: true, totalRuns: 3, consecutiveFailures: 0, intervalMs: 3_600_000 },
+      ]
+      const result = formatLoopStatus(entries)
+      expect(result).toContain("🟢")
+      expect(result).toContain("running")
+    })
+
+    it("shows idle icon for enabled but not running loop", () => {
+      const entries: LoopStatusEntry[] = [
+        { id: "lint", name: "Lint Sweep", enabled: true, running: false, totalRuns: 0, consecutiveFailures: 0, intervalMs: 3_600_000 },
+      ]
+      const result = formatLoopStatus(entries)
+      expect(result).toContain("⏳")
+      expect(result).toContain("idle")
+    })
+
+    it("shows disabled icon for disabled loop", () => {
+      const entries: LoopStatusEntry[] = [
+        { id: "lint", name: "Lint Sweep", enabled: false, running: false, totalRuns: 0, consecutiveFailures: 0, intervalMs: 3_600_000 },
+      ]
+      const result = formatLoopStatus(entries)
+      expect(result).toContain("⏸")
+      expect(result).toContain("disabled")
+    })
+
+    it("shows consecutive failures", () => {
+      const entries: LoopStatusEntry[] = [
+        { id: "lint", name: "Lint Sweep", enabled: true, running: false, totalRuns: 5, consecutiveFailures: 3, intervalMs: 3_600_000 },
+      ]
+      const result = formatLoopStatus(entries)
+      expect(result).toContain("❌ 3 consecutive")
+    })
+
+    it("shows last run time", () => {
+      const entries: LoopStatusEntry[] = [
+        { id: "lint", name: "Lint Sweep", enabled: true, running: false, totalRuns: 1, consecutiveFailures: 0, intervalMs: 3_600_000, lastRunAt: Date.now() - 60_000 },
+      ]
+      const result = formatLoopStatus(entries)
+      expect(result).toContain("last run:")
+      expect(result).toContain("ago")
+    })
+
+    it("shows next fire time for enabled loops", () => {
+      const entries: LoopStatusEntry[] = [
+        { id: "lint", name: "Lint Sweep", enabled: true, running: false, totalRuns: 1, consecutiveFailures: 0, intervalMs: 3_600_000, nextRunAt: Date.now() + 120_000 },
+      ]
+      const result = formatLoopStatus(entries)
+      expect(result).toContain("next fire:")
+    })
+
+    it("shows last PR URL", () => {
+      const entries: LoopStatusEntry[] = [
+        { id: "lint", name: "Lint Sweep", enabled: true, running: false, totalRuns: 1, consecutiveFailures: 0, intervalMs: 3_600_000, lastPrUrl: "https://github.com/org/repo/pull/42" },
+      ]
+      const result = formatLoopStatus(entries)
+      expect(result).toContain("last PR:")
+      expect(result).toContain("github.com/org/repo/pull/42")
+    })
+
+    it("formats interval in hours", () => {
+      const entries: LoopStatusEntry[] = [
+        { id: "lint", name: "Lint Sweep", enabled: true, running: false, totalRuns: 0, consecutiveFailures: 0, intervalMs: 7_200_000 },
+      ]
+      const result = formatLoopStatus(entries)
+      expect(result).toContain("every 2h")
+    })
+
+    it("escapes HTML in loop name", () => {
+      const entries: LoopStatusEntry[] = [
+        { id: "lint", name: "<b>Lint</b>", enabled: true, running: false, totalRuns: 0, consecutiveFailures: 0, intervalMs: 3_600_000 },
+      ]
+      const result = formatLoopStatus(entries)
+      expect(result).toContain("&lt;b&gt;Lint&lt;/b&gt;")
     })
   })
 })
