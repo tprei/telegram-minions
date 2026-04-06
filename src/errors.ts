@@ -63,10 +63,10 @@ export class UnknownNodeError extends MinionError {
 
 /** Thrown when a session lookup fails. */
 export class SessionNotFoundError extends MinionError {
-  readonly threadId: number
-  readonly activeThreadIds?: number[]
+  readonly threadId: string
+  readonly activeThreadIds?: string[]
 
-  constructor(threadId: number, activeThreadIds?: number[]) {
+  constructor(threadId: string, activeThreadIds?: string[]) {
     let message = `Session not found: thread ${threadId}`
     if (activeThreadIds && activeThreadIds.length > 0) {
       message += `. Active sessions: ${activeThreadIds.join(", ")}`

@@ -38,7 +38,7 @@ export interface PendingBabysitEntry {
  * and deferred babysit queuing for split children.
  */
 export class CIBabysitter {
-  readonly pendingBabysitPRs = new Map<number, PendingBabysitEntry[]>()
+  readonly pendingBabysitPRs = new Map<string, PendingBabysitEntry[]>()
   private readonly ctx: DispatcherContext
 
   constructor(ctx: DispatcherContext) {
@@ -48,7 +48,7 @@ export class CIBabysitter {
   /**
    * Queue a child session's PR for deferred babysitting (used by split children).
    */
-  queueDeferredBabysit(parentThreadId: number, entry: PendingBabysitEntry): void {
+  queueDeferredBabysit(parentThreadId: string, entry: PendingBabysitEntry): void {
     const queue = this.pendingBabysitPRs.get(parentThreadId) ?? []
     queue.push(entry)
     this.pendingBabysitPRs.set(parentThreadId, queue)
@@ -57,7 +57,7 @@ export class CIBabysitter {
   /**
    * Run all deferred babysit entries for a parent session in parallel.
    */
-  async runDeferredBabysit(parentThreadId: number): Promise<void> {
+  async runDeferredBabysit(parentThreadId: string): Promise<void> {
     const entries = this.pendingBabysitPRs.get(parentThreadId)
     if (!entries || entries.length === 0) return
     this.pendingBabysitPRs.delete(parentThreadId)

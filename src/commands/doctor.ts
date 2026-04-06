@@ -14,7 +14,7 @@ import { threadLink } from "../telegram/format.js"
 // ── Types ──────────────────────────────────────────────────────────────
 
 export interface ThreadSummary {
-  threadId: number
+  threadId: string
   slug: string
   mode: string
   repo: string
@@ -102,9 +102,9 @@ export interface GatherEvidenceOptions {
   /** Whether the current session has an active running agent. */
   isCurrentActive: boolean
   /** Lookup function: threadId → TopicSession | undefined */
-  getSession: (threadId: number) => TopicSession | undefined
+  getSession: (threadId: string) => TopicSession | undefined
   /** Lookup function: threadId → boolean (is session actively running) */
-  isSessionActive: (threadId: number) => boolean
+  isSessionActive: (threadId: string) => boolean
   /** Lookup function: dagId → DagGraph | undefined */
   getDag: (dagId: string) => DagGraph | undefined
   /** Telegram chat ID for generating thread links. */

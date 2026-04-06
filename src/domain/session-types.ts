@@ -29,7 +29,7 @@ export type SessionMode = "task" | "plan" | "think" | "review" | "ci-fix" | "dag
 
 export interface SessionMeta {
   sessionId: string
-  threadId: number
+  threadId: string
   topicName: string
   repo: string
   cwd: string
@@ -46,7 +46,7 @@ export interface TopicMessage {
 }
 
 export interface TopicSession {
-  threadId: number
+  threadId: string
   repo: string
   repoUrl?: string
   cwd: string
@@ -58,8 +58,8 @@ export interface TopicSession {
   mode: SessionMode
   lastActivityAt: number
   profileId?: string
-  parentThreadId?: number
-  childThreadIds?: number[]
+  parentThreadId?: string
+  childThreadIds?: string[]
   splitLabel?: string
   interruptedAt?: number
   branch?: string

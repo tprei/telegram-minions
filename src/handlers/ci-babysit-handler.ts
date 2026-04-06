@@ -7,7 +7,7 @@ import { createLogger } from "../logger.js"
 const log = createLogger({ component: "ci-babysit-handler" })
 
 export interface CIBabysitter {
-  queueDeferredBabysit(parentThreadId: number, opts: { childSession: TopicSession; prUrl: string; qualityReport?: QualityReport }): void
+  queueDeferredBabysit(parentThreadId: string, opts: { childSession: TopicSession; prUrl: string; qualityReport?: QualityReport }): void
   babysitPR(topicSession: TopicSession, prUrl: string, qualityReport?: QualityReport): Promise<void>
 }
 

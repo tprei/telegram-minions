@@ -7,11 +7,11 @@ import { createLogger } from "../logger.js"
 const log = createLogger({ component: "completion-handler-chain" })
 
 export interface TopicSessionProvider {
-  get(threadId: number): TopicSession | undefined
+  get(threadId: string): TopicSession | undefined
 }
 
 export interface SessionRemover {
-  delete(threadId: number): boolean
+  delete(threadId: string): boolean
 }
 
 export interface SessionBroadcaster {
@@ -27,7 +27,7 @@ export interface SessionPersister {
 }
 
 export interface ReplyQueueManager {
-  getQueue(threadId: number): { clearDelivered(): Promise<void> } | undefined
+  getQueue(threadId: string): { clearDelivered(): Promise<void> } | undefined
 }
 
 /**

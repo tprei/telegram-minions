@@ -8,9 +8,9 @@ describe("API Server", () => {
   let broadcaster: StateBroadcaster
   let mockDispatcher: DispatcherApi
 
-  const mockSessions = new Map<number, { handle: unknown; meta: { sessionId: string; threadId: number }; task: string }>()
-  const mockTopicSessions = new Map<number, { threadId: number; slug: string; conversation: { role: string; text: string }[]; repo?: string; repoUrl?: string; startedAt?: number; lastActivityAt: number; mode: string }>()
-  const mockDags = new Map<string, { id: string; nodes: { id: string; title: string; status: string; dependsOn: string[] }[]; parentThreadId: number; repo: string; createdAt: number }>()
+  const mockSessions = new Map<string, { handle: unknown; meta: { sessionId: string; threadId: string }; task: string }>()
+  const mockTopicSessions = new Map<string, { threadId: string; slug: string; conversation: { role: string; text: string }[]; repo?: string; repoUrl?: string; startedAt?: number; lastActivityAt: number; mode: string }>()
+  const mockDags = new Map<string, { id: string; nodes: { id: string; title: string; status: string; dependsOn: string[] }[]; parentThreadId: string; repo: string; createdAt: number }>()
 
   beforeEach(() => {
     broadcaster = new StateBroadcaster()
@@ -61,8 +61,8 @@ describe("API Server", () => {
     })
 
     it("should return sessions from dispatcher", async () => {
-      mockTopicSessions.set(123, {
-        threadId: 123,
+      mockTopicSessions.set("123", {
+        threadId: "123",
         slug: "bold-meadow",
         conversation: [{ role: "user", text: "/task Add feature" }],
         repo: "org/repo",
@@ -96,8 +96,8 @@ describe("API Server", () => {
     })
 
     it("should expose prUrl and branch fields from topic session", async () => {
-      mockTopicSessions.set(456, {
-        threadId: 456,
+      mockTopicSessions.set("456", {
+        threadId: "456",
         slug: "swift-river",
         conversation: [{ role: "user", text: "/task Fix bug" }],
         repo: "org/repo",
@@ -132,8 +132,8 @@ describe("API Server", () => {
     })
 
     it("should return undefined prUrl and branch when not set", async () => {
-      mockTopicSessions.set(789, {
-        threadId: 789,
+      mockTopicSessions.set("789", {
+        threadId: "789",
         slug: "quiet-pond",
         conversation: [{ role: "user", text: "/plan Design feature" }],
         lastActivityAt: Date.now(),
@@ -188,8 +188,8 @@ describe("API Server", () => {
     })
 
     it("should return session by slug", async () => {
-      mockTopicSessions.set(123, {
-        threadId: 123,
+      mockTopicSessions.set("123", {
+        threadId: "123",
         slug: "calm-lake",
         conversation: [{ role: "user", text: "/plan Feature design" }],
         repo: "org/repo",
@@ -245,8 +245,8 @@ describe("API Server", () => {
 
   describe("POST /api/commands", () => {
     it("should handle reply command", async () => {
-      mockTopicSessions.set(123, {
-        threadId: 123,
+      mockTopicSessions.set("123", {
+        threadId: "123",
         slug: "test-session",
         conversation: [],
         lastActivityAt: Date.now(),
@@ -276,12 +276,12 @@ describe("API Server", () => {
 
       expect(response.status).toBe(200)
       expect(data.success).toBe(true)
-      expect(mockDispatcher.sendReply).toHaveBeenCalledWith(123, "Hello")
+      expect(mockDispatcher.sendReply).toHaveBeenCalledWith("123", "Hello")
     })
 
     it("should handle stop command", async () => {
-      mockTopicSessions.set(456, {
-        threadId: 456,
+      mockTopicSessions.set("456", {
+        threadId: "456",
         slug: "running-session",
         conversation: [],
         lastActivityAt: Date.now(),
@@ -311,7 +311,7 @@ describe("API Server", () => {
 
       expect(response.status).toBe(200)
       expect(data.success).toBe(true)
-      expect(mockDispatcher.stopSession).toHaveBeenCalledWith(456)
+      expect(mockDispatcher.stopSession).toHaveBeenCalledWith("456")
     })
 
     it("should return 404 for unknown session", async () => {
@@ -367,8 +367,8 @@ describe("API Server", () => {
 
   describe("chatId in API responses", () => {
     it("should include parsed chatId in session response", async () => {
-      mockTopicSessions.set(123, {
-        threadId: 123,
+      mockTopicSessions.set("123", {
+        threadId: "123",
         slug: "test-chatid",
         conversation: [{ role: "user", text: "/task test" }],
         lastActivityAt: Date.now(),
@@ -392,12 +392,12 @@ describe("API Server", () => {
       const response = await fetch(`http://localhost:${address.port}/api/sessions`)
       const data = await response.json()
 
-      expect(data.data[0].chatId).toBe(-1001234567890)
+      expect(data.data[0].chatId).toBe("-1001234567890")
     })
 
     it("should include chatId in single session response", async () => {
-      mockTopicSessions.set(456, {
-        threadId: 456,
+      mockTopicSessions.set("456", {
+        threadId: "456",
         slug: "single-chatid",
         conversation: [{ role: "user", text: "/task hello" }],
         lastActivityAt: Date.now(),
@@ -421,7 +421,7 @@ describe("API Server", () => {
       const response = await fetch(`http://localhost:${address.port}/api/sessions/single-chatid`)
       const data = await response.json()
 
-      expect(data.data.chatId).toBe(-1009876543210)
+      expect(data.data.chatId).toBe("-1009876543210")
     })
   })
 

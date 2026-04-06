@@ -4,7 +4,7 @@ export interface LoggerContext {
   /** Session slug for correlation */
   slug?: string
   /** Thread/topic ID */
-  threadId?: number
+  threadId?: string
   /** Session ID */
   sessionId?: string
   /** Component name (e.g., 'dispatcher', 'observer', 'telegram') */
@@ -69,7 +69,7 @@ export const loggers = {
  */
 export function createSessionLogger(
   slug: string,
-  threadId?: number,
+  threadId?: string,
   sessionId?: string
 ): pino.Logger {
   return rootLogger.child({

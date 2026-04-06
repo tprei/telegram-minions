@@ -42,8 +42,8 @@ export interface ApiSession {
   repo?: string
   branch?: string
   prUrl?: string
-  threadId?: number
-  chatId?: number
+  threadId?: string
+  chatId?: string
   createdAt: string
   updatedAt: string
   parentId?: string
@@ -98,13 +98,13 @@ export type MinionCommand =
   | { action: "plan_action"; sessionId: string; planAction: PlanActionType }
 
 export interface DispatcherApi {
-  getSessions(): Map<number, { handle: unknown; meta: { sessionId: string; threadId: number }; task: string }>
-  getTopicSessions(): Map<number, TopicSession>
+  getSessions(): Map<string, { handle: unknown; meta: { sessionId: string; threadId: string }; task: string }>
+  getTopicSessions(): Map<string, TopicSession>
   getDags(): Map<string, DagGraph>
-  getSessionState(threadId: number): SessionState | undefined
-  sendReply(threadId: number, message: string): Promise<void>
-  stopSession(threadId: number): void
-  closeSession(threadId: number): Promise<void>
+  getSessionState(threadId: string): SessionState | undefined
+  sendReply(threadId: string, message: string): Promise<void>
+  stopSession(threadId: string): void
+  closeSession(threadId: string): Promise<void>
 }
 
 export class StateBroadcaster extends EventEmitter {
@@ -229,7 +229,7 @@ export function topicSessionToApi(
     branch: session.branch,
     prUrl: session.prUrl,
     threadId: session.threadId,
-    chatId: parseInt(chatId, 10),
+    chatId,
     createdAt: new Date().toISOString(),
     updatedAt: new Date(session.lastActivityAt).toISOString(),
     parentId: session.parentThreadId?.toString(),
@@ -244,8 +244,8 @@ export function topicSessionToApi(
 
 export function dagToApi(
   graph: DagGraph,
-  topicSessions: Map<number, TopicSession>,
-  sessions: Map<number, { meta: { sessionId: string; threadId: number } }>,
+  topicSessions: Map<string, TopicSession>,
+  sessions: Map<string, { meta: { sessionId: string; threadId: string } }>,
   chatId: string,
 ): ApiDagGraph {
   const nodes: Record<string, ApiDagNode> = {}
@@ -450,7 +450,7 @@ async function handleApiRoute(
 
       // Find the thread ID from the session ID (slug)
       const topicSessions = dispatcher.getTopicSessions()
-      let threadId: number | undefined
+      let threadId: string | undefined
 
       for (const [tid, session] of topicSessions) {
         if (session.slug === command.sessionId || tid.toString() === command.sessionId) {

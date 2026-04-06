@@ -14,7 +14,7 @@ import { truncateConversation } from "../conversation-limits.js"
  * across dispatcher, orchestrators, and pipeline code.
  */
 export class TopicSessionAggregate {
-  threadId: number
+  threadId: string
   repo: string
   repoUrl?: string
   cwd: string
@@ -26,8 +26,8 @@ export class TopicSessionAggregate {
   mode: SessionMode
   lastActivityAt: number
   profileId?: string
-  parentThreadId?: number
-  childThreadIds?: number[]
+  parentThreadId?: string
+  childThreadIds?: string[]
   splitLabel?: string
   interruptedAt?: number
   branch?: string
@@ -122,7 +122,7 @@ export class TopicSessionAggregate {
   }
 
   /** Add a child thread ID (from split/stack/DAG). Initializes the array if needed. */
-  addChild(childThreadId: number): void {
+  addChild(childThreadId: string): void {
     if (!this.childThreadIds) {
       this.childThreadIds = []
     }
@@ -131,7 +131,7 @@ export class TopicSessionAggregate {
   }
 
   /** Remove a child thread ID. Returns true if the child was found and removed. */
-  removeChild(childThreadId: number): boolean {
+  removeChild(childThreadId: string): boolean {
     if (!this.childThreadIds) return false
     const idx = this.childThreadIds.indexOf(childThreadId)
     if (idx === -1) return false

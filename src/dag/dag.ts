@@ -12,7 +12,7 @@ export interface DagNode {
   description: string
   dependsOn: string[]
   status: DagNodeStatus
-  threadId?: number
+  threadId?: string
   branch?: string
   prUrl?: string
   error?: string
@@ -23,7 +23,7 @@ export interface DagNode {
 export interface DagGraph {
   id: string
   nodes: DagNode[]
-  parentThreadId: number
+  parentThreadId: string
   repoUrl?: string
   repo: string
   createdAt: number
@@ -88,7 +88,7 @@ function findCycle(nodes: DagNode[] | DagInput[]): string[] {
 export function buildDag(
   dagId: string,
   items: DagInput[],
-  parentThreadId: number,
+  parentThreadId: string,
   repo: string,
   repoUrl?: string,
 ): DagGraph {
@@ -147,7 +147,7 @@ export function buildDag(
 export function buildLinearDag(
   dagId: string,
   items: { title: string; description: string }[],
-  parentThreadId: number,
+  parentThreadId: string,
   repo: string,
   repoUrl?: string,
 ): DagGraph {

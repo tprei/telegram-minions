@@ -33,7 +33,7 @@ const mockRunQualityGates = vi.mocked(runQualityGates)
 
 function makeSession(overrides: Partial<TopicSession> = {}): TopicSession {
   return {
-    threadId: 100,
+    threadId: "100",
     repo: "org/repo",
     cwd: "/tmp/workspace",
     slug: "test-slug",
@@ -114,25 +114,25 @@ describe("CIBabysitter", () => {
   describe("queueDeferredBabysit", () => {
     it("queues entries by parent thread ID", () => {
       const session = makeSession()
-      babysitter.queueDeferredBabysit(1, { childSession: session, prUrl: "https://github.com/org/repo/pull/1" })
-      babysitter.queueDeferredBabysit(1, { childSession: session, prUrl: "https://github.com/org/repo/pull/2" })
+      babysitter.queueDeferredBabysit("1", { childSession: session, prUrl: "https://github.com/org/repo/pull/1" })
+      babysitter.queueDeferredBabysit("1", { childSession: session, prUrl: "https://github.com/org/repo/pull/2" })
 
-      expect(babysitter.pendingBabysitPRs.get(1)).toHaveLength(2)
+      expect(babysitter.pendingBabysitPRs.get("1")).toHaveLength(2)
     })
 
     it("keeps separate queues per parent", () => {
       const session = makeSession()
-      babysitter.queueDeferredBabysit(1, { childSession: session, prUrl: "https://github.com/org/repo/pull/1" })
-      babysitter.queueDeferredBabysit(2, { childSession: session, prUrl: "https://github.com/org/repo/pull/2" })
+      babysitter.queueDeferredBabysit("1", { childSession: session, prUrl: "https://github.com/org/repo/pull/1" })
+      babysitter.queueDeferredBabysit("2", { childSession: session, prUrl: "https://github.com/org/repo/pull/2" })
 
-      expect(babysitter.pendingBabysitPRs.get(1)).toHaveLength(1)
-      expect(babysitter.pendingBabysitPRs.get(2)).toHaveLength(1)
+      expect(babysitter.pendingBabysitPRs.get("1")).toHaveLength(1)
+      expect(babysitter.pendingBabysitPRs.get("2")).toHaveLength(1)
     })
   })
 
   describe("runDeferredBabysit", () => {
     it("does nothing when no entries exist", async () => {
-      await babysitter.runDeferredBabysit(999)
+      await babysitter.runDeferredBabysit("999")
       expect(ctx.telegram.sendMessage).not.toHaveBeenCalled()
     })
 
@@ -141,16 +141,16 @@ describe("CIBabysitter", () => {
       mockCheckPRMergeability.mockResolvedValue("MERGEABLE")
       mockWaitForCI.mockResolvedValue({ passed: true, checks: [], timedOut: false })
 
-      babysitter.queueDeferredBabysit(1, { childSession: session, prUrl: "https://github.com/org/repo/pull/1" })
-      await babysitter.runDeferredBabysit(1)
+      babysitter.queueDeferredBabysit("1", { childSession: session, prUrl: "https://github.com/org/repo/pull/1" })
+      await babysitter.runDeferredBabysit("1")
 
-      expect(babysitter.pendingBabysitPRs.has(1)).toBe(false)
+      expect(babysitter.pendingBabysitPRs.has("1")).toBe(false)
       expect(ctx.telegram.sendMessage).toHaveBeenCalled()
     })
 
     it("continues processing even if one entry fails", async () => {
-      const session1 = makeSession({ threadId: 100 })
-      const session2 = makeSession({ threadId: 200 })
+      const session1 = makeSession({ threadId: "100" })
+      const session2 = makeSession({ threadId: "200" })
       mockCheckPRMergeability.mockResolvedValue("MERGEABLE")
 
       // First call throws, second succeeds
@@ -158,18 +158,18 @@ describe("CIBabysitter", () => {
         .mockRejectedValueOnce(new Error("network error"))
         .mockResolvedValueOnce({ passed: true, checks: [], timedOut: false })
 
-      babysitter.queueDeferredBabysit(1, { childSession: session1, prUrl: "https://github.com/org/repo/pull/1" })
-      babysitter.queueDeferredBabysit(1, { childSession: session2, prUrl: "https://github.com/org/repo/pull/2" })
+      babysitter.queueDeferredBabysit("1", { childSession: session1, prUrl: "https://github.com/org/repo/pull/1" })
+      babysitter.queueDeferredBabysit("1", { childSession: session2, prUrl: "https://github.com/org/repo/pull/2" })
 
-      await babysitter.runDeferredBabysit(1)
+      await babysitter.runDeferredBabysit("1")
 
       // Queue should be cleared regardless
-      expect(babysitter.pendingBabysitPRs.has(1)).toBe(false)
+      expect(babysitter.pendingBabysitPRs.has("1")).toBe(false)
     })
 
     it("runs entries in parallel, not sequentially", async () => {
-      const session1 = makeSession({ threadId: 100 })
-      const session2 = makeSession({ threadId: 200 })
+      const session1 = makeSession({ threadId: "100" })
+      const session2 = makeSession({ threadId: "200" })
       mockCheckPRMergeability.mockResolvedValue("MERGEABLE")
 
       const callOrder: number[] = []
@@ -190,10 +190,10 @@ describe("CIBabysitter", () => {
           return { passed: true, checks: [], timedOut: false }
         })
 
-      babysitter.queueDeferredBabysit(1, { childSession: session1, prUrl: "https://github.com/org/repo/pull/1" })
-      babysitter.queueDeferredBabysit(1, { childSession: session2, prUrl: "https://github.com/org/repo/pull/2" })
+      babysitter.queueDeferredBabysit("1", { childSession: session1, prUrl: "https://github.com/org/repo/pull/1" })
+      babysitter.queueDeferredBabysit("1", { childSession: session2, prUrl: "https://github.com/org/repo/pull/2" })
 
-      const promise = babysitter.runDeferredBabysit(1)
+      const promise = babysitter.runDeferredBabysit("1")
 
       // Wait a tick for both to start
       await new Promise((r) => setTimeout(r, 10))

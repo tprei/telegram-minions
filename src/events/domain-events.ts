@@ -11,7 +11,7 @@ export interface DomainEvent<T extends string = string> {
 
 export interface SessionSpawnedEvent extends DomainEvent<"session.spawned"> {
   readonly sessionId: string
-  readonly threadId: number
+  readonly threadId: string
   readonly slug: string
   readonly repo: string
   readonly mode: SessionMode
@@ -31,12 +31,12 @@ export interface SessionErroredEvent extends DomainEvent<"session.errored"> {
 
 export interface SessionInterruptedEvent extends DomainEvent<"session.interrupted"> {
   readonly sessionId: string
-  readonly threadId: number
+  readonly threadId: string
 }
 
 export interface SessionTimeoutEvent extends DomainEvent<"session.timeout"> {
   readonly sessionId: string
-  readonly threadId: number
+  readonly threadId: string
   readonly kind: "duration" | "inactivity"
 }
 
@@ -46,7 +46,7 @@ export interface SessionTimeoutEvent extends DomainEvent<"session.timeout"> {
 
 export interface DagCreatedEvent extends DomainEvent<"dag.created"> {
   readonly dagId: string
-  readonly parentThreadId: number
+  readonly parentThreadId: string
   readonly nodeCount: number
 }
 
@@ -59,7 +59,7 @@ export interface DagNodeReadyEvent extends DomainEvent<"dag.node_ready"> {
 export interface DagNodeStartedEvent extends DomainEvent<"dag.node_started"> {
   readonly dagId: string
   readonly nodeId: string
-  readonly threadId: number
+  readonly threadId: string
   readonly sessionId: string
 }
 
@@ -79,7 +79,7 @@ export interface DagNodeFailedEvent extends DomainEvent<"dag.node_failed"> {
 
 export interface DagCompletedEvent extends DomainEvent<"dag.completed"> {
   readonly dagId: string
-  readonly parentThreadId: number
+  readonly parentThreadId: string
 }
 
 // ---------------------------------------------------------------------------
@@ -88,30 +88,30 @@ export interface DagCompletedEvent extends DomainEvent<"dag.completed"> {
 
 export interface CiWatchingEvent extends DomainEvent<"ci.watching"> {
   readonly prUrl: string
-  readonly threadId: number
+  readonly threadId: string
 }
 
 export interface CiPassedEvent extends DomainEvent<"ci.passed"> {
   readonly prUrl: string
-  readonly threadId: number
+  readonly threadId: string
 }
 
 export interface CiFailedEvent extends DomainEvent<"ci.failed"> {
   readonly prUrl: string
-  readonly threadId: number
+  readonly threadId: string
   readonly attempt: number
   readonly maxAttempts: number
 }
 
 export interface CiFixStartedEvent extends DomainEvent<"ci.fix_started"> {
   readonly prUrl: string
-  readonly threadId: number
+  readonly threadId: string
   readonly attempt: number
 }
 
 export interface CiGaveUpEvent extends DomainEvent<"ci.gave_up"> {
   readonly prUrl: string
-  readonly threadId: number
+  readonly threadId: string
   readonly reason: string
 }
 
@@ -120,18 +120,18 @@ export interface CiGaveUpEvent extends DomainEvent<"ci.gave_up"> {
 // ---------------------------------------------------------------------------
 
 export interface SplitStartedEvent extends DomainEvent<"split.started"> {
-  readonly parentThreadId: number
+  readonly parentThreadId: string
   readonly itemCount: number
 }
 
 export interface SplitChildSpawnedEvent extends DomainEvent<"split.child_spawned"> {
-  readonly parentThreadId: number
-  readonly childThreadId: number
+  readonly parentThreadId: string
+  readonly childThreadId: string
   readonly label: string
 }
 
 export interface SplitAllDoneEvent extends DomainEvent<"split.all_done"> {
-  readonly parentThreadId: number
+  readonly parentThreadId: string
   readonly childCount: number
 }
 
@@ -141,12 +141,12 @@ export interface SplitAllDoneEvent extends DomainEvent<"split.all_done"> {
 
 export interface QuotaExhaustedEvent extends DomainEvent<"quota.exhausted"> {
   readonly sessionId: string
-  readonly threadId: number
+  readonly threadId: string
 }
 
 export interface QuotaSleepStartedEvent extends DomainEvent<"quota.sleep_started"> {
   readonly sessionId: string
-  readonly threadId: number
+  readonly threadId: string
   readonly resumeAt: number
 }
 
@@ -155,17 +155,17 @@ export interface QuotaSleepStartedEvent extends DomainEvent<"quota.sleep_started
 // ---------------------------------------------------------------------------
 
 export interface ShipPhaseStartedEvent extends DomainEvent<"ship.phase_started"> {
-  readonly threadId: number
+  readonly threadId: string
   readonly phase: string
 }
 
 export interface ShipPhaseCompletedEvent extends DomainEvent<"ship.phase_completed"> {
-  readonly threadId: number
+  readonly threadId: string
   readonly phase: string
 }
 
 export interface ShipPipelineCompletedEvent extends DomainEvent<"ship.pipeline_completed"> {
-  readonly threadId: number
+  readonly threadId: string
 }
 
 // ---------------------------------------------------------------------------
