@@ -30,6 +30,7 @@ export const JUDGE_CMD = "/judge"
 export const DONE_CMD = "/done"
 export const DOCTOR_CMD = "/doctor"
 export const SHIP_PREFIX = "/ship"
+export const LOOPS_CMD = "/loops"
 
 /**
  * Parse task arguments to extract repo URL and task description.

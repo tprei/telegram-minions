@@ -601,6 +601,7 @@ export function formatHelp(): string {
     `<code>/stats</code> — show aggregate usage statistics`,
     `<code>/usage</code> — show Claude ACP quota and recent activity`,
     `<code>/config</code> — manage provider profiles`,
+    `<code>/loops</code> — show loop status and manage loops`,
     `<code>/clean</code> — remove idle sessions, orphaned workspaces, and cached repos`,
     `<code>/help</code> — show this message`,
     ``,
@@ -1307,4 +1308,57 @@ function renderDagTree(lines: string[], nodes: PinnedDagNode[], chatId?: number 
       lines.push(`${indent}│`)
     }
   }
+}
+
+// ── Loop status formatting ────────────────────────────────────────────
+
+export interface LoopStatusEntry {
+  id: string
+  name: string
+  enabled: boolean
+  running: boolean
+  totalRuns: number
+  consecutiveFailures: number
+  lastRunAt?: number
+  nextRunAt?: number
+  lastPrUrl?: string
+  intervalMs: number
+}
+
+export function formatLoopStatus(entries: LoopStatusEntry[]): string {
+  if (entries.length === 0) {
+    return "🔄 <b>Loops</b>\n\nNo loops configured."
+  }
+
+  const lines: string[] = [`🔄 <b>Loops</b>  ·  ${entries.length} defined`, ""]
+
+  for (const entry of entries) {
+    const icon = entry.running ? "🟢" : entry.enabled ? "⏳" : "⏸"
+    const status = entry.running ? "running" : entry.enabled ? "idle" : "disabled"
+    const intervalH = (entry.intervalMs / 3_600_000).toFixed(1).replace(/\.0$/, "")
+    const runs = `${entry.totalRuns} run${entry.totalRuns === 1 ? "" : "s"}`
+    const failures = entry.consecutiveFailures > 0 ? ` · ❌ ${entry.consecutiveFailures} consecutive` : ""
+
+    lines.push(`${icon} <b>${esc(entry.name)}</b> (<code>${esc(entry.id)}</code>)`)
+    lines.push(`   ${status} · every ${intervalH}h · ${runs}${failures}`)
+
+    if (entry.lastRunAt) {
+      const ago = formatElapsed(Date.now() - entry.lastRunAt)
+      lines.push(`   last run: ${ago} ago`)
+    }
+    if (entry.nextRunAt && entry.enabled) {
+      const inMs = entry.nextRunAt - Date.now()
+      if (inMs > 0) {
+        lines.push(`   next fire: in ${formatElapsed(inMs)}`)
+      } else {
+        lines.push(`   next fire: imminent`)
+      }
+    }
+    if (entry.lastPrUrl) {
+      lines.push(`   last PR: ${esc(entry.lastPrUrl)}`)
+    }
+    lines.push("")
+  }
+
+  return lines.join("\n")
 }

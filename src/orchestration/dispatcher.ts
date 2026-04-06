@@ -25,6 +25,8 @@ import {
   formatQuotaSleep,
   formatQuotaResume,
   formatQuotaExhausted,
+  formatLoopStatus,
+  type LoopStatusEntry,
 } from "../telegram/format.js"
 import { StatsTracker } from "../stats.js"
 import { truncateConversation } from "../conversation-limits.js"
@@ -508,6 +510,118 @@ export class Dispatcher {
     return this.loopScheduler
   }
 
+  async handleLoopsCommand(args: string): Promise<void> {
+    const scheduler = this.loopScheduler
+    if (!scheduler) {
+      await this.telegram.sendMessage("🔄 <b>Loops</b>\n\nNo loops configured.")
+      return
+    }
+
+    const parts = args.split(/\s+/).filter(Boolean)
+    const subcommand = parts[0]
+
+    if (!subcommand) {
+      const entries = this.buildLoopStatusEntries(scheduler)
+      await this.telegram.sendMessage(formatLoopStatus(entries))
+      return
+    }
+
+    if (subcommand === "enable" || subcommand === "disable") {
+      const loopId = parts[1]
+      if (!loopId) {
+        await this.telegram.sendMessage(`Usage: <code>/loops ${subcommand} &lt;id&gt;</code>`)
+        return
+      }
+      const ok = subcommand === "enable"
+        ? scheduler.enableLoop(loopId)
+        : scheduler.disableLoop(loopId)
+      if (ok) {
+        await this.telegram.sendMessage(`✅ Loop <code>${escapeHtml(loopId)}</code> ${subcommand}d.`)
+      } else {
+        await this.telegram.sendMessage(`❌ Loop <code>${escapeHtml(loopId)}</code> not found.`)
+      }
+      return
+    }
+
+    if (subcommand === "fire") {
+      const loopId = parts[1]
+      if (!loopId) {
+        await this.telegram.sendMessage(`Usage: <code>/loops fire &lt;id&gt;</code>`)
+        return
+      }
+      const defs = scheduler.getDefinitions()
+      const states = scheduler.getStates()
+      const def = defs.get(loopId)
+      const state = states.get(loopId)
+      if (!def || !state) {
+        await this.telegram.sendMessage(`❌ Loop <code>${escapeHtml(loopId)}</code> not found.`)
+        return
+      }
+      await this.telegram.sendMessage(`🔄 Firing loop <code>${escapeHtml(loopId)}</code>…`)
+      const threadId = await this.startLoopSession(loopId, def, state)
+      if (threadId != null) {
+        scheduler.getActiveLoopThreads().set(loopId, threadId)
+      } else {
+        await this.telegram.sendMessage(`❌ Failed to start loop <code>${escapeHtml(loopId)}</code>.`)
+      }
+      return
+    }
+
+    if (subcommand === "interval") {
+      const loopId = parts[1]
+      const hours = parts[2] ? parseFloat(parts[2]) : NaN
+      if (!loopId || isNaN(hours) || hours <= 0) {
+        await this.telegram.sendMessage(`Usage: <code>/loops interval &lt;id&gt; &lt;hours&gt;</code>`)
+        return
+      }
+      const defs = scheduler.getDefinitions()
+      const def = defs.get(loopId)
+      if (!def) {
+        await this.telegram.sendMessage(`❌ Loop <code>${escapeHtml(loopId)}</code> not found.`)
+        return
+      }
+      def.intervalMs = hours * 3_600_000
+      await this.telegram.sendMessage(`✅ Loop <code>${escapeHtml(loopId)}</code> interval set to ${hours}h.`)
+      return
+    }
+
+    await this.telegram.sendMessage(
+      [
+        `<b>Loop commands</b>`,
+        ``,
+        `<code>/loops</code> — show all loops and their status`,
+        `<code>/loops enable &lt;id&gt;</code> — enable a loop`,
+        `<code>/loops disable &lt;id&gt;</code> — disable a loop`,
+        `<code>/loops fire &lt;id&gt;</code> — trigger a loop immediately`,
+        `<code>/loops interval &lt;id&gt; &lt;hours&gt;</code> — change loop interval`,
+      ].join("\n"),
+    )
+  }
+
+  private buildLoopStatusEntries(scheduler: LoopScheduler): LoopStatusEntry[] {
+    const defs = scheduler.getDefinitions()
+    const states = scheduler.getStates()
+    const entries: LoopStatusEntry[] = []
+
+    for (const [id, def] of defs) {
+      const state = states.get(id)
+      entries.push({
+        id,
+        name: def.name,
+        enabled: state?.enabled ?? def.enabled,
+        running: scheduler.isLoopActive(id),
+        totalRuns: state?.totalRuns ?? 0,
+        consecutiveFailures: state?.consecutiveFailures ?? 0,
+        lastRunAt: state?.lastRunAt,
+        nextRunAt: state?.nextRunAt,
+        lastPrUrl: state?.lastPrUrl,
+        intervalMs: def.intervalMs,
+      })
+    }
+
+    return entries
+  }
+
   private async startLoopSession(loopId: string, def: LoopDefinition, state: LoopState): Promise<number | null> {
     const sessionId = crypto.randomUUID()
     const slug = generateSlug(sessionId)
@@ -716,6 +830,7 @@ export class Dispatcher {
       case "clean": return this.commandHandler.handleCleanCommand()
       case "help": return this.commandHandler.handleHelpCommand()
       case "config": return this.commandHandler.handleConfigCommand(routed.args)
+      case "loops": return this.handleLoopsCommand(routed.args)
       case "task": return this.commandHandler.handleTaskCommand(routed.args, routed.threadId, routed.photos)
       case "plan": return this.handlePlanCommand(routed.args, routed.threadId, routed.photos)
       case "think": return this.handleThinkCommand(routed.args, routed.threadId, routed.photos)

@@ -34,6 +34,35 @@ describe("routeCommand", () => {
       })
     })
 
+    it("routes /loops with no args", () => {
+      expect(routeCommand("/loops", undefined, undefined, false)).toEqual({ type: "loops", args: "" })
+    })
+
+    it("routes /loops with subcommand args", () => {
+      expect(routeCommand("/loops enable lint-sweep", undefined, undefined, false)).toEqual({
+        type: "loops",
+        args: "enable lint-sweep",
+      })
+    })
+
+    it("routes /loops fire with id", () => {
+      expect(routeCommand("/loops fire test-fixer", undefined, undefined, false)).toEqual({
+        type: "loops",
+        args: "fire test-fixer",
+      })
+    })
+
+    it("routes /loops interval with id and hours", () => {
+      expect(routeCommand("/loops interval lint-sweep 4", undefined, undefined, false)).toEqual({
+        type: "loops",
+        args: "interval lint-sweep 4",
+      })
+    })
+
+    it("ignores /loops when in a thread", () => {
+      expect(routeCommand("/loops", 123, undefined, false)).toBeNull()
+    })
+
     it("ignores global commands when in a thread", () => {
       expect(routeCommand("/status", 123, undefined, false)).toBeNull()
     })

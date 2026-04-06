@@ -5,6 +5,7 @@ import {
   EXECUTE_CMD, STATUS_CMD, STATS_CMD, REPLY_PREFIX, REPLY_SHORT,
   CLOSE_CMD, STOP_CMD, HELP_CMD, CLEAN_CMD, USAGE_CMD, CONFIG_CMD,
   SPLIT_CMD, STACK_CMD, DAG_CMD, JUDGE_CMD, LAND_CMD, RETRY_CMD, FORCE_CMD, DONE_CMD, DOCTOR_CMD, SHIP_PREFIX,
+  LOOPS_CMD,
 } from "./command-parser.js"
 
 export type RoutedCommand =
@@ -31,6 +32,7 @@ export type RoutedCommand =
   | { type: "retry"; threadId: number; nodeId?: string }
   | { type: "force"; threadId: number; nodeId?: string }
   | { type: "doctor"; threadId: number; directive?: string }
+  | { type: "loops"; args: string }
   | { type: "reply"; threadId: number; text: string; photos?: TelegramPhotoSize[] }
 
 /**
@@ -62,6 +64,9 @@ export function routeCommand(
     if (text === HELP_CMD) return { type: "help" }
     if (text === CONFIG_CMD || text?.startsWith(CONFIG_CMD + " ")) {
       return { type: "config", args: text!.slice(CONFIG_CMD.length).trim() }
+    }
+    if (text === LOOPS_CMD || text?.startsWith(LOOPS_CMD + " ")) {
+      return { type: "loops", args: text!.slice(LOOPS_CMD.length).trim() }
     }
   }
 
