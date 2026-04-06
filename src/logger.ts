@@ -61,6 +61,7 @@ export const loggers = {
   conversationSummarizer: createLogger({ component: "conversation-summarizer" }),
   judgeOrchestrator: createLogger({ component: "judge-orchestrator" }),
   replyQueue: createLogger({ component: "reply-queue" }),
+  loopStore: createLogger({ component: "loop-store" }),
 } as const
 
 /**
