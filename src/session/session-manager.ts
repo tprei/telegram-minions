@@ -328,7 +328,7 @@ export async function removeWorkspace(
  * Resolve the default branch name from a bare git repo.
  * Tries HEAD symbolic-ref, then main, then master.
  */
-export function resolveDefaultBranch(bareDir: string, gitOpts: object, repoUrl?: string): string {
+export function resolveDefaultBranch(bareDir: string, gitOpts: GitOpts, repoUrl?: string): string {
   try {
     const ref = execSync("git symbolic-ref HEAD", { ...gitOpts, cwd: bareDir })
       .toString()
