@@ -5,30 +5,32 @@ vi.mock("node:child_process", async (importOriginal) => {
   return { ...actual, execFile: vi.fn(actual.execFile) }
 })
 
-import { execFile } from "node:child_process"
+import { execFile, type ChildProcess } from "node:child_process"
 import { cleanupMergedBranch } from "../src/dag/dag.js"
 
 const mockExecFile = vi.mocked(execFile)
+
+type ExecFileCallback = (err: Error | null, stdout: string, stderr: string) => void
 
 beforeEach(() => {
   mockExecFile.mockReset()
 })
 
 function mockExecFileSuccess() {
-  mockExecFile.mockImplementation((_cmd: any, _args: any, _opts: any, cb?: any) => {
-    const callback = typeof _opts === "function" ? _opts : cb
-    if (callback) callback(null, "", "")
-    return {} as any
+  mockExecFile.mockImplementation((...allArgs: unknown[]) => {
+    const cb = allArgs[allArgs.length - 1] as ExecFileCallback
+    cb(null, "", "")
+    return null as unknown as ChildProcess
   })
 }
 
-function mockExecFileSequence(implementations: Array<(cb: (err: Error | null, stdout: string, stderr: string) => void) => void>) {
+function mockExecFileSequence(implementations: Array<(cb: ExecFileCallback) => void>) {
   let callIndex = 0
-  mockExecFile.mockImplementation((_cmd: any, _args: any, _opts: any, cb?: any) => {
-    const callback = typeof _opts === "function" ? _opts : cb
+  mockExecFile.mockImplementation((...allArgs: unknown[]) => {
+    const cb = allArgs[allArgs.length - 1] as ExecFileCallback
     const impl = implementations[callIndex++]
-    if (impl && callback) impl(callback)
-    return {} as any
+    if (impl) impl(cb)
+    return null as unknown as ChildProcess
   })
 }
 
@@ -92,10 +94,10 @@ describe("cleanupMergedBranch", () => {
   })
 
   it("swallows both errors without throwing", async () => {
-    mockExecFile.mockImplementation((_cmd: any, _args: any, _opts: any, cb?: any) => {
-      const callback = typeof _opts === "function" ? _opts : cb
-      if (callback) callback(new Error("everything fails"), "", "")
-      return {} as any
+    mockExecFile.mockImplementation((...allArgs: unknown[]) => {
+      const cb = allArgs[allArgs.length - 1] as ExecFileCallback
+      cb(new Error("everything fails"), "", "")
+      return null as unknown as ChildProcess
     })
 
     const result = await cleanupMergedBranch("minion/test-branch", "/workspace/wt", "/workspace/repo")

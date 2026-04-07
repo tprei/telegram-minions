@@ -7,27 +7,27 @@ vi.mock("node:child_process", async (importOriginal) => {
   return { ...actual, execFile: vi.fn() }
 })
 
-import { execFile } from "node:child_process"
+import { execFile, type ChildProcess } from "node:child_process"
 const mockExecFile = vi.mocked(execFile)
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+type ExecFileCallback = (err: Error | null, stdout: string, stderr: string) => void
+
 function mockSuccess(output: string): void {
-  mockExecFile.mockImplementation((...allArgs: any[]) => {
-    const cb = allArgs[allArgs.length - 1] as (err: Error | null, stdout: string, stderr: string) => void
+  mockExecFile.mockImplementation((...allArgs: unknown[]) => {
+    const cb = allArgs[allArgs.length - 1] as ExecFileCallback
     cb(null, output, "")
-    return undefined as any
+    return null as unknown as ChildProcess
   })
 }
 
 function mockError(stderr = "gh failed"): void {
   const err = Object.assign(new Error("Command failed"), { stderr })
-  mockExecFile.mockImplementation((...allArgs: any[]) => {
-    const cb = allArgs[allArgs.length - 1] as (err: Error | null, stdout: string, stderr: string) => void
+  mockExecFile.mockImplementation((...allArgs: unknown[]) => {
+    const cb = allArgs[allArgs.length - 1] as ExecFileCallback
     cb(err, "", stderr)
-    return undefined as any
+    return null as unknown as ChildProcess
   })
 }
-/* eslint-enable @typescript-eslint/no-explicit-any */
 
 describe("extractPRUrl", () => {
   it("extracts a PR URL from conversation text", () => {
@@ -373,15 +373,14 @@ describe("waitForCI", () => {
 
   it("continues polling when checks are pending", async () => {
     let callCount = 0
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    mockExecFile.mockImplementation((...allArgs: any[]) => {
+    mockExecFile.mockImplementation((...allArgs: unknown[]) => {
       callCount++
-      const cb = allArgs[allArgs.length - 1] as (err: Error | null, stdout: string, stderr: string) => void
+      const cb = allArgs[allArgs.length - 1] as ExecFileCallback
       const output = callCount < 3
         ? JSON.stringify([{ name: "test", state: "pending", bucket: "pending" }])
         : JSON.stringify([{ name: "test", state: "success", bucket: "pass" }])
       cb(null, output, "")
-      return undefined as any // eslint-disable-line @typescript-eslint/no-explicit-any
+      return null as unknown as ChildProcess
     })
 
     const result = await waitForCI("https://github.com/org/repo/pull/1", "/tmp", testConfig)
@@ -393,17 +392,16 @@ describe("waitForCI", () => {
 
   it("continues polling on transient errors (null returns)", async () => {
     let callCount = 0
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    mockExecFile.mockImplementation((...allArgs: any[]) => {
+    mockExecFile.mockImplementation((...allArgs: unknown[]) => {
       callCount++
-      const cb = allArgs[allArgs.length - 1] as (err: Error | null, stdout: string, stderr: string) => void
+      const cb = allArgs[allArgs.length - 1] as ExecFileCallback
       if (callCount < 3) {
         const err = Object.assign(new Error("Transient network error"), { stderr: "network timeout" })
         cb(err, "", "network timeout")
       } else {
         cb(null, JSON.stringify([{ name: "test", state: "success", bucket: "pass" }]), "")
       }
-      return undefined as any // eslint-disable-line @typescript-eslint/no-explicit-any
+      return null as unknown as ChildProcess
     })
 
     const result = await waitForCI("https://github.com/org/repo/pull/1", "/tmp", testConfig)
@@ -433,15 +431,14 @@ describe("waitForCI", () => {
   })
 
   it("treats 'no checks reported' as passed after grace period", async () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    mockExecFile.mockImplementation((...allArgs: any[]) => {
-      const cb = allArgs[allArgs.length - 1] as (err: Error | null, stdout: string, stderr: string) => void
+    mockExecFile.mockImplementation((...allArgs: unknown[]) => {
+      const cb = allArgs[allArgs.length - 1] as ExecFileCallback
       const err = Object.assign(
         new Error("Command failed: gh pr checks ...\nno checks reported on the 'minion/near-fir' branch\n"),
         { code: 1, stderr: "no checks reported on the 'minion/near-fir' branch\n" },
       )
       cb(err, "", err.stderr)
-      return undefined as any // eslint-disable-line @typescript-eslint/no-explicit-any
+      return null as unknown as ChildProcess
     })
 
     const noChecksConfig: CiConfig = { ...testConfig, noChecksGraceMs: 30 }
@@ -455,17 +452,16 @@ describe("waitForCI", () => {
   it("uses exponential backoff between polls", async () => {
     const pollTimes: number[] = []
     let callCount = 0
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    mockExecFile.mockImplementation((...allArgs: any[]) => {
+    mockExecFile.mockImplementation((...allArgs: unknown[]) => {
       callCount++
       pollTimes.push(Date.now())
-      const cb = allArgs[allArgs.length - 1] as (err: Error | null, stdout: string, stderr: string) => void
+      const cb = allArgs[allArgs.length - 1] as ExecFileCallback
       if (callCount < 4) {
         cb(null, JSON.stringify([{ name: "test", state: "pending", bucket: "pending" }]), "")
       } else {
         cb(null, JSON.stringify([{ name: "test", state: "success", bucket: "pass" }]), "")
       }
-      return undefined as any // eslint-disable-line @typescript-eslint/no-explicit-any
+      return null as unknown as ChildProcess
     })
 
     const backoffConfig: CiConfig = { ...testConfig, pollIntervalMs: 50, pollTimeoutMs: 5000 }
@@ -482,14 +478,13 @@ describe("waitForCI", () => {
 
   it("aborts immediately on terminal error without retrying", async () => {
     let callCount = 0
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    mockExecFile.mockImplementation((...allArgs: any[]) => {
+    mockExecFile.mockImplementation((...allArgs: unknown[]) => {
       callCount++
-      const cb = allArgs[allArgs.length - 1] as (err: Error | null, stdout: string, stderr: string) => void
+      const cb = allArgs[allArgs.length - 1] as ExecFileCallback
       const stderr = "GraphQL: Could not resolve to a Repository with the name 'cfbarber/telegram-minions'."
       const err = Object.assign(new Error("Command failed"), { stderr })
       cb(err, "", stderr)
-      return undefined as any // eslint-disable-line @typescript-eslint/no-explicit-any
+      return null as unknown as ChildProcess
     })
 
     const result = await waitForCI("https://github.com/org/repo/pull/1", "/tmp", testConfig)
