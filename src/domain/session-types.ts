@@ -76,6 +76,7 @@ export interface TopicSession {
   autoAdvance?: AutoAdvance
   verificationState?: VerificationState
   loopId?: string
+  pipelineAdvancing?: boolean
 }
 
 export interface PendingDagItem {

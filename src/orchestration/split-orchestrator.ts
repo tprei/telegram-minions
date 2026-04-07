@@ -19,6 +19,14 @@ export class SplitOrchestrator {
   }
 
   async handleSplitCommand(topicSession: TopicSession, directive?: string): Promise<void> {
+    if (topicSession.pipelineAdvancing) {
+      await this.ctx.telegram.sendMessage(
+        `⏳ Pipeline is advancing to the next phase. Wait for it to finish, or use <code>/close</code> to cancel.`,
+        topicSession.threadId,
+      )
+      return
+    }
+
     if (topicSession.activeSessionId) {
       const activeSession = this.ctx.sessions.get(topicSession.threadId)
       if (activeSession) await activeSession.handle.kill()
@@ -121,6 +129,14 @@ export class SplitOrchestrator {
   }
 
   async handleStackCommand(topicSession: TopicSession, directive?: string): Promise<void> {
+    if (topicSession.pipelineAdvancing) {
+      await this.ctx.telegram.sendMessage(
+        `⏳ Pipeline is advancing to the next phase. Wait for it to finish, or use <code>/close</code> to cancel.`,
+        topicSession.threadId,
+      )
+      return
+    }
+
     if (topicSession.activeSessionId) {
       const activeSession = this.ctx.sessions.get(topicSession.threadId)
       if (activeSession) await activeSession.handle.kill()

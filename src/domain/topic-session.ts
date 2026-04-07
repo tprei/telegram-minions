@@ -43,6 +43,7 @@ export class TopicSessionAggregate {
   quotaSleepUntil?: number
   autoAdvance?: AutoAdvance
   verificationState?: VerificationState
+  pipelineAdvancing?: boolean
 
   constructor(data: TopicSession) {
     this.threadId = data.threadId
@@ -73,6 +74,7 @@ export class TopicSessionAggregate {
     this.quotaRetryCount = data.quotaRetryCount
     this.quotaSleepUntil = data.quotaSleepUntil
     this.autoAdvance = data.autoAdvance ? { ...data.autoAdvance } : undefined
+    this.pipelineAdvancing = data.pipelineAdvancing
     this.verificationState = data.verificationState
       ? { ...data.verificationState, rounds: [...data.verificationState.rounds] }
       : undefined

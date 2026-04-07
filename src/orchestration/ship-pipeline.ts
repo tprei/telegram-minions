@@ -118,8 +118,18 @@ export class ShipPipeline {
     const GRACE_PERIOD_MS = 2000
     await new Promise((resolve) => setTimeout(resolve, GRACE_PERIOD_MS))
 
+    if (!topicSession.autoAdvance) {
+      log.warn({ slug: topicSession.slug }, "autoAdvance cleared during DAG advance, aborting")
+      return
+    }
+
     const profile = topicSession.profileId ? this.ctx.profileStore.get(topicSession.profileId) : undefined
     const result = await extractDagItems(topicSession.conversation, undefined, profile)
+
+    if (!topicSession.autoAdvance) {
+      log.warn({ slug: topicSession.slug }, "autoAdvance cleared during DAG extraction, aborting")
+      return
+    }
 
     if (result.error === "system") {
       topicSession.autoAdvance!.phase = "plan"

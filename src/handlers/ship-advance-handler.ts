@@ -43,20 +43,25 @@ export class ShipAdvanceHandler implements CompletionHandler {
     ctx.handled = true
 
     if (state === "completed") {
+      topicSession.pipelineAdvancing = true
       try {
-        await this.observer.flushAndComplete(meta, state, durationMs)
-      } catch (err) {
-        loggers.ship.warn({ err, slug: topicSession.slug }, "flushAndComplete failed, continuing with ship advance")
-      }
-      writeSessionLog(topicSession, meta, state, durationMs)
-      try {
-        await this.shipPipeline.handleShipAdvance(topicSession)
-      } catch (err) {
-        loggers.ship.error({ err, slug: topicSession.slug }, "ship advance error")
-        this.telegram.sendMessage(
-          `❌ Ship pipeline error during ${topicSession.autoAdvance!.phase} phase: ${err instanceof Error ? err.message : String(err)}`,
-          topicSession.threadId,
-        ).catch(() => {})
+        try {
+          await this.observer.flushAndComplete(meta, state, durationMs)
+        } catch (err) {
+          loggers.ship.warn({ err, slug: topicSession.slug }, "flushAndComplete failed, continuing with ship advance")
+        }
+        writeSessionLog(topicSession, meta, state, durationMs)
+        try {
+          await this.shipPipeline.handleShipAdvance(topicSession)
+        } catch (err) {
+          loggers.ship.error({ err, slug: topicSession.slug }, "ship advance error")
+          this.telegram.sendMessage(
+            `❌ Ship pipeline error during ${topicSession.autoAdvance!.phase} phase: ${err instanceof Error ? err.message : String(err)}`,
+            topicSession.threadId,
+          ).catch(() => {})
+        }
+      } finally {
+        topicSession.pipelineAdvancing = false
       }
     } else {
       this.pinnedMessages.updateTopicTitle(topicSession, "⚠️").catch(() => {})
