@@ -190,7 +190,7 @@ describe("Dispatcher module wiring", () => {
     topicSessions.set(200, session)
 
     const sessions = (dispatcher as unknown as { sessions: Map<number, { handle: { kill: typeof mockKill } }> }).sessions
-    sessions.set(200, { handle: { kill: mockKill } } as any)
+    sessions.set(200, { handle: { kill: mockKill } })
 
     await dispatcher.handleStopCommand(200)
     expect(mockKill).toHaveBeenCalled()

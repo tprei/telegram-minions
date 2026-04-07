@@ -7,6 +7,7 @@ import {
 import type { TopicSession, TopicMessage } from "../src/domain/session-types.js"
 import type { ChildProcess } from "node:child_process"
 import type { DispatcherContext } from "../src/orchestration/dispatcher-context.js"
+import { makeMockActiveSession, makeMockSessionPort } from "./test-helpers.js"
 
 // Mock spawn to control advocate/judge CLI output
 vi.mock("node:child_process", async (importOriginal) => {
@@ -393,8 +394,10 @@ describe("JudgeOrchestrator.handleJudgeCommand", () => {
 
     const ctx = createMockContext()
     const mockKill = vi.fn().mockResolvedValue(undefined)
-    const activeSession = { handle: { kill: mockKill } }
-    ctx.sessions.set(123, activeSession as any)
+    const activeSession = makeMockActiveSession({
+      handle: makeMockSessionPort({ kill: mockKill }),
+    })
+    ctx.sessions.set(123, activeSession)
 
     const orchestrator = new JudgeOrchestrator(ctx)
     const session = createTopicSession()

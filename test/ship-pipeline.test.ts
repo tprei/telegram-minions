@@ -4,6 +4,7 @@ import type { DispatcherContext } from "../src/orchestration/dispatcher-context.
 import type { TopicSession } from "../src/domain/session-types.js"
 import type { AutoAdvance } from "../src/domain/workflow-types.js"
 import type { DagGraph, DagNode } from "../src/dag/dag.js"
+import { createMockContext } from "./test-helpers.js"
 
 vi.mock("../src/ci/verification.js", () => ({
   buildCompletenessReviewPrompt: vi.fn().mockReturnValue("verify task prompt"),
@@ -69,72 +70,7 @@ function makeSession(overrides: Partial<TopicSession> = {}): TopicSession {
 }
 
 function makeContext(overrides: Partial<DispatcherContext> = {}): DispatcherContext {
-  return {
-    config: {
-      goose: {},
-      claude: {},
-      mcp: {},
-      ci: { babysitEnabled: false, maxRetries: 2, pollIntervalMs: 100, pollTimeoutMs: 1000, dagCiPolicy: "skip" },
-      workspace: { maxDagConcurrency: 3, maxConcurrentSessions: 5, sessionTimeoutMs: 60000, sessionInactivityTimeoutMs: 30000 },
-      sessionEnvPassthrough: [],
-    } as any,
-    telegram: {
-      sendMessage: vi.fn().mockResolvedValue(undefined),
-    } as any,
-    observer: {
-      onEvent: vi.fn().mockResolvedValue(undefined),
-      onSessionStart: vi.fn().mockResolvedValue(undefined),
-      onSessionComplete: vi.fn().mockResolvedValue(undefined),
-    } as any,
-    stats: {} as any,
-    profileStore: {
-      get: vi.fn().mockReturnValue(undefined),
-    } as any,
-    broadcaster: undefined,
-    sessions: new Map(),
-    topicSessions: new Map(),
-    dags: new Map(),
-    abortControllers: new Map(),
-    refreshGitToken: vi.fn().mockResolvedValue(undefined),
-    spawnTopicAgent: vi.fn().mockResolvedValue(true),
-    spawnCIFixAgent: vi.fn().mockResolvedValue(undefined),
-    prepareWorkspace: vi.fn().mockResolvedValue("/tmp/child-workspace"),
-    removeWorkspace: vi.fn().mockResolvedValue(undefined),
-    cleanBuildArtifacts: vi.fn(),
-    prepareFanInBranch: vi.fn().mockResolvedValue(null),
-    mergeUpstreamBranches: vi.fn().mockReturnValue({ ok: true, conflictFiles: [] }),
-    downloadPhotos: vi.fn().mockResolvedValue([]),
-    pushToConversation: vi.fn(),
-    extractPRFromConversation: vi.fn().mockReturnValue(null),
-    persistTopicSessions: vi.fn().mockResolvedValue(undefined),
-    persistDags: vi.fn().mockResolvedValue(undefined),
-    updatePinnedSummary: vi.fn(),
-    updateTopicTitle: vi.fn().mockResolvedValue(undefined),
-    pinThreadMessage: vi.fn().mockResolvedValue(undefined),
-    updatePinnedSplitStatus: vi.fn().mockResolvedValue(undefined),
-    updatePinnedDagStatus: vi.fn().mockResolvedValue(undefined),
-    broadcastSession: vi.fn(),
-    broadcastSessionDeleted: vi.fn(),
-    broadcastDag: vi.fn(),
-    broadcastDagDeleted: vi.fn(),
-    closeChildSessions: vi.fn().mockResolvedValue(undefined),
-    closeSingleChild: vi.fn().mockResolvedValue(undefined),
-    startDag: vi.fn().mockResolvedValue(undefined),
-    shipAdvanceToVerification: vi.fn().mockResolvedValue(undefined),
-    handleLandCommand: vi.fn().mockResolvedValue(undefined),
-    handleShipAdvance: vi.fn().mockResolvedValue(undefined),
-    handleExecuteCommand: vi.fn().mockResolvedValue(undefined),
-    notifyParentOfChildComplete: vi.fn().mockResolvedValue(undefined),
-    postSessionDigest: vi.fn(),
-    runDeferredBabysit: vi.fn().mockResolvedValue(undefined),
-    babysitPR: vi.fn().mockResolvedValue(undefined),
-    babysitDagChildCI: vi.fn().mockResolvedValue(true),
-    updateDagPRDescriptions: vi.fn().mockResolvedValue(undefined),
-    scheduleDagNodes: vi.fn().mockResolvedValue(undefined),
-    spawnSplitChild: vi.fn().mockResolvedValue(null),
-    spawnDagChild: vi.fn().mockResolvedValue(null),
-    ...overrides,
-  }
+  return createMockContext(overrides)
 }
 
 describe("ShipPipeline", () => {

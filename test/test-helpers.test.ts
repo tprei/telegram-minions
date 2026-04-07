@@ -23,7 +23,7 @@ describe("makeMockTelegram", () => {
     expect(await tg.editMessage(1, "hi")).toBe(true)
     expect(await tg.getUpdates(0, 1)).toEqual([])
     const topic = await tg.createForumTopic("test")
-    expect(topic).toEqual({ threadId: 100, name: "test" })
+    expect(topic).toEqual({ message_thread_id: 100, name: "test", icon_color: 0 })
   })
 
   it("accepts overrides", async () => {
