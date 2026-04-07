@@ -78,7 +78,8 @@ export function makeMockStats(overrides: Partial<StatsTracker> = {}): StatsTrack
       totalDurationMs: 0,
       avgDurationMs: 0,
     })),
-    modeBreakdown: vi.fn(async () => new Map()),
+    recentSessions: vi.fn(async () => []),
+    breakdownByMode: vi.fn(async () => ({})),
     ...overrides,
   } as unknown as StatsTracker
 }
@@ -91,10 +92,12 @@ export function makeMockProfileStore(overrides: Partial<ProfileStore> = {}): Pro
     save: vi.fn(),
     list: vi.fn(() => [{ id: "claude-acp", name: "Claude Code (default)" }] as ProviderProfile[]),
     get: vi.fn(() => ({ id: "claude-acp", name: "Claude Code (default)" }) as ProviderProfile | undefined),
-    add: vi.fn(),
-    remove: vi.fn(),
-    getDefault: vi.fn(() => ({ id: "claude-acp", name: "Claude Code (default)" }) as ProviderProfile | undefined),
-    setDefault: vi.fn(),
+    add: vi.fn(() => true),
+    update: vi.fn(() => true),
+    remove: vi.fn(() => true),
+    getDefaultId: vi.fn(() => undefined as string | undefined),
+    setDefaultId: vi.fn(() => true),
+    clearDefault: vi.fn(),
     ...overrides,
   } as unknown as ProfileStore
 }
@@ -268,6 +271,32 @@ export function createMockContext(overrides: Partial<DispatcherContext> = {}): D
     scheduleDagNodes: vi.fn(async () => {}),
     spawnSplitChild: vi.fn(async () => null),
     spawnDagChild: vi.fn(async () => null),
+    ...overrides,
+  }
+}
+
+// ── DagNode ───────────────────────────────────────────────────────────
+
+export function makeMockDagNode(overrides: Partial<DagNode> = {}): DagNode {
+  return {
+    id: "node-1",
+    title: "Test node",
+    description: "A test DAG node",
+    dependsOn: [],
+    status: "pending",
+    ...overrides,
+  }
+}
+
+// ── DagGraph ──────────────────────────────────────────────────────────
+
+export function makeMockDagGraph(overrides: Partial<DagGraph> = {}): DagGraph {
+  return {
+    id: "dag-1",
+    nodes: [],
+    parentThreadId: 1,
+    repo: "test-repo",
+    createdAt: Date.now(),
     ...overrides,
   }
 }

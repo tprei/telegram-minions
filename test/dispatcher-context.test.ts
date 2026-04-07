@@ -1,105 +1,11 @@
 import { describe, it, expect } from "vitest"
-import type { DispatcherContext } from "../src/orchestration/dispatcher-context.js"
-import type { TopicSession, TopicMessage } from "../src/domain/session-types.js"
-import type { AutoAdvance } from "../src/domain/workflow-types.js"
-import type { DagGraph, DagNode, DagInput } from "../src/dag/dag.js"
-import type { QualityReport } from "../src/ci/quality-gates.js"
-
-/**
- * Build a minimal mock DispatcherContext for testing extracted modules.
- * Each method is a no-op or returns a sensible default.
- */
-function createMockContext(overrides: Partial<DispatcherContext> = {}): DispatcherContext {
-  const sessions = new Map()
-  const topicSessions = new Map()
-  const dags = new Map()
-
-  return {
-    config: {
-      telegram: { botToken: "test", chatId: "123", allowedUserIds: [1] },
-      telegramQueue: { minSendIntervalMs: 0 },
-      goose: { provider: "test", model: "test" },
-      claude: { planModel: "test", thinkModel: "test", reviewModel: "test" },
-      workspace: {
-        root: "/tmp/test",
-        maxConcurrentSessions: 5,
-        maxDagConcurrency: 3,
-        maxSplitItems: 10,
-        sessionTokenBudget: 100000,
-        sessionBudgetUsd: 10,
-        sessionTimeoutMs: 300000,
-        sessionInactivityTimeoutMs: 60000,
-        staleTtlMs: 86400000,
-        cleanupIntervalMs: 3600000,
-        maxConversationLength: 50,
-      },
-      ci: {
-        babysitEnabled: false,
-        maxRetries: 2,
-        pollIntervalMs: 5000,
-        pollTimeoutMs: 300000,
-        dagCiPolicy: "skip",
-      },
-      mcp: {
-        browserEnabled: false,
-        githubEnabled: false,
-        context7Enabled: false,
-        sentryEnabled: false,
-        sentryOrgSlug: "",
-        sentryProjectSlug: "",
-        supabaseEnabled: false,
-        supabaseProjectRef: "",
-        zaiEnabled: false,
-      },
-      observer: { activityThrottleMs: 0, textFlushDebounceMs: 0, activityEditDebounceMs: 0 },
-      repos: {},
-    } as any,
-    telegram: {} as any,
-    observer: {} as any,
-    stats: {} as any,
-    profileStore: {} as any,
-    broadcaster: undefined,
-    sessions,
-    topicSessions,
-    dags,
-    refreshGitToken: async () => {},
-    spawnTopicAgent: async () => {},
-    spawnCIFixAgent: async () => {},
-    prepareWorkspace: async () => "/tmp/test/workspace",
-    removeWorkspace: async () => {},
-    cleanBuildArtifacts: () => {},
-    prepareFanInBranch: async () => null,
-    mergeUpstreamBranches: () => ({ ok: true, conflictFiles: [] }),
-    downloadPhotos: async () => [],
-    pushToConversation: () => {},
-    extractPRFromConversation: () => null,
-    persistTopicSessions: async () => {},
-    persistDags: async () => {},
-    updatePinnedSummary: () => {},
-    updateTopicTitle: async () => {},
-    pinThreadMessage: async () => {},
-    updatePinnedSplitStatus: async () => {},
-    updatePinnedDagStatus: async () => {},
-    broadcastSession: () => {},
-    broadcastSessionDeleted: () => {},
-    broadcastDag: () => {},
-    broadcastDagDeleted: () => {},
-    closeChildSessions: async () => {},
-    closeSingleChild: async () => {},
-    startDag: async () => {},
-    shipAdvanceToVerification: async () => {},
-    shipAdvanceToDag: async () => {},
-    handleExecuteCommand: async () => {},
-    runDeferredBabysit: async () => {},
-    babysitPR: async () => {},
-    babysitDagChildCI: async () => true,
-    updateDagPRDescriptions: async () => {},
-    scheduleDagNodes: async () => {},
-    spawnSplitChild: async () => null,
-    spawnDagChild: async () => null,
-    ...overrides,
-  }
-}
+import type { TopicMessage } from "../src/domain/session-types.js"
+import {
+  createMockContext,
+  makeMockTopicSession,
+  makeMockDagGraph,
+  makeMockDagNode,
+} from "./test-helpers.js"
 
 describe("DispatcherContext", () => {
   it("can be constructed with createMockContext", () => {
@@ -113,16 +19,7 @@ describe("DispatcherContext", () => {
   it("exposes shared mutable state by reference", () => {
     const ctx = createMockContext()
 
-    const session: TopicSession = {
-      threadId: 1,
-      repo: "test",
-      cwd: "/tmp",
-      slug: "test-slug",
-      conversation: [],
-      pendingFeedback: [],
-      mode: "task",
-      lastActivityAt: Date.now(),
-    }
+    const session = makeMockTopicSession({ threadId: 1 })
 
     ctx.topicSessions.set(1, session)
     expect(ctx.topicSessions.get(1)).toBe(session)
@@ -138,16 +35,7 @@ describe("DispatcherContext", () => {
       },
     })
 
-    const session: TopicSession = {
-      threadId: 1,
-      repo: "test",
-      cwd: "/tmp",
-      slug: "test-slug",
-      conversation: [],
-      pendingFeedback: [],
-      mode: "task",
-      lastActivityAt: Date.now(),
-    }
+    const session = makeMockTopicSession({ threadId: 1, conversation: [] })
 
     ctx.pushToConversation(session, { role: "user", text: "hello" })
     expect(called).toBe(true)
@@ -160,13 +48,15 @@ describe("DispatcherContext", () => {
     const cwd = await ctx.prepareWorkspace("slug-1", "https://github.com/org/repo")
     expect(cwd).toBe("/tmp/test/workspace")
 
-    await expect(ctx.removeWorkspace({} as TopicSession)).resolves.toBeUndefined()
+    const session = makeMockTopicSession()
+    await expect(ctx.removeWorkspace(session)).resolves.toBeUndefined()
     expect(ctx.mergeUpstreamBranches("/tmp", ["branch-1"])).toEqual({ ok: true, conflictFiles: [] })
   })
 
   it("extractPRFromConversation returns null by default", () => {
     const ctx = createMockContext()
-    const result = ctx.extractPRFromConversation({} as TopicSession)
+    const session = makeMockTopicSession()
+    const result = ctx.extractPRFromConversation(session)
     expect(result).toBeNull()
   })
 
@@ -179,22 +69,29 @@ describe("DispatcherContext", () => {
       shipAdvanceToVerification: async () => { verificationStarted = true },
     })
 
-    await ctx.startDag({} as TopicSession, [], false)
+    const session = makeMockTopicSession()
+    const graph = makeMockDagGraph()
+
+    await ctx.startDag(session, [], false)
     expect(dagStarted).toBe(true)
 
-    await ctx.shipAdvanceToVerification({} as TopicSession, {} as DagGraph)
+    await ctx.shipAdvanceToVerification(session, graph)
     expect(verificationStarted).toBe(true)
   })
 
   it("babysitDagChildCI returns true by default", async () => {
     const ctx = createMockContext()
-    const result = await ctx.babysitDagChildCI({} as TopicSession, "https://github.com/org/repo/pull/1")
+    const session = makeMockTopicSession()
+    const result = await ctx.babysitDagChildCI(session, "https://github.com/org/repo/pull/1")
     expect(result).toBe(true)
   })
 
   it("spawnSplitChild and spawnDagChild return null by default", async () => {
     const ctx = createMockContext()
-    expect(await ctx.spawnSplitChild({} as TopicSession, { title: "t", description: "d" }, [])).toBeNull()
-    expect(await ctx.spawnDagChild({} as TopicSession, {} as DagGraph, {} as DagNode, false)).toBeNull()
+    const session = makeMockTopicSession()
+    const graph = makeMockDagGraph()
+    const node = makeMockDagNode()
+    expect(await ctx.spawnSplitChild(session, { title: "t", description: "d" }, [])).toBeNull()
+    expect(await ctx.spawnDagChild(session, graph, node, false)).toBeNull()
   })
 })

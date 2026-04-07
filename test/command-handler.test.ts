@@ -2,6 +2,16 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { CommandHandler } from "../src/commands/command-handler.js"
 import type { DispatcherContext } from "../src/orchestration/dispatcher-context.js"
 import type { TopicSession } from "../src/domain/session-types.js"
+import {
+  createMockContext,
+  makeMockConfig,
+  makeMockActiveSession,
+  makeMockSessionPort,
+  makeMockTopicSession,
+  makeMockDagGraph,
+  makeMockDagNode,
+} from "./test-helpers.js"
+
 vi.mock("../src/dag/dag-extract.js", () => ({
   extractDagItems: vi.fn(),
 }))
@@ -50,92 +60,13 @@ function makeSession(overrides: Partial<TopicSession> = {}): TopicSession {
   }
 }
 
-function makeContext(overrides: Partial<DispatcherContext> = {}): DispatcherContext {
-  return {
-    config: {
-      telegram: { chatId: "-1001234567890" },
-      workspace: { maxConcurrentSessions: 5, root: "/tmp", staleTtlMs: 86400000 },
-      repos: {},
-      ci: { babysitEnabled: true, maxRetries: 2, pollIntervalMs: 100, pollTimeoutMs: 1000, dagCiPolicy: "skip" },
-    } as any,
-    telegram: {
-      sendMessage: vi.fn().mockResolvedValue(undefined),
-      sendMessageWithKeyboard: vi.fn().mockResolvedValue(1),
-      deleteForumTopic: vi.fn().mockResolvedValue(undefined),
-    } as any,
-    observer: {} as any,
-    stats: {
-      aggregate: vi.fn().mockResolvedValue({}),
-      breakdownByMode: vi.fn().mockResolvedValue([]),
-      recentSessions: vi.fn().mockResolvedValue([]),
-    } as any,
-    profileStore: {
-      list: vi.fn().mockReturnValue([]),
-      getDefaultId: vi.fn().mockReturnValue(undefined),
-      get: vi.fn().mockReturnValue(undefined),
-      add: vi.fn().mockReturnValue(true),
-      update: vi.fn().mockReturnValue(true),
-      remove: vi.fn().mockReturnValue(true),
-      setDefaultId: vi.fn().mockReturnValue(true),
-      clearDefault: vi.fn(),
-    } as any,
-    broadcaster: undefined,
-    sessions: new Map(),
-    topicSessions: new Map(),
-    dags: new Map(),
-    abortControllers: new Map(),
-    pendingTasks: new Map(),
-    refreshGitToken: vi.fn().mockResolvedValue(undefined),
-    spawnTopicAgent: vi.fn().mockResolvedValue(true),
-    spawnCIFixAgent: vi.fn().mockImplementation(async (_s, _t, cb) => cb()),
-    prepareWorkspace: vi.fn().mockResolvedValue("/tmp"),
-    removeWorkspace: vi.fn().mockResolvedValue(undefined),
-    cleanBuildArtifacts: vi.fn(),
-    prepareFanInBranch: vi.fn().mockResolvedValue(null),
-    mergeUpstreamBranches: vi.fn().mockReturnValue({ ok: true, conflictFiles: [] }),
-    downloadPhotos: vi.fn().mockResolvedValue([]),
-    pushToConversation: vi.fn(),
-    extractPRFromConversation: vi.fn().mockReturnValue(null),
-    persistTopicSessions: vi.fn().mockResolvedValue(undefined),
-    persistDags: vi.fn().mockResolvedValue(undefined),
-    updatePinnedSummary: vi.fn(),
-    updateTopicTitle: vi.fn().mockResolvedValue(undefined),
-    pinThreadMessage: vi.fn().mockResolvedValue(undefined),
-    updatePinnedSplitStatus: vi.fn().mockResolvedValue(undefined),
-    updatePinnedDagStatus: vi.fn().mockResolvedValue(undefined),
-    broadcastSession: vi.fn(),
-    broadcastSessionDeleted: vi.fn(),
-    broadcastDag: vi.fn(),
-    broadcastDagDeleted: vi.fn(),
-    closeChildSessions: vi.fn().mockResolvedValue(undefined),
-    closeSingleChild: vi.fn().mockResolvedValue(undefined),
-    startWithProfileSelection: vi.fn().mockResolvedValue(undefined),
-    startDag: vi.fn().mockResolvedValue(undefined),
-    shipAdvanceToVerification: vi.fn().mockResolvedValue(undefined),
-    handleLandCommand: vi.fn().mockResolvedValue(undefined),
-    handleShipAdvance: vi.fn().mockResolvedValue(undefined),
-    shipAdvanceToDag: vi.fn().mockResolvedValue(undefined),
-    handleExecuteCommand: vi.fn().mockResolvedValue(undefined),
-    notifyParentOfChildComplete: vi.fn().mockResolvedValue(undefined),
-    postSessionDigest: vi.fn(),
-    runDeferredBabysit: vi.fn().mockResolvedValue(undefined),
-    babysitPR: vi.fn().mockResolvedValue(undefined),
-    babysitDagChildCI: vi.fn().mockResolvedValue(true),
-    updateDagPRDescriptions: vi.fn().mockResolvedValue(undefined),
-    scheduleDagNodes: vi.fn().mockResolvedValue(undefined),
-    spawnSplitChild: vi.fn().mockResolvedValue(null),
-    spawnDagChild: vi.fn().mockResolvedValue(null),
-    ...overrides,
-  }
-}
-
 describe("CommandHandler", () => {
   let ctx: DispatcherContext
   let handler: CommandHandler
 
   beforeEach(() => {
     vi.clearAllMocks()
-    ctx = makeContext()
+    ctx = createMockContext()
     handler = new CommandHandler(ctx)
   })
 
@@ -218,11 +149,11 @@ describe("CommandHandler", () => {
 
   describe("handleTaskCommand", () => {
     it("rejects when max concurrent sessions reached", async () => {
-      ctx.sessions.set(1, {} as any)
-      ctx.sessions.set(2, {} as any)
-      ctx.sessions.set(3, {} as any)
-      ctx.sessions.set(4, {} as any)
-      ctx.sessions.set(5, {} as any)
+      ctx.sessions.set(1, makeMockActiveSession())
+      ctx.sessions.set(2, makeMockActiveSession())
+      ctx.sessions.set(3, makeMockActiveSession())
+      ctx.sessions.set(4, makeMockActiveSession())
+      ctx.sessions.set(5, makeMockActiveSession())
       await handler.handleTaskCommand("do something", 42)
       expect(ctx.telegram.sendMessage).toHaveBeenCalledWith(
         expect.stringContaining("Max concurrent sessions"),
@@ -239,10 +170,15 @@ describe("CommandHandler", () => {
     })
 
     it("shows repo keyboard when no repo specified and multiple repos configured", async () => {
-      ;(ctx.config as any).repos = {
-        repo1: "https://github.com/org/repo1",
-        repo2: "https://github.com/org/repo2",
-      }
+      ctx = createMockContext({
+        config: makeMockConfig({
+          repos: {
+            repo1: "https://github.com/org/repo1",
+            repo2: "https://github.com/org/repo2",
+          },
+        }),
+      })
+      handler = new CommandHandler(ctx)
       await handler.handleTaskCommand("do something", 42)
       expect(ctx.telegram.sendMessageWithKeyboard).toHaveBeenCalled()
     })
@@ -281,9 +217,9 @@ describe("CommandHandler", () => {
 
   describe("handleExecuteCommand", () => {
     it("kills active session and spawns execution task", async () => {
+      const mockHandle = makeMockSessionPort({ kill: vi.fn().mockResolvedValue(undefined) })
       const session = makeSession({ activeSessionId: "abc", mode: "plan" })
-      const mockHandle = { kill: vi.fn().mockResolvedValue(undefined) }
-      ctx.sessions.set(100, { handle: mockHandle } as any)
+      ctx.sessions.set(100, makeMockActiveSession({ handle: mockHandle }))
 
       await handler.handleExecuteCommand(session)
 
@@ -365,8 +301,8 @@ describe("CommandHandler", () => {
   describe("handleDoctorCommand", () => {
     it("kills active session and starts plan-mode diagnostic", async () => {
       const session = makeSession({ activeSessionId: "abc" })
-      const mockHandle = { kill: vi.fn().mockResolvedValue(undefined) }
-      ctx.sessions.set(100, { handle: mockHandle } as any)
+      const mockHandle = makeMockSessionPort({ kill: vi.fn().mockResolvedValue(undefined) })
+      ctx.sessions.set(100, makeMockActiveSession({ handle: mockHandle }))
 
       await handler.handleDoctorCommand(session)
 
@@ -417,16 +353,22 @@ describe("CommandHandler", () => {
 
     it("includes DAG evidence when dagId is present", async () => {
       const session = makeSession({ dagId: "dag-1" })
-      const graph = {
+      const graph = makeMockDagGraph({
         id: "dag-1",
         nodes: [
-          { id: "a", title: "Task A", description: "...", dependsOn: [], status: "failed", error: "Timeout" },
+          makeMockDagNode({
+            id: "a",
+            title: "Task A",
+            description: "...",
+            dependsOn: [],
+            status: "failed",
+            error: "Timeout",
+          }),
         ],
         parentThreadId: 100,
         repo: "org/repo",
-        createdAt: Date.now(),
-      }
-      ctx.dags.set("dag-1", graph as any)
+      })
+      ctx.dags.set("dag-1", graph)
 
       await handler.handleDoctorCommand(session)
 

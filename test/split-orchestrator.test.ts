@@ -1,7 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { SplitOrchestrator } from "../src/orchestration/split-orchestrator.js"
 import type { DispatcherContext } from "../src/orchestration/dispatcher-context.js"
-import type { TopicSession } from "../src/domain/session-types.js"
+import type { ActiveSession } from "../src/session/session-manager.js"
+import {
+  createMockContext,
+  makeMockConfig,
+  makeMockActiveSession,
+  makeMockSessionPort,
+  makeMockTopicSession,
+  makeMockProfileStore,
+} from "./test-helpers.js"
+
 vi.mock("../src/orchestration/split.js", () => ({
   extractSplitItems: vi.fn(),
 }))
@@ -25,8 +34,8 @@ import { formatSplitChildComplete } from "../src/telegram/format.js"
 const mockExtractSplitItems = vi.mocked(extractSplitItems)
 const mockExtractStackItems = vi.mocked(extractStackItems)
 
-function makeSession(overrides: Partial<TopicSession> = {}): TopicSession {
-  return {
+function makeSession(overrides: Partial<import("../src/domain/session-types.js").TopicSession> = {}): import("../src/domain/session-types.js").TopicSession {
+  return makeMockTopicSession({
     threadId: 100,
     repo: "org/repo",
     repoUrl: "https://github.com/org/repo",
@@ -35,67 +44,8 @@ function makeSession(overrides: Partial<TopicSession> = {}): TopicSession {
     conversation: [{ role: "user", text: "plan something" }],
     pendingFeedback: [],
     mode: "think",
-    lastActivityAt: Date.now(),
     ...overrides,
-  }
-}
-
-function makeContext(overrides: Partial<DispatcherContext> = {}): DispatcherContext {
-  return {
-    config: {
-      telegram: { chatId: "-1001234567890" },
-      workspace: { maxSplitItems: 10, maxConcurrentSessions: 5 },
-      ci: { babysitEnabled: true, maxRetries: 2, pollIntervalMs: 100, pollTimeoutMs: 1000, dagCiPolicy: "skip" },
-    } as any,
-    telegram: {
-      sendMessage: vi.fn().mockResolvedValue(undefined),
-    } as any,
-    observer: {} as any,
-    stats: {} as any,
-    profileStore: { get: vi.fn().mockReturnValue(undefined) } as any,
-    broadcaster: undefined,
-    sessions: new Map(),
-    topicSessions: new Map(),
-    dags: new Map(),
-    abortControllers: new Map(),
-    refreshGitToken: vi.fn().mockResolvedValue(undefined),
-    spawnTopicAgent: vi.fn().mockResolvedValue(true),
-    spawnCIFixAgent: vi.fn().mockImplementation(async (_s, _t, cb) => cb()),
-    prepareWorkspace: vi.fn().mockResolvedValue("/tmp"),
-    removeWorkspace: vi.fn().mockResolvedValue(undefined),
-    cleanBuildArtifacts: vi.fn(),
-    prepareFanInBranch: vi.fn().mockResolvedValue(null),
-    mergeUpstreamBranches: vi.fn().mockReturnValue({ ok: true, conflictFiles: [] }),
-    downloadPhotos: vi.fn().mockResolvedValue([]),
-    pushToConversation: vi.fn(),
-    extractPRFromConversation: vi.fn().mockReturnValue(null),
-    persistTopicSessions: vi.fn().mockResolvedValue(undefined),
-    persistDags: vi.fn().mockResolvedValue(undefined),
-    updatePinnedSummary: vi.fn(),
-    updateTopicTitle: vi.fn().mockResolvedValue(undefined),
-    pinThreadMessage: vi.fn().mockResolvedValue(undefined),
-    updatePinnedSplitStatus: vi.fn().mockResolvedValue(undefined),
-    updatePinnedDagStatus: vi.fn().mockResolvedValue(undefined),
-    broadcastSession: vi.fn(),
-    broadcastSessionDeleted: vi.fn(),
-    broadcastDag: vi.fn(),
-    broadcastDagDeleted: vi.fn(),
-    closeChildSessions: vi.fn().mockResolvedValue(undefined),
-    closeSingleChild: vi.fn().mockResolvedValue(undefined),
-    startDag: vi.fn().mockResolvedValue(undefined),
-    shipAdvanceToVerification: vi.fn().mockResolvedValue(undefined),
-    handleExecuteCommand: vi.fn().mockResolvedValue(undefined),
-    notifyParentOfChildComplete: vi.fn().mockResolvedValue(undefined),
-    postSessionDigest: vi.fn(),
-    runDeferredBabysit: vi.fn().mockResolvedValue(undefined),
-    babysitPR: vi.fn().mockResolvedValue(undefined),
-    babysitDagChildCI: vi.fn().mockResolvedValue(true),
-    updateDagPRDescriptions: vi.fn().mockResolvedValue(undefined),
-    scheduleDagNodes: vi.fn().mockResolvedValue(undefined),
-    spawnSplitChild: vi.fn().mockResolvedValue(null),
-    spawnDagChild: vi.fn().mockResolvedValue(null),
-    ...overrides,
-  }
+  })
 }
 
 describe("SplitOrchestrator", () => {
@@ -104,15 +54,15 @@ describe("SplitOrchestrator", () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    ctx = makeContext()
+    ctx = createMockContext()
     orchestrator = new SplitOrchestrator(ctx)
   })
 
   describe("handleSplitCommand", () => {
     it("kills active session before extracting", async () => {
-      const handle = { kill: vi.fn().mockResolvedValue(undefined) }
+      const handle = makeMockSessionPort({ kill: vi.fn().mockResolvedValue(undefined) })
       const session = makeSession({ activeSessionId: "abc" })
-      ctx.sessions.set(100, { handle } as any)
+      ctx.sessions.set(100, makeMockActiveSession({ handle }))
 
       mockExtractSplitItems.mockResolvedValue({ items: [] })
 
@@ -164,8 +114,8 @@ describe("SplitOrchestrator", () => {
       ]
       mockExtractSplitItems.mockResolvedValue({ items })
 
-      const childA: TopicSession = makeSession({ threadId: 201, slug: "child-a", repo: "org/repo" })
-      const childB: TopicSession = makeSession({ threadId: 202, slug: "child-b", repo: "org/repo" })
+      const childA = makeSession({ threadId: 201, slug: "child-a", repo: "org/repo" })
+      const childB = makeSession({ threadId: 202, slug: "child-b", repo: "org/repo" })
       ctx.topicSessions.set(201, childA)
       ctx.topicSessions.set(202, childB)
 
@@ -183,12 +133,12 @@ describe("SplitOrchestrator", () => {
 
     it("queues excess items when concurrency limit reached", async () => {
       // Fill up sessions to leave only 1 slot
-      const sessions = new Map<number, any>()
-      sessions.set(1, {} as any)
-      sessions.set(2, {} as any)
-      sessions.set(3, {} as any)
-      sessions.set(4, {} as any)
-      ctx = makeContext({ sessions })
+      const sessions = new Map<number, ActiveSession>()
+      sessions.set(1, makeMockActiveSession())
+      sessions.set(2, makeMockActiveSession())
+      sessions.set(3, makeMockActiveSession())
+      sessions.set(4, makeMockActiveSession())
+      ctx = createMockContext({ sessions })
       orchestrator = new SplitOrchestrator(ctx)
 
       const session = makeSession()
@@ -199,7 +149,7 @@ describe("SplitOrchestrator", () => {
       ]
       mockExtractSplitItems.mockResolvedValue({ items })
 
-      const childA: TopicSession = makeSession({ threadId: 201, slug: "child-a" })
+      const childA = makeSession({ threadId: 201, slug: "child-a" })
       ctx.topicSessions.set(201, childA)
       vi.mocked(ctx.spawnSplitChild).mockResolvedValueOnce(201)
 
@@ -228,12 +178,25 @@ describe("SplitOrchestrator", () => {
     })
 
     it("truncates items exceeding maxSplitItems", async () => {
-      ctx = makeContext({
-        config: {
-          telegram: { chatId: "-1001234567890" },
-          workspace: { maxSplitItems: 2, maxConcurrentSessions: 10 },
-          ci: { babysitEnabled: true, maxRetries: 2, pollIntervalMs: 100, pollTimeoutMs: 1000, dagCiPolicy: "skip" },
-        } as any,
+      ctx = createMockContext({
+        config: makeMockConfig({
+          workspace: {
+            root: "/tmp/test",
+            maxConcurrentSessions: 10,
+            maxDagConcurrency: 3,
+            maxSplitItems: 2,
+            sessionTokenBudget: 100000,
+            sessionBudgetUsd: 10,
+            sessionTimeoutMs: 300000,
+            sessionInactivityTimeoutMs: 60000,
+            staleTtlMs: 86400000,
+            cleanupIntervalMs: 3600000,
+            maxConversationLength: 50,
+            maxJudgeOptions: 5,
+            judgeAdvocateTimeoutMs: 120000,
+            judgeTimeoutMs: 300000,
+          },
+        }),
       })
       orchestrator = new SplitOrchestrator(ctx)
 
@@ -245,8 +208,8 @@ describe("SplitOrchestrator", () => {
       ]
       mockExtractSplitItems.mockResolvedValue({ items })
 
-      const childA: TopicSession = makeSession({ threadId: 201, slug: "child-a" })
-      const childB: TopicSession = makeSession({ threadId: 202, slug: "child-b" })
+      const childA = makeSession({ threadId: 201, slug: "child-a" })
+      const childB = makeSession({ threadId: 202, slug: "child-b" })
       ctx.topicSessions.set(201, childA)
       ctx.topicSessions.set(202, childB)
       vi.mocked(ctx.spawnSplitChild)
@@ -261,9 +224,9 @@ describe("SplitOrchestrator", () => {
 
   describe("handleStackCommand", () => {
     it("kills active session before extracting", async () => {
-      const handle = { kill: vi.fn().mockResolvedValue(undefined) }
+      const handle = makeMockSessionPort({ kill: vi.fn().mockResolvedValue(undefined) })
       const session = makeSession({ activeSessionId: "abc" })
-      ctx.sessions.set(100, { handle } as any)
+      ctx.sessions.set(100, makeMockActiveSession({ handle }))
 
       mockExtractStackItems.mockResolvedValue({ items: [] })
 
@@ -320,9 +283,11 @@ describe("SplitOrchestrator", () => {
     })
 
     it("passes profile from profileStore", async () => {
-      const profile = { provider: "test" }
-      ctx = makeContext({
-        profileStore: { get: vi.fn().mockReturnValue(profile) } as any,
+      const profile = { id: "my-profile", name: "My Profile" }
+      ctx = createMockContext({
+        profileStore: makeMockProfileStore({
+          get: vi.fn().mockReturnValue(profile),
+        }),
       })
       orchestrator = new SplitOrchestrator(ctx)
 
@@ -392,7 +357,7 @@ describe("SplitOrchestrator", () => {
         "Auth fix",
         "https://github.com/org/repo/pull/42",
         100,
-        "-1001234567890",
+        "123",
       )
     })
 

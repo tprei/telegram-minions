@@ -4,110 +4,12 @@ import path from "node:path"
 import { ConfigManager } from "../src/config/config-manager.js"
 import type { DispatcherContext } from "../src/orchestration/dispatcher-context.js"
 import type { TopicSession } from "../src/domain/session-types.js"
-function createMockContext(overrides: Partial<DispatcherContext> = {}): DispatcherContext {
-  const sessions = new Map()
-  const topicSessions = new Map()
-  const dags = new Map()
-
-  return {
-    config: {
-      telegram: { botToken: "test", chatId: "123", allowedUserIds: [1] },
-      telegramQueue: { minSendIntervalMs: 0 },
-      goose: { provider: "test", model: "test" },
-      claude: { planModel: "test", thinkModel: "test", reviewModel: "test" },
-      workspace: {
-        root: "/tmp/test-config-manager",
-        maxConcurrentSessions: 5,
-        maxDagConcurrency: 3,
-        maxSplitItems: 10,
-        sessionTokenBudget: 100000,
-        sessionBudgetUsd: 10,
-        sessionTimeoutMs: 300000,
-        sessionInactivityTimeoutMs: 60000,
-        staleTtlMs: 86400000,
-        cleanupIntervalMs: 3600000,
-        maxConversationLength: 50,
-      },
-      ci: {
-        babysitEnabled: false,
-        maxRetries: 2,
-        pollIntervalMs: 5000,
-        pollTimeoutMs: 300000,
-        dagCiPolicy: "skip",
-      },
-      mcp: {
-        browserEnabled: false,
-        githubEnabled: false,
-        context7Enabled: false,
-        sentryEnabled: false,
-        sentryOrgSlug: "",
-        sentryProjectSlug: "",
-        supabaseEnabled: false,
-        supabaseProjectRef: "",
-        zaiEnabled: false,
-      },
-      observer: { activityThrottleMs: 0, textFlushDebounceMs: 0, activityEditDebounceMs: 0 },
-      repos: {},
-    } as any,
-    telegram: {
-      sendMessage: vi.fn(async () => ({ message_id: 1 })),
-      deleteForumTopic: vi.fn(async () => {}),
-    } as any,
-    observer: {} as any,
-    stats: {} as any,
-    profileStore: {
-      list: vi.fn(() => []),
-      getDefaultId: vi.fn(() => undefined),
-      add: vi.fn(() => true),
-      update: vi.fn(() => true),
-      remove: vi.fn(() => true),
-      get: vi.fn(() => ({ id: "test", name: "Test" })),
-      setDefaultId: vi.fn(() => true),
-      clearDefault: vi.fn(),
-    } as any,
-    broadcaster: undefined,
-    sessions,
-    topicSessions,
-    dags,
-    refreshGitToken: async () => {},
-    spawnTopicAgent: async () => {},
-    spawnCIFixAgent: async () => {},
-    prepareWorkspace: async () => "/tmp/test/workspace",
-    removeWorkspace: vi.fn(async () => {}),
-    cleanBuildArtifacts: () => {},
-    prepareFanInBranch: async () => null,
-    mergeUpstreamBranches: () => ({ ok: true, conflictFiles: [] }),
-    downloadPhotos: async () => [],
-    pushToConversation: () => {},
-    extractPRFromConversation: () => null,
-    persistTopicSessions: vi.fn(async () => {}),
-    persistDags: vi.fn(async () => {}),
-    updatePinnedSummary: vi.fn(),
-    updateTopicTitle: async () => {},
-    pinThreadMessage: async () => {},
-    updatePinnedSplitStatus: async () => {},
-    updatePinnedDagStatus: async () => {},
-    broadcastSession: () => {},
-    broadcastSessionDeleted: () => {},
-    broadcastDag: () => {},
-    broadcastDagDeleted: () => {},
-    closeChildSessions: async () => {},
-    closeSingleChild: async () => {},
-    startDag: async () => {},
-    shipAdvanceToVerification: async () => {},
-    handleExecuteCommand: async () => {},
-    notifyParentOfChildComplete: async () => {},
-    postSessionDigest: () => {},
-    runDeferredBabysit: async () => {},
-    babysitPR: async () => {},
-    babysitDagChildCI: async () => true,
-    updateDagPRDescriptions: async () => {},
-    scheduleDagNodes: async () => {},
-    spawnSplitChild: async () => null,
-    spawnDagChild: async () => null,
-    ...overrides,
-  }
-}
+import {
+  createMockContext,
+  makeMockConfig,
+  makeMockProfileStore,
+  makeMockTopicSession,
+} from "./test-helpers.js"
 
 describe("ConfigManager", () => {
   describe("handleConfigCommand", () => {
@@ -132,10 +34,9 @@ describe("ConfigManager", () => {
 
     it("reports error when profile already exists", async () => {
       const ctx = createMockContext({
-        profileStore: {
-          ...createMockContext().profileStore,
+        profileStore: makeMockProfileStore({
           add: vi.fn(() => false),
-        } as any,
+        }),
       })
       const mgr = new ConfigManager(ctx)
       await mgr.handleConfigCommand("add existing Existing")
@@ -214,10 +115,12 @@ describe("ConfigManager", () => {
       const root = "/tmp/test-config-manager-empty"
       fs.mkdirSync(root, { recursive: true })
       const ctx = createMockContext({
-        config: {
-          ...createMockContext().config,
-          workspace: { ...createMockContext().config.workspace, root },
-        } as any,
+        config: makeMockConfig({
+          workspace: {
+            ...makeMockConfig().workspace,
+            root,
+          },
+        }),
       })
       const mgr = new ConfigManager(ctx)
       await mgr.handleCleanCommand()
@@ -236,22 +139,21 @@ describe("ConfigManager", () => {
       fs.writeFileSync(path.join(sessionDir, "file.txt"), "data")
 
       const ctx = createMockContext({
-        config: {
-          ...createMockContext().config,
-          workspace: { ...createMockContext().config.workspace, root },
-        } as any,
+        config: makeMockConfig({
+          workspace: {
+            ...makeMockConfig().workspace,
+            root,
+          },
+        }),
       })
 
-      const idleSession: TopicSession = {
+      const idleSession = makeMockTopicSession({
         threadId: 42,
         repo: "test",
         cwd: sessionDir,
         slug: "test-slug",
-        conversation: [],
-        pendingFeedback: [],
         mode: "task",
-        lastActivityAt: Date.now(),
-      }
+      })
       ctx.topicSessions.set(42, idleSession)
 
       const mgr = new ConfigManager(ctx)
@@ -272,23 +174,22 @@ describe("ConfigManager", () => {
       fs.mkdirSync(root, { recursive: true })
 
       const ctx = createMockContext({
-        config: {
-          ...createMockContext().config,
-          workspace: { ...createMockContext().config.workspace, root },
-        } as any,
+        config: makeMockConfig({
+          workspace: {
+            ...makeMockConfig().workspace,
+            root,
+          },
+        }),
       })
 
-      const activeSession: TopicSession = {
+      const activeSession = makeMockTopicSession({
         threadId: 99,
         repo: "test",
         cwd: "/tmp/active",
         slug: "active-slug",
-        conversation: [],
-        pendingFeedback: [],
         mode: "task",
-        lastActivityAt: Date.now(),
         activeSessionId: "running-session",
-      }
+      })
       ctx.topicSessions.set(99, activeSession)
 
       const mgr = new ConfigManager(ctx)
