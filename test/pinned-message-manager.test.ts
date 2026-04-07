@@ -3,16 +3,17 @@ import fs from "node:fs"
 import { PinnedMessageManager } from "../src/telegram/pinned-message-manager.js"
 import type { TopicSession } from "../src/domain/session-types.js"
 import type { DagGraph, DagNode } from "../src/dag/dag.js"
+import { makeMockTelegram } from "./test-helpers.js"
 
 vi.mock("node:fs")
 
 function makeTelegram() {
-  return {
+  return makeMockTelegram({
     sendMessage: vi.fn().mockResolvedValue({ ok: true, messageId: 100 }),
     editMessage: vi.fn().mockResolvedValue(true),
     pinChatMessage: vi.fn().mockResolvedValue(undefined),
     editForumTopic: vi.fn().mockResolvedValue(undefined),
-  } as any
+  })
 }
 
 function makeSession(overrides: Partial<TopicSession> = {}): TopicSession {
