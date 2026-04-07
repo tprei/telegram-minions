@@ -48,7 +48,7 @@ import {
   downloadPhotos, prepareFanInBranch, mergeUpstreamBranches,
 } from "../session/session-manager.js"
 import { buildSplitChildPrompt } from "./split.js"
-import { advanceDag, failNode, renderDagStatus, type DagGraph } from "../dag/dag.js"
+import { advanceDag, failNode, readyNodes, renderDagStatus, type DagGraph } from "../dag/dag.js"
 import type { DispatcherContext } from "./dispatcher-context.js"
 import { CIBabysitter } from "../ci/ci-babysitter.js"
 import { LandingManager } from "../dag/landing-manager.js"
@@ -419,6 +419,14 @@ export class Dispatcher {
             log.warn({ err, dagId }, "failed to send DAG recovery notification")
           })
           this.pinnedMessages.updatePinnedDagStatus(parent, graph).catch(() => {})
+
+          if (readyNodes(graph).length > 0) {
+            const isStack = !graph.nodes.some((n) => n.dependsOn.length > 1) &&
+              graph.nodes.every((n, i) => i === 0 || n.dependsOn.length === 1)
+            this.dagOrchestrator.scheduleDagNodes(parent, graph, isStack).catch((err) => {
+              log.error({ err, dagId }, "failed to schedule ready nodes after DAG reconciliation")
+            })
+          }
         }
 
         this.broadcastDag(graph, "dag_updated")

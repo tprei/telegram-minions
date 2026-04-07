@@ -448,17 +448,17 @@ export class DagOrchestrator {
       }
     }
 
-    if (node.status === "done") {
-      try {
-        const newlyReady = advanceDag(graph)
-        if (newlyReady.length > 0) {
-          const isStack = !graph.nodes.some((n) => n.dependsOn.length > 1) &&
-            graph.nodes.every((n, i) => i === 0 || n.dependsOn.length === 1)
-          await this.scheduleDagNodes(parent, graph, isStack)
-        }
-      } catch (err) {
-        log.error({ err, dagId: graph.id }, "DAG advancement failed")
+    try {
+      if (node.status === "done") {
+        advanceDag(graph)
       }
+      if (readyNodes(graph).length > 0) {
+        const isStack = !graph.nodes.some((n) => n.dependsOn.length > 1) &&
+          graph.nodes.every((n, i) => i === 0 || n.dependsOn.length === 1)
+        await this.scheduleDagNodes(parent, graph, isStack)
+      }
+    } catch (err) {
+      log.error({ err, dagId: graph.id }, "DAG advancement failed")
     }
 
     this.ctx.broadcastDag(graph, "dag_updated")
@@ -689,8 +689,8 @@ export class DagOrchestrator {
         topicSession.threadId,
       )
 
-      const newlyReady = advanceDag(graph)
-      if (newlyReady.length > 0) {
+      advanceDag(graph)
+      if (readyNodes(graph).length > 0) {
         const isStack = !graph.nodes.some((n) => n.dependsOn.length > 1) &&
           graph.nodes.every((n, i) => i === 0 || n.dependsOn.length === 1)
         await this.scheduleDagNodes(topicSession, graph, isStack)

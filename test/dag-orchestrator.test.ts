@@ -656,6 +656,80 @@ describe("DagOrchestrator", () => {
 
       expect(child.conversation).toEqual([])
     })
+
+    it("schedules concurrency-blocked ready node on next completion", async () => {
+      ctx = makeContext({
+        ...ctx,
+        config: {
+          ...ctx.config,
+          workspace: { ...ctx.config.workspace, maxDagConcurrency: 2 },
+        } as any,
+      })
+      orchestrator = new DagOrchestrator(ctx)
+      const scheduleSpy = vi.spyOn(orchestrator, "scheduleDagNodes").mockResolvedValue(undefined)
+
+      const parent = makeSession({ threadId: 100 })
+      const graph: DagGraph = {
+        id: "dag-test",
+        parentThreadId: 100,
+        repo: "org/repo",
+        nodes: [
+          { id: "root", title: "Root", description: "", dependsOn: [], status: "done", branch: "minion/root", prUrl: "https://github.com/org/repo/pull/1" },
+          { id: "a", title: "A", description: "", dependsOn: ["root"], status: "running", branch: "minion/a" },
+          { id: "b", title: "B", description: "", dependsOn: ["root"], status: "running", branch: "minion/b" },
+          { id: "c", title: "C", description: "", dependsOn: ["root"], status: "ready" },
+        ],
+      } as DagGraph
+      ctx.dags.set("dag-test", graph)
+      ctx.topicSessions.set(100, parent)
+
+      const childA = makeSession({
+        threadId: 201,
+        slug: "child-a",
+        dagId: "dag-test",
+        dagNodeId: "a",
+        parentThreadId: 100,
+        conversation: [{ role: "assistant", text: "PR https://github.com/org/repo/pull/2" }],
+      })
+      ctx.topicSessions.set(201, childA)
+
+      vi.mocked(ctx.extractPRFromConversation).mockReturnValue("https://github.com/org/repo/pull/2")
+
+      await orchestrator.onDagChildComplete(childA, "completed")
+
+      expect(scheduleSpy).toHaveBeenCalledWith(parent, graph, true)
+    })
+
+    it("schedules independent ready nodes after a failed completion", async () => {
+      const scheduleSpy = vi.spyOn(orchestrator, "scheduleDagNodes").mockResolvedValue(undefined)
+
+      const parent = makeSession({ threadId: 100 })
+      const graph: DagGraph = {
+        id: "dag-test",
+        parentThreadId: 100,
+        repo: "org/repo",
+        nodes: [
+          { id: "a", title: "A", description: "", dependsOn: [], status: "running", branch: "minion/a" },
+          { id: "b", title: "B", description: "", dependsOn: [], status: "ready" },
+        ],
+      } as DagGraph
+      ctx.dags.set("dag-test", graph)
+      ctx.topicSessions.set(100, parent)
+
+      const childA = makeSession({
+        threadId: 201,
+        slug: "child-a",
+        dagId: "dag-test",
+        dagNodeId: "a",
+        parentThreadId: 100,
+      })
+      ctx.topicSessions.set(201, childA)
+
+      await orchestrator.onDagChildComplete(childA, "errored")
+
+      expect(graph.nodes[0].status).toBe("failed")
+      expect(scheduleSpy).toHaveBeenCalledWith(parent, graph, false)
+    })
   })
 
   describe("handleRetryCommand", () => {
