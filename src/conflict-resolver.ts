@@ -10,6 +10,77 @@ const execFile = promisify(execFileCb)
 const CONFLICT_TIMEOUT_MS = 120_000
 const MAX_FILE_PREVIEW_BYTES = 8_000
 
+interface UnmergedStages {
+  base?: string
+  ours?: string
+  theirs?: string
+}
+
+export function parseUnmergedEntries(raw: string): Map<string, UnmergedStages> {
+  const byPath = new Map<string, UnmergedStages>()
+  for (const line of raw.split("\n").filter(Boolean)) {
+    const match = line.match(/^\d+ ([a-f0-9]+) (\d)\t(.+)$/)
+    if (!match) continue
+    const [, blob, stageStr, filePath] = match
+    const stage = parseInt(stageStr, 10)
+    const entry = byPath.get(filePath) ?? {}
+    if (stage === 1) entry.base = blob
+    else if (stage === 2) entry.ours = blob
+    else if (stage === 3) entry.theirs = blob
+    byPath.set(filePath, entry)
+  }
+  return byPath
+}
+
+export async function resolvePhantomConflicts(
+  cwd: string,
+): Promise<{ resolved: string[]; remaining: string[] }> {
+  const { stdout: raw } = await execFile("git", ["ls-files", "--unmerged"], {
+    cwd,
+    encoding: "utf-8",
+  })
+  const byPath = parseUnmergedEntries(raw)
+  if (byPath.size === 0) return { resolved: [], remaining: [] }
+
+  const resolved: string[] = []
+  const remaining: string[] = []
+
+  for (const [filePath, stages] of byPath) {
+    let isPhantom = false
+
+    if (stages.base && stages.theirs && !stages.ours) {
+      try {
+        const { stdout } = await execFile(
+          "git",
+          ["rev-parse", "--verify", `HEAD:${filePath}`],
+          { cwd, encoding: "utf-8" },
+        )
+        if (stdout.trim() === stages.base) isPhantom = true
+      } catch {
+        // file genuinely absent from HEAD
+      }
+    } else if (stages.base && stages.ours && stages.theirs && stages.base === stages.ours) {
+      isPhantom = true
+    }
+
+    if (isPhantom) {
+      if (stages.ours) {
+        await execFile("git", ["checkout", "--theirs", "--", filePath], { cwd })
+      }
+      await execFile("git", ["add", "--", filePath], { cwd })
+      resolved.push(filePath)
+    } else {
+      remaining.push(filePath)
+    }
+  }
+
+  log.info(
+    { resolved, remaining: remaining.length > 0 ? remaining : "(none)" },
+    "phantom conflict resolution result",
+  )
+  return { resolved, remaining }
+}
+
 function readFilePreview(cwd: string, file: string): string | null {
   try {
     const content = readFileSync(path.join(cwd, file), "utf-8")

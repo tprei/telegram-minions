@@ -5,7 +5,7 @@ import type { DispatcherContext } from "../orchestration/dispatcher-context.js"
 import type { TopicSession } from "../domain/session-types.js"
 import type { DagGraph, DagNode } from "./dag.js"
 import { topologicalSort, needsRestack, cleanupMergedBranch, getDownstreamNodes } from "./dag.js"
-import { resolveConflictsWithAgent } from "../conflict-resolver.js"
+import { resolveConflictsWithAgent, resolvePhantomConflicts } from "../conflict-resolver.js"
 import {
   esc,
   formatLandStart,
@@ -231,11 +231,16 @@ export class LandingManager {
             try {
               const unmerged = await git(["diff", "--name-only", "--diff-filter=U"], { cwd: restackCwd })
               if (unmerged.length > 0) {
-                await this.ctx.telegram.sendMessage(
-                  `🤖 Attempting conflict resolution for <b>${esc(downstream.title)}</b>…`,
-                  topicSession.threadId,
-                )
-                conflictResolved = await resolveConflictsWithAgent(restackCwd, downstream.branch, baseBranch)
+                const { resolved: phantomResolved, remaining } = await resolvePhantomConflicts(restackCwd)
+                if (remaining.length > 0) {
+                  await this.ctx.telegram.sendMessage(
+                    `🤖 Attempting conflict resolution for <b>${esc(downstream.title)}</b>…`,
+                    topicSession.threadId,
+                  )
+                  conflictResolved = await resolveConflictsWithAgent(restackCwd, downstream.branch!, baseBranch)
+                } else {
+                  conflictResolved = phantomResolved.length > 0
+                }
 
                 if (conflictResolved) {
                   await git(["rebase", "--continue"], { cwd: restackCwd, env: { GIT_EDITOR: "true" } })
@@ -370,12 +375,17 @@ export class LandingManager {
       try {
         const unmerged = await git(["diff", "--name-only", "--diff-filter=U"], { cwd })
         if (unmerged.length > 0) {
-          await this.ctx.telegram.sendMessage(
-            `🤖 Attempting conflict resolution for <b>${esc(node.title)}</b>…`,
-            topicSession.threadId,
-          )
+          const { resolved: phantomResolved, remaining } = await resolvePhantomConflicts(cwd)
+          let allResolved = remaining.length === 0 && phantomResolved.length > 0
+          if (remaining.length > 0) {
+            await this.ctx.telegram.sendMessage(
+              `🤖 Attempting conflict resolution for <b>${esc(node.title)}</b>…`,
+              topicSession.threadId,
+            )
+            allResolved = await resolveConflictsWithAgent(cwd, node.branch, baseBranch)
+          }
 
-          if (await resolveConflictsWithAgent(cwd, node.branch, baseBranch)) {
+          if (allResolved) {
             await git(["rebase", "--continue"], { cwd, env: { GIT_EDITOR: "true" } })
             await git(["push", "--force-with-lease", "origin", node.branch], { cwd })
 
