@@ -46,19 +46,6 @@ export function captureException(
   })
 }
 
-export function captureMessage(
-  message: string,
-  level: "info" | "warning" | "error" = "error",
-): void {
-  if (!sentry) return
-  sentry.captureMessage(message, level)
-}
-
-export function setTag(key: string, value: string): void {
-  if (!sentry) return
-  sentry.setTag(key, value)
-}
-
 export function setContext(name: string, data: Record<string, unknown>): void {
   if (!sentry) return
   sentry.setContext(name, data)
