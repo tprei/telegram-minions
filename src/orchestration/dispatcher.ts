@@ -419,17 +419,23 @@ export class Dispatcher {
             log.warn({ err, dagId }, "failed to send DAG recovery notification")
           })
           this.pinnedMessages.updatePinnedDagStatus(parent, graph).catch(() => {})
-
-          if (readyNodes(graph).length > 0) {
-            const isStack = !graph.nodes.some((n) => n.dependsOn.length > 1) &&
-              graph.nodes.every((n, i) => i === 0 || n.dependsOn.length === 1)
-            this.dagOrchestrator.scheduleDagNodes(parent, graph, isStack).catch((err) => {
-              log.error({ err, dagId }, "failed to schedule ready nodes after DAG reconciliation")
-            })
-          }
         }
 
         this.broadcastDag(graph, "dag_updated")
+      }
+
+      const ready = readyNodes(graph)
+      const runningCount = graph.nodes.filter(n => n.status === "running").length
+      if (ready.length > 0 && runningCount < ready.length) {
+        const parent = this.topicSessions.get(graph.parentThreadId)
+        if (parent) {
+          log.info({ dagId, readyCount: ready.length, runningCount }, "scheduling unstarted ready nodes after reconciliation")
+          const isStack = !graph.nodes.some((n) => n.dependsOn.length > 1) &&
+            graph.nodes.every((n, i) => i === 0 || n.dependsOn.length === 1)
+          this.dagOrchestrator.scheduleDagNodes(parent, graph, isStack).catch((err) => {
+            log.error({ err, dagId }, "failed to schedule ready nodes after DAG reconciliation")
+          })
+        }
       }
     }
 
