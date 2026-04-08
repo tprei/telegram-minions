@@ -19,6 +19,12 @@ export type {
   GooseStreamEvent,
 } from "./goose-types.js"
 
+export {
+  isTextContent,
+  isToolRequestContent,
+  isToolResponseContent,
+} from "./goose-types.js"
+
 export type {
   SessionDoneState,
   SessionState,

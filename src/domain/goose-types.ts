@@ -49,6 +49,18 @@ export interface GooseNotificationContent {
   total?: number | null
 }
 
+export function isTextContent(block: GooseContentType): block is GooseTextContent {
+  return block.type === "text"
+}
+
+export function isToolRequestContent(block: GooseContentType): block is GooseToolRequestContent {
+  return block.type === "toolRequest"
+}
+
+export function isToolResponseContent(block: GooseContentType): block is GooseToolResponseContent {
+  return block.type === "toolResponse"
+}
+
 export interface GooseMessage {
   id?: string | null
   role: "user" | "assistant"

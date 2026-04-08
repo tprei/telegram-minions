@@ -2,6 +2,7 @@ import fs from "node:fs"
 import path from "node:path"
 import type { TelegramClient } from "./telegram.js"
 import type { GooseStreamEvent, GooseMessage, GooseToolRequestContent, GooseToolResponseContent } from "../domain/goose-types.js"
+import { isTextContent, isToolRequestContent, isToolResponseContent } from "../domain/goose-types.js"
 import type { SessionMeta, SessionDoneState } from "../domain/session-types.js"
 import { captureException } from "../sentry.js"
 import { loggers } from "../logger.js"
@@ -173,8 +174,8 @@ export class Observer {
   private async handleMessage(meta: SessionMeta, message: GooseMessage): Promise<void> {
     // Process tool responses from any role (user messages carry toolResponse blocks)
     for (const block of message.content) {
-      if (block.type === "toolResponse") {
-        await this.handleToolResponse(meta, block as GooseToolResponseContent)
+      if (isToolResponseContent(block)) {
+        await this.handleToolResponse(meta, block)
       }
     }
 
@@ -183,15 +184,14 @@ export class Observer {
     await this.scanAndSendScreenshots(meta)
 
     for (const block of message.content) {
-      if (block.type === "text") {
-        const text = (block as { type: "text"; text: string }).text
-        if (text) {
-          this.bufferText(meta, text)
+      if (isTextContent(block)) {
+        if (block.text) {
+          this.bufferText(meta, block.text)
         }
-      } else if (block.type === "toolRequest") {
+      } else if (isToolRequestContent(block)) {
         // Flush buffered text before showing tool activity
         await this.flushTextBuffer(meta, "tool")
-        await this.handleToolRequest(meta, block as GooseToolRequestContent)
+        await this.handleToolRequest(meta, block)
       }
     }
   }
