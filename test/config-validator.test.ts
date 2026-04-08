@@ -443,7 +443,7 @@ describe("validateAgentDefinitions", () => {
 
   it("rejects non-object settingsJson", () => {
     const result = validateAgentDefinitions({
-      settingsJson: "invalid" as unknown as object,
+      settingsJson: "invalid" as unknown as Record<string, unknown>,
     })
     expect(result.valid).toBe(false)
   })
@@ -491,7 +491,7 @@ describe("validateAgentDefinitions", () => {
 
   it("rejects array as settingsJson", () => {
     const result = validateAgentDefinitions({
-      settingsJson: [1, 2, 3] as unknown as object,
+      settingsJson: [1, 2, 3] as unknown as Record<string, unknown>,
     })
     expect(result.valid).toBe(false)
     expect(result.errors.some((e) => e.path.includes("settingsJson"))).toBe(true)

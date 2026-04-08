@@ -80,7 +80,7 @@ export interface AgentDefinitions {
   skillsDir?: string
   goosehintsPath?: string
   claudeMd?: string
-  settingsJson?: object
+  settingsJson?: Record<string, unknown>
 }
 
 export interface QuotaConfig {
