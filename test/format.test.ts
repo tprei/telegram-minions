@@ -49,6 +49,14 @@ import {
   formatJudgeError,
   formatLoopStatus,
   type LoopStatusEntry,
+  formatLandStart,
+  formatLandProgress,
+  formatLandComplete,
+  formatLandError,
+  formatLandSkipped,
+  formatLandSummary,
+  formatLandConflictResolution,
+  formatLandRestacking,
 } from "../src/telegram/format.js"
 import type { ClaudeUsageResponse } from "../src/claude-usage.js"
 import type { AggregateStats, SessionRecord, ModeBreakdown } from "../src/stats.js"
@@ -1780,6 +1788,123 @@ describe("formatPinnedDagStatus", () => {
       ]
       const result = formatLoopStatus(entries)
       expect(result).toContain("&lt;b&gt;Lint&lt;/b&gt;")
+    })
+  })
+
+  describe("formatLandStart", () => {
+    it("includes slug and PR count", () => {
+      const result = formatLandStart("my-task", 3)
+      expect(result).toContain("my-task")
+      expect(result).toContain("3 PRs")
+    })
+
+    it("escapes HTML in slug", () => {
+      const result = formatLandStart("<script>", 1)
+      expect(result).toContain("&lt;script&gt;")
+      expect(result).not.toContain("<script>")
+    })
+  })
+
+  describe("formatLandProgress", () => {
+    it("shows 1-indexed progress", () => {
+      const result = formatLandProgress("Add auth", "https://github.com/o/r/pull/1", 0, 3)
+      expect(result).toContain("1/3")
+      expect(result).toContain("Add auth")
+      expect(result).toContain("PR")
+    })
+
+    it("escapes HTML in title and URL", () => {
+      const result = formatLandProgress("<b>title</b>", "https://example.com/pull/1&x=y", 1, 2)
+      expect(result).toContain("&lt;b&gt;title&lt;/b&gt;")
+    })
+  })
+
+  describe("formatLandComplete", () => {
+    it("shows success count and defaults to main", () => {
+      const result = formatLandComplete(3, 3)
+      expect(result).toContain("3/3")
+      expect(result).toContain("main")
+    })
+
+    it("uses custom base branch", () => {
+      const result = formatLandComplete(2, 3, "develop")
+      expect(result).toContain("develop")
+    })
+  })
+
+  describe("formatLandError", () => {
+    it("includes title and error message", () => {
+      const result = formatLandError("Setup CI", "merge conflict")
+      expect(result).toContain("Setup CI")
+      expect(result).toContain("merge conflict")
+    })
+
+    it("escapes HTML in title and error", () => {
+      const result = formatLandError("<em>task</em>", "a & b")
+      expect(result).toContain("&lt;em&gt;task&lt;/em&gt;")
+      expect(result).toContain("a &amp; b")
+    })
+  })
+
+  describe("formatLandSkipped", () => {
+    it("shows title and lowercased state", () => {
+      const result = formatLandSkipped("Auth PR", "MERGED")
+      expect(result).toContain("Auth PR")
+      expect(result).toContain("merged")
+    })
+  })
+
+  describe("formatLandSummary", () => {
+    it("shows merged count and base branch", () => {
+      const result = formatLandSummary(2, 1, 0, 3, ["Deploy fix"])
+      expect(result).toContain("2/3")
+      expect(result).toContain("main")
+    })
+
+    it("includes skipped count when present", () => {
+      const result = formatLandSummary(1, 0, 2, 3, [])
+      expect(result).toContain("2 skipped")
+    })
+
+    it("lists failed titles", () => {
+      const result = formatLandSummary(1, 2, 0, 3, ["Task A", "Task B"])
+      expect(result).toContain("2 failed")
+      expect(result).toContain("Task A")
+      expect(result).toContain("Task B")
+    })
+
+    it("uses custom base branch", () => {
+      const result = formatLandSummary(1, 0, 0, 1, [], "develop")
+      expect(result).toContain("develop")
+    })
+  })
+
+  describe("formatLandConflictResolution", () => {
+    it("shows resolved message when resolved", () => {
+      const result = formatLandConflictResolution("Auth", "feat/auth", true)
+      expect(result).toContain("Resolved")
+      expect(result).toContain("Auth")
+      expect(result).toContain("feat/auth")
+    })
+
+    it("shows warning when not resolved", () => {
+      const result = formatLandConflictResolution("Auth", "feat/auth", false)
+      expect(result).toContain("Could not resolve")
+      expect(result).toContain("Auth")
+    })
+  })
+
+  describe("formatLandRestacking", () => {
+    it("includes title and branch", () => {
+      const result = formatLandRestacking("Setup DB", "feat/db")
+      expect(result).toContain("Setup DB")
+      expect(result).toContain("feat/db")
+    })
+
+    it("escapes HTML in title and branch", () => {
+      const result = formatLandRestacking("<b>task</b>", "feat/<branch>")
+      expect(result).toContain("&lt;b&gt;task&lt;/b&gt;")
+      expect(result).toContain("feat/&lt;branch&gt;")
     })
   })
 })
