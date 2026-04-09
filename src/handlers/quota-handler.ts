@@ -3,8 +3,8 @@ import type { Observer } from "../telegram/observer.js"
 import { writeSessionLog } from "../session/session-log.js"
 
 export interface QuotaEventStore {
-  get(threadId: number): { rawMessage: string } | undefined
-  delete(threadId: number): boolean
+  get(threadId: string): { rawMessage: string } | undefined
+  delete(threadId: string): boolean
 }
 
 export interface QuotaSleepHandler {

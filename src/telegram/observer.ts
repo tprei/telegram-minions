@@ -48,7 +48,7 @@ interface SessionState {
   lastTextAt: number // timestamp of last text chunk
   flushInterval: ReturnType<typeof setInterval> | null
   // Tool activity tracking (per-flush window)
-  activityMessageId: number | null
+  activityMessageId: string | null
   activityLastSentAt: number
   toolCount: number
   activityLog: string[]
@@ -118,7 +118,7 @@ export class Observer {
   private async safeSendMessage(
     meta: SessionMeta,
     html: string,
-  ): Promise<{ ok: boolean; messageId: number | null }> {
+  ): Promise<{ ok: boolean; messageId: string | null }> {
     try {
       return await this.telegram.sendMessage(html, meta.threadId)
     } catch (err) {

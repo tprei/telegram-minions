@@ -87,26 +87,26 @@ const POLL_TIMEOUT = 30
 const SDK_MODES: Set<SessionMode> = new Set(["plan", "think", "review", "ship-think", "ship-plan", "ship-verify"])
 
 export class Dispatcher {
-  private readonly sessions = new Map<number, ActiveSession>()
-  private readonly topicSessions = new Map<number, TopicSession>()
-  private readonly replyQueues = new Map<number, ReplyQueue>()
-  private readonly pendingTasks = new Map<number, PendingTask>()
-  private readonly pendingProfiles = new Map<number, PendingTask>()
+  private readonly sessions = new Map<string, ActiveSession>()
+  private readonly topicSessions = new Map<string, TopicSession>()
+  private readonly replyQueues = new Map<string, ReplyQueue>()
+  private readonly pendingTasks = new Map<string, PendingTask>()
+  private readonly pendingProfiles = new Map<string, PendingTask>()
   private readonly store: SessionStore
   private readonly dagStore: DagStore
   private readonly profileStore: ProfileStore
   private readonly dags = new Map<string, DagGraph>()
-  private readonly abortControllers = new Map<number, AbortController>()
+  private readonly abortControllers = new Map<string, AbortController>()
   private readonly broadcaster?: StateBroadcaster
   private offset = 0
   private running = false
   private cleanupTimer: ReturnType<typeof setInterval> | null = null
   private readonly stats: StatsTracker
 
-  private readonly quotaEvents = new Map<number, { resetAt?: number; rawMessage: string }>()
+  private readonly quotaEvents = new Map<string, { resetAt?: number; rawMessage: string }>()
   private readonly loopStore: LoopStore
   private loopScheduler: LoopScheduler | null = null
-  private readonly quotaSleepTimers = new Map<number, ReturnType<typeof setTimeout>>()
+  private readonly quotaSleepTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
   private readonly ciBabysitter: CIBabysitter
   private readonly landingManager: LandingManager
@@ -135,7 +135,18 @@ export class Dispatcher {
     this.profileStore = new ProfileStore(this.config.workspace.root)
     this.stats = new StatsTracker(this.config.workspace.root)
     this.pinnedMessages = new PinnedMessageManager({
-      telegram: this.telegram,
+      chat: {
+        sendMessage: (html, threadId) => this.telegram.sendMessage(html, threadId),
+        editMessage: (messageId, html, threadId) => this.telegram.editMessage(messageId, html, threadId),
+        deleteMessage: (messageId) => this.telegram.deleteMessage(messageId),
+        pinMessage: (messageId) => this.telegram.pinChatMessage(messageId),
+      },
+      threads: {
+        createThread: (name) => this.telegram.createForumTopic(name).then((t) => ({ threadId: String(t.message_thread_id), name: name })),
+        editThread: (threadId, name) => this.telegram.editForumTopic(threadId, name),
+        closeThread: (threadId) => this.telegram.closeForumTopic(threadId),
+        deleteThread: (threadId) => this.telegram.deleteForumTopic(threadId),
+      },
       topicSessions: this.topicSessions,
       workspaceRoot: this.config.workspace.root,
       chatId: this.config.telegram.chatId,
@@ -476,7 +487,7 @@ export class Dispatcher {
 
   // ── Public command handlers (called by tests and external API) ────────
 
-  async handleReplyCommand(threadId: number, text: string): Promise<void> {
+  async handleReplyCommand(threadId: string, text: string): Promise<void> {
     const topicSession = this.topicSessions.get(threadId)
     if (!topicSession) {
       await this.telegram.sendMessage(`❌ Thread ${threadId} not found or no active session`, threadId)
@@ -489,7 +500,7 @@ export class Dispatcher {
     await this.handleTopicFeedback(topicSession, text)
   }
 
-  async handleStopCommand(threadId: number): Promise<void> {
+  async handleStopCommand(threadId: string): Promise<void> {
     const topicSession = this.topicSessions.get(threadId)
     if (!topicSession) {
       await this.telegram.sendMessage(`❌ Thread ${threadId} not found or no active session`, threadId)
@@ -498,7 +509,7 @@ export class Dispatcher {
     await this.handleStopCommandInternal(topicSession)
   }
 
-  async handleCloseCommand(threadId: number): Promise<void> {
+  async handleCloseCommand(threadId: string): Promise<void> {
     const topicSession = this.topicSessions.get(threadId)
     if (!topicSession) {
       await this.telegram.sendMessage(`❌ Thread ${threadId} not found or no active session`, threadId)
@@ -644,7 +655,7 @@ export class Dispatcher {
     return entries
   }
 
-  private async startLoopSession(loopId: string, def: LoopDefinition, state: LoopState): Promise<number | null> {
+  private async startLoopSession(loopId: string, def: LoopDefinition, state: LoopState): Promise<string | null> {
     const sessionId = crypto.randomUUID()
     const slug = generateSlug(sessionId)
     const repo = def.repo ? extractRepoName(def.repo) : "local"
@@ -660,7 +671,7 @@ export class Dispatcher {
       return null
     }
 
-    const threadId = topic.message_thread_id
+    const threadId = String(topic.message_thread_id)
 
     const cwd = await this.prepareWorkspace(slug, repoUrl)
     if (!cwd) {
@@ -741,7 +752,7 @@ export class Dispatcher {
   private async cleanupStaleSessions(): Promise<void> {
     const now = Date.now()
     const staleTtlMs = this.config.workspace.staleTtlMs
-    const stale: [number, TopicSession][] = []
+    const stale: [string, TopicSession][] = []
 
     for (const [threadId, session] of this.topicSessions) {
       if (session.activeSessionId) continue
@@ -772,7 +783,7 @@ export class Dispatcher {
   }
 
   private async persistTopicSessions(markInterrupted = false): Promise<void> {
-    const toSave = new Map<number, TopicSession>()
+    const toSave = new Map<string, TopicSession>()
     const now = Date.now()
     for (const [threadId, session] of this.topicSessions) {
       if (markInterrupted && session.activeSessionId) {
@@ -830,7 +841,7 @@ export class Dispatcher {
     const photos = message.photo
     if (!text && !photos) return
 
-    const threadId = message.message_thread_id
+    const threadId = message.message_thread_id !== undefined ? String(message.message_thread_id) : undefined
     const topicSession = threadId !== undefined ? this.topicSessions.get(threadId) : undefined
 
     const routed = routeCommand(text, threadId, topicSession?.mode, !!topicSession, photos)
@@ -917,7 +928,7 @@ export class Dispatcher {
       return
     }
 
-    const messageId = query.message?.message_id
+    const messageId = query.message?.message_id !== undefined ? String(query.message.message_id) : undefined
 
     if (messageId) {
       const pending = this.pendingTasks.get(messageId)
@@ -966,7 +977,7 @@ export class Dispatcher {
       return
     }
 
-    const messageId = query.message?.message_id
+    const messageId = query.message?.message_id !== undefined ? String(query.message.message_id) : undefined
     if (messageId) {
       const pending = this.pendingProfiles.get(messageId)
       if (pending) {
@@ -983,7 +994,7 @@ export class Dispatcher {
 
   // ── Session-creating commands ─────────────────────────────────────────
 
-  private async handlePlanCommand(args: string, replyThreadId?: number, photos?: TelegramPhotoSize[]): Promise<void> {
+  private async handlePlanCommand(args: string, replyThreadId?: string, photos?: TelegramPhotoSize[]): Promise<void> {
     const { repoUrl, task } = parseTaskArgs(this.config.repos, args)
 
     if (!task) {
@@ -1012,7 +1023,7 @@ export class Dispatcher {
     await this.startWithProfileSelection(repoUrl, task, "plan", replyThreadId, photos)
   }
 
-  private async handleThinkCommand(args: string, replyThreadId?: number, photos?: TelegramPhotoSize[]): Promise<void> {
+  private async handleThinkCommand(args: string, replyThreadId?: string, photos?: TelegramPhotoSize[]): Promise<void> {
     const { repoUrl, task } = parseTaskArgs(this.config.repos, args)
 
     if (!task) {
@@ -1041,7 +1052,7 @@ export class Dispatcher {
     await this.startWithProfileSelection(repoUrl, task, "think", replyThreadId, photos)
   }
 
-  private async handleShipCommand(args: string, replyThreadId?: number): Promise<void> {
+  private async handleShipCommand(args: string, replyThreadId?: string): Promise<void> {
     const { repoUrl, task } = parseTaskArgs(this.config.repos, args)
 
     if (!task) {
@@ -1079,7 +1090,7 @@ export class Dispatcher {
     repoUrl: string | undefined,
     task: string,
     mode: "task" | "plan" | "think" | "review" | "ship-think",
-    replyThreadId?: number,
+    replyThreadId?: string,
     photos?: TelegramPhotoSize[],
     autoAdvance?: AutoAdvance,
   ): Promise<void> {
@@ -1142,7 +1153,7 @@ export class Dispatcher {
       return
     }
 
-    const threadId = topic.message_thread_id
+    const threadId = String(topic.message_thread_id)
 
     const cwd = await this.prepareWorkspace(slug, repoUrl)
     if (!cwd) {
@@ -1380,7 +1391,7 @@ export class Dispatcher {
     this.persistTopicSessions().catch(() => {})
   }
 
-  private clearQuotaSleepTimer(threadId: number): void {
+  private clearQuotaSleepTimer(threadId: string): void {
     const timer = this.quotaSleepTimers.get(threadId)
     if (timer) {
       clearTimeout(timer)
@@ -1557,7 +1568,7 @@ export class Dispatcher {
     parent: TopicSession,
     item: { title: string; description: string },
     allItems: { title: string; description: string }[],
-  ): Promise<number | null> {
+  ): Promise<string | null> {
     const sessionId = crypto.randomUUID()
     const slug = generateSlug(sessionId)
     const repo = parent.repo
@@ -1574,7 +1585,7 @@ export class Dispatcher {
       return null
     }
 
-    const threadId = topic.message_thread_id
+    const threadId = String(topic.message_thread_id)
 
     const cwd = await this.prepareWorkspace(slug, parent.repoUrl)
     if (!cwd) {
@@ -1625,7 +1636,7 @@ export class Dispatcher {
   // ── Child session management ──────────────────────────────────────────
 
   private async closeChildSessions(parent: TopicSession): Promise<void> {
-    const childrenToClose = new Map<number, TopicSession>()
+    const childrenToClose = new Map<string, TopicSession>()
 
     if (parent.childThreadIds) {
       for (const childId of parent.childThreadIds) {
@@ -1792,11 +1803,11 @@ export class Dispatcher {
     return this.sessions.size
   }
 
-  getSessions(): Map<number, ActiveSession> {
+  getSessions(): Map<string, ActiveSession> {
     return this.sessions
   }
 
-  getTopicSessions(): Map<number, TopicSession> {
+  getTopicSessions(): Map<string, TopicSession> {
     return this.topicSessions
   }
 
@@ -1804,12 +1815,12 @@ export class Dispatcher {
     return this.dags
   }
 
-  getSessionState(threadId: number): SessionState | undefined {
+  getSessionState(threadId: string): SessionState | undefined {
     const session = this.sessions.get(threadId)
     return session?.handle.getState()
   }
 
-  async apiSendReply(threadId: number, message: string): Promise<void> {
+  async apiSendReply(threadId: string, message: string): Promise<void> {
     const topicSession = this.topicSessions.get(threadId)
     if (!topicSession) {
       throw new SessionNotFoundError(threadId, Array.from(this.topicSessions.keys()))
@@ -1827,14 +1838,14 @@ export class Dispatcher {
     }
   }
 
-  apiStopSession(threadId: number): void {
+  apiStopSession(threadId: string): void {
     const session = this.sessions.get(threadId)
     if (session) {
       session.handle.interrupt()
     }
   }
 
-  async apiCloseSession(threadId: number): Promise<void> {
+  async apiCloseSession(threadId: string): Promise<void> {
     const topicSession = this.topicSessions.get(threadId)
     if (!topicSession) {
       throw new SessionNotFoundError(threadId, Array.from(this.topicSessions.keys()))

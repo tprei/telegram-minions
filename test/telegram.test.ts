@@ -58,7 +58,7 @@ describe("TelegramClient retry logic", () => {
       const client = new TelegramClient(TOKEN, CHAT_ID)
       const result = await drainTimers(client.sendMessage("hello"))
 
-      expect(result).toEqual({ ok: true, messageId: 42 })
+      expect(result).toEqual({ ok: true, messageId: "42" })
       expect(fetchMock).toHaveBeenCalledTimes(2)
     })
 
@@ -83,7 +83,7 @@ describe("TelegramClient retry logic", () => {
       const client = new TelegramClient(TOKEN, CHAT_ID)
       const result = await drainTimers(client.sendMessage("hello"))
 
-      expect(result).toEqual({ ok: true, messageId: 1 })
+      expect(result).toEqual({ ok: true, messageId: "1" })
     })
   })
 
@@ -96,7 +96,7 @@ describe("TelegramClient retry logic", () => {
       const client = new TelegramClient(TOKEN, CHAT_ID)
       const result = await drainTimers(client.sendMessage("hello"))
 
-      expect(result).toEqual({ ok: true, messageId: 99 })
+      expect(result).toEqual({ ok: true, messageId: "99" })
       expect(fetchMock).toHaveBeenCalledTimes(2)
     })
 
@@ -191,7 +191,7 @@ describe("TelegramClient retry logic", () => {
         client.sendPhotoBuffer(Buffer.from("fake-png"), "test.png"),
       )
 
-      expect(result).toBe(55)
+      expect(result).toBe("55")
       expect(fetchMock).toHaveBeenCalledTimes(2)
     })
 
@@ -210,7 +210,7 @@ describe("TelegramClient retry logic", () => {
         client.sendPhotoBuffer(Buffer.from("fake-png"), "test.png"),
       )
 
-      expect(result).toBe(56)
+      expect(result).toBe("56")
     })
 
     it("returns null after exhausting retries on sendPhoto", async () => {
@@ -236,7 +236,7 @@ describe("TelegramClient retry logic", () => {
       const client = new TelegramClient(TOKEN, CHAT_ID)
       const result = await drainTimers(client.sendMessage("hello"))
 
-      expect(result).toEqual({ ok: true, messageId: 77 })
+      expect(result).toEqual({ ok: true, messageId: "77" })
       expect(fetchMock).toHaveBeenCalledTimes(3)
     })
   })
@@ -246,7 +246,7 @@ describe("TelegramClient retry logic", () => {
       fetchMock.mockResolvedValueOnce(ok(true))
 
       const client = new TelegramClient(TOKEN, CHAT_ID)
-      await client.pinChatMessage(42)
+      await client.pinChatMessage("42")
 
       expect(fetchMock).toHaveBeenCalledTimes(1)
       const [url, opts] = fetchMock.mock.calls[0]
@@ -263,7 +263,7 @@ describe("TelegramClient retry logic", () => {
       fetchMock.mockResolvedValueOnce(httpError(400, "Bad Request: not enough rights"))
 
       const client = new TelegramClient(TOKEN, CHAT_ID)
-      await expect(client.pinChatMessage(42)).resolves.toBeUndefined()
+      await expect(client.pinChatMessage("42")).resolves.toBeUndefined()
     })
   })
 
@@ -277,8 +277,8 @@ describe("TelegramClient retry logic", () => {
       const [r1, r2] = await drainTimers(
         Promise.all([client.sendMessage("a"), client.sendMessage("b")])
       )
-      expect(r1).toEqual({ ok: true, messageId: 1 })
-      expect(r2).toEqual({ ok: true, messageId: 2 })
+      expect(r1).toEqual({ ok: true, messageId: "1" })
+      expect(r2).toEqual({ ok: true, messageId: "2" })
       expect(fetchMock).toHaveBeenCalledTimes(2)
     })
 

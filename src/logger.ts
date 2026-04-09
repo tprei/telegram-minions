@@ -71,7 +71,7 @@ export const loggers = {
  */
 export function createSessionLogger(
   slug: string,
-  threadId?: number,
+  threadId?: string,
   sessionId?: string
 ): pino.Logger {
   return rootLogger.child({

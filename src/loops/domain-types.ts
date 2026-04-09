@@ -11,7 +11,7 @@ export interface LoopOutcome {
   result: LoopOutcomeResult
   prUrl?: string
   error?: string
-  threadId?: number
+  threadId?: string
 }
 
 /** Persistent state for one loop definition */

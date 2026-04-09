@@ -23,7 +23,7 @@ const mockFindPRByBranch = vi.mocked(findPRByBranch)
 
 function makeSession(overrides: Partial<TopicSession> = {}): TopicSession {
   return {
-    threadId: 100,
+    threadId: "100",
     repo: "org/repo",
     repoUrl: "https://github.com/org/repo",
     cwd: "/tmp/workspace",
@@ -119,7 +119,7 @@ describe("DagOrchestrator", () => {
     function makeGraph(nodes: Partial<DagNode>[]): DagGraph {
       return {
         id: "dag-test",
-        parentThreadId: 100,
+        parentThreadId: "100",
         repo: "org/repo",
         nodes: nodes.map(n => ({
           id: n.id ?? "node",
@@ -207,13 +207,13 @@ describe("DagOrchestrator", () => {
 
       const threadId = await orchestrator.spawnDagChild(parent, graph, node, false)
 
-      expect(threadId).toBe(200)
+      expect(threadId).toBe("200")
       expect(ctx.telegram.createForumTopic).toHaveBeenCalled()
       expect(ctx.prepareWorkspace).toHaveBeenCalled()
       expect(ctx.spawnTopicAgent).toHaveBeenCalled()
-      expect(ctx.topicSessions.has(200)).toBe(true)
+      expect(ctx.topicSessions.has("200")).toBe(true)
 
-      const childSession = ctx.topicSessions.get(200)!
+      const childSession = ctx.topicSessions.get("200")!
       expect(childSession.dagId).toBe("dag-test")
       expect(childSession.dagNodeId).toBe("a")
       expect(childSession.mode).toBe("task")
@@ -254,7 +254,7 @@ describe("DagOrchestrator", () => {
 
       const threadId = await orchestrator.spawnDagChild(parent, graph, node, false)
       expect(threadId).toBeNull()
-      expect(ctx.telegram.deleteForumTopic).toHaveBeenCalledWith(200)
+      expect(ctx.telegram.deleteForumTopic).toHaveBeenCalledWith("200")
     })
 
     it("handles fan-in with multiple upstream branches", async () => {
@@ -314,7 +314,7 @@ describe("DagOrchestrator", () => {
       vi.mocked(ctx.mergeUpstreamBranches).mockReturnValue({ ok: false, conflictFiles: ["test/format.test.ts"] })
 
       const threadId = await orchestrator.spawnDagChild(parent, graph, graph.nodes[2], false)
-      expect(threadId).toBe(200)
+      expect(threadId).toBe("200")
       expect(ctx.spawnTopicAgent).toHaveBeenCalled()
       const taskPrompt = vi.mocked(ctx.spawnTopicAgent).mock.calls[0][1]
       expect(taskPrompt).toContain("Merge conflicts to resolve first")

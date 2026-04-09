@@ -73,10 +73,10 @@ export function createMinion(config: MinionConfig, options?: MinionOptions): Min
       getSessions: () => dispatcher.getSessions(),
       getTopicSessions: () => dispatcher.getTopicSessions(),
       getDags: () => dispatcher.getDags(),
-      getSessionState: (threadId: number) => dispatcher.getSessionState(threadId),
-      sendReply: (threadId: number, message: string) => dispatcher.apiSendReply(threadId, message),
-      stopSession: (threadId: number) => dispatcher.apiStopSession(threadId),
-      closeSession: (threadId: number) => dispatcher.apiCloseSession(threadId),
+      getSessionState: (threadId: string) => dispatcher.getSessionState(threadId),
+      sendReply: (threadId: string, message: string) => dispatcher.apiSendReply(threadId, message),
+      stopSession: (threadId: string) => dispatcher.apiStopSession(threadId),
+      closeSession: (threadId: string) => dispatcher.apiCloseSession(threadId),
     }
 
     apiServer = createApiServer(dispatcherApi, {

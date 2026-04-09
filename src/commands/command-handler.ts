@@ -158,7 +158,7 @@ export class CommandHandler {
 
     const now = Date.now()
     const staleTtlMs = this.ctx.config.workspace.staleTtlMs
-    const idle: [number, TopicSession][] = []
+    const idle: [string, TopicSession][] = []
     for (const [threadId, session] of this.ctx.topicSessions) {
       if (session.activeSessionId) continue
       const staleTime = session.interruptedAt ?? session.lastActivityAt
@@ -190,7 +190,7 @@ export class CommandHandler {
       const entryPath = path.join(root, entry.name)
       if (entryPath === parentHome) continue
       if (activeCwds.has(entryPath)) continue
-      if (this.ctx.sessions.has(Number(entry.name))) continue
+      if (this.ctx.sessions.has(entry.name)) continue
 
       freedBytes += dirSizeBytes(entryPath)
       try {
@@ -273,7 +273,7 @@ export class CommandHandler {
 
   // ── Session-creating commands ─────────────────────────────────────────
 
-  async handleTaskCommand(args: string, replyThreadId?: number, photos?: TelegramPhotoSize[]): Promise<void> {
+  async handleTaskCommand(args: string, replyThreadId?: string, photos?: TelegramPhotoSize[]): Promise<void> {
     if (this.ctx.sessions.size >= this.ctx.config.workspace.maxConcurrentSessions) {
       if (replyThreadId !== undefined) {
         await this.ctx.telegram.sendMessage(
@@ -317,7 +317,7 @@ export class CommandHandler {
     await this.ctx.startWithProfileSelection(repoUrl, task, "task", replyThreadId, photos)
   }
 
-  async handleReviewCommand(args: string, replyThreadId?: number): Promise<void> {
+  async handleReviewCommand(args: string, replyThreadId?: string): Promise<void> {
     const parsed = parseReviewArgs(this.ctx.config.repos, args)
 
     if (!parsed.repoUrl && !parsed.task) {

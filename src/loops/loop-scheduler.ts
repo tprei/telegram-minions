@@ -18,7 +18,7 @@ export interface LoopSchedulerConfig {
 
 export interface LoopSchedulerCallbacks {
   getActiveSessionCount(): number
-  startLoopSession(loopId: string, definition: LoopDefinition, state: LoopState): Promise<number | null>
+  startLoopSession(loopId: string, definition: LoopDefinition, state: LoopState): Promise<string | null>
   isQuotaSleeping(): boolean
 }
 
@@ -26,7 +26,7 @@ export class LoopScheduler {
   private readonly definitions = new Map<string, LoopDefinition>()
   private readonly states = new Map<string, LoopState>()
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>()
-  private readonly activeLoopThreads = new Map<string, number>()
+  private readonly activeLoopThreads = new Map<string, string>()
   private running = false
 
   constructor(
@@ -91,7 +91,7 @@ export class LoopScheduler {
     return this.states
   }
 
-  getActiveLoopThreads(): Map<string, number> {
+  getActiveLoopThreads(): Map<string, string> {
     return this.activeLoopThreads
   }
 

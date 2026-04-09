@@ -10,6 +10,8 @@ import { vi } from "vitest"
 import type { ChildProcess } from "node:child_process"
 import type { TelegramClient } from "../src/telegram/telegram.js"
 import type { Observer, TextCaptureCallback } from "../src/telegram/observer.js"
+import type { ChatProvider } from "../src/provider/chat-provider.js"
+import type { ThreadManager } from "../src/provider/thread-manager.js"
 import type { StatsTracker, SessionRecord, AggregateStats } from "../src/stats.js"
 import type { ProfileStore } from "../src/profile-store.js"
 import type { DispatcherContext } from "../src/orchestration/dispatcher-context.js"
@@ -50,6 +52,30 @@ export function makeMockTelegram(overrides: Partial<TelegramClient> = {}): Teleg
     downloadFile: vi.fn(async () => true),
     ...overrides,
   } as unknown as TelegramClient
+}
+
+// ── ChatProvider ──────────────────────────────────────────────────────
+
+export function makeMockChatProvider(overrides: Partial<ChatProvider> = {}): ChatProvider {
+  return {
+    sendMessage: vi.fn(async () => ({ ok: true, messageId: "100" })),
+    editMessage: vi.fn(async () => true),
+    deleteMessage: vi.fn(async () => {}),
+    pinMessage: vi.fn(async () => {}),
+    ...overrides,
+  }
+}
+
+// ── ThreadManager ─────────────────────────────────────────────────────
+
+export function makeMockThreadManager(overrides: Partial<ThreadManager> = {}): ThreadManager {
+  return {
+    createThread: vi.fn(async () => ({ threadId: "100", name: "test" })),
+    editThread: vi.fn(async () => {}),
+    closeThread: vi.fn(async () => {}),
+    deleteThread: vi.fn(async () => {}),
+    ...overrides,
+  }
 }
 
 // ── Observer ───────────────────────────────────────────────────────────
@@ -107,7 +133,7 @@ export function makeMockProfileStore(overrides: Partial<ProfileStore> = {}): Pro
 export function makeMockSessionPort(overrides: Partial<SessionPort> = {}): SessionPort {
   const meta: SessionMeta = {
     sessionId: "test-session-1",
-    threadId: 1,
+    threadId: "1",
     topicName: "test-topic",
     repo: "test-repo",
     cwd: "/tmp/test",
@@ -147,7 +173,7 @@ export function makeMockActiveSession(overrides: Partial<ActiveSession> = {}): A
 
 export function makeMockTopicSession(overrides: Partial<TopicSession> = {}): TopicSession {
   return {
-    threadId: 1,
+    threadId: "1",
     repo: "test-repo",
     cwd: "/tmp/test",
     slug: "test-slug",
@@ -296,7 +322,7 @@ export function makeMockDagGraph(overrides: Partial<DagGraph> = {}): DagGraph {
   return {
     id: "dag-1",
     nodes: [],
-    parentThreadId: 1,
+    parentThreadId: "1",
     repo: "test-repo",
     createdAt: Date.now(),
     ...overrides,

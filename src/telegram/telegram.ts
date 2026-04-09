@@ -223,9 +223,9 @@ export class TelegramClient {
 
   private async sendOne(
     html: string,
-    threadId?: number,
-    replyToMessageId?: number,
-  ): Promise<number | null> {
+    threadId?: string,
+    replyToMessageId?: string,
+  ): Promise<string | null> {
     const sanitized = sanitizeText(html)
     try {
       const body: Record<string, unknown> = {
@@ -233,11 +233,11 @@ export class TelegramClient {
         text: sanitized,
         parse_mode: "HTML",
       }
-      if (threadId !== undefined) body.message_thread_id = threadId
-      if (replyToMessageId !== undefined) body.reply_to_message_id = replyToMessageId
+      if (threadId !== undefined) body.message_thread_id = Number(threadId)
+      if (replyToMessageId !== undefined) body.reply_to_message_id = Number(replyToMessageId)
 
       const result = await this.call<{ message_id: number }>("sendMessage", body)
-      return result.message_id
+      return String(result.message_id)
     } catch (err) {
       if (isThreadNotFoundError(err)) {
         throw err
@@ -250,9 +250,9 @@ export class TelegramClient {
 
   async sendMessage(
     html: string,
-    threadId?: number,
-    replyToMessageId?: number,
-  ): Promise<{ ok: boolean; messageId: number | null }> {
+    threadId?: string,
+    replyToMessageId?: string,
+  ): Promise<{ ok: boolean; messageId: string | null }> {
     const chunks = splitMessage(html)
 
     const firstId = await this.sendOne(chunks[0], threadId, replyToMessageId)
@@ -268,21 +268,21 @@ export class TelegramClient {
   }
 
   async editMessage(
-    messageId: number,
+    messageId: string,
     html: string,
-    threadId?: number,
+    threadId?: string,
   ): Promise<boolean> {
     const sanitized = sanitizeText(html)
     try {
       const body: Record<string, unknown> = {
         chat_id: this.chatId,
-        message_id: messageId,
+        message_id: Number(messageId),
         text: sanitized,
         parse_mode: "HTML",
       }
-      if (threadId !== undefined) body.message_thread_id = threadId
+      if (threadId !== undefined) body.message_thread_id = Number(threadId)
 
-      await this.call("editMessageText", body, String(messageId))
+      await this.call("editMessageText", body, messageId)
       return true
     } catch (err) {
       if (String(err).includes("message is not modified")) return true
@@ -299,19 +299,19 @@ export class TelegramClient {
     })
   }
 
-  async editForumTopic(threadId: number, name: string): Promise<void> {
+  async editForumTopic(threadId: string, name: string): Promise<void> {
     await this.call("editForumTopic", {
       chat_id: this.chatId,
-      message_thread_id: threadId,
+      message_thread_id: Number(threadId),
       name: name.slice(0, 128),
     })
   }
 
-  async pinChatMessage(messageId: number): Promise<void> {
+  async pinChatMessage(messageId: string): Promise<void> {
     try {
       await this.call("pinChatMessage", {
         chat_id: this.chatId,
-        message_id: messageId,
+        message_id: Number(messageId),
         disable_notification: true,
       })
     } catch (err) {
@@ -319,11 +319,11 @@ export class TelegramClient {
     }
   }
 
-  async closeForumTopic(threadId: number): Promise<void> {
+  async closeForumTopic(threadId: string): Promise<void> {
     try {
       await this.call("closeForumTopic", {
         chat_id: this.chatId,
-        message_thread_id: threadId,
+        message_thread_id: Number(threadId),
       })
     } catch (err) {
       log.warn({ err, method: "closeForumTopic" }, "closeForumTopic failed")
@@ -333,8 +333,8 @@ export class TelegramClient {
   async sendMessageWithKeyboard(
     html: string,
     keyboard: { text: string; callback_data: string }[][],
-    threadId?: number,
-  ): Promise<number | null> {
+    threadId?: string,
+  ): Promise<string | null> {
     try {
       const body: Record<string, unknown> = {
         chat_id: this.chatId,
@@ -342,9 +342,9 @@ export class TelegramClient {
         parse_mode: "HTML",
         reply_markup: { inline_keyboard: keyboard },
       }
-      if (threadId !== undefined) body.message_thread_id = threadId
+      if (threadId !== undefined) body.message_thread_id = Number(threadId)
       const result = await this.call<{ message_id: number }>("sendMessage", body)
-      return result.message_id
+      return String(result.message_id)
     } catch (err) {
       log.error({ err, method: "sendMessageWithKeyboard" }, "sendMessageWithKeyboard failed")
       return null
@@ -361,22 +361,22 @@ export class TelegramClient {
     }
   }
 
-  async deleteMessage(messageId: number): Promise<void> {
+  async deleteMessage(messageId: string): Promise<void> {
     try {
       await this.call("deleteMessage", {
         chat_id: this.chatId,
-        message_id: messageId,
+        message_id: Number(messageId),
       })
     } catch (err) {
       log.warn({ err, method: "deleteMessage" }, "deleteMessage failed")
     }
   }
 
-  async deleteForumTopic(threadId: number): Promise<void> {
+  async deleteForumTopic(threadId: string): Promise<void> {
     try {
       await this.call("deleteForumTopic", {
         chat_id: this.chatId,
-        message_thread_id: threadId,
+        message_thread_id: Number(threadId),
       })
     } catch (err) {
       log.warn({ err, method: "deleteForumTopic" }, "deleteForumTopic failed")
@@ -385,9 +385,9 @@ export class TelegramClient {
 
   async sendPhoto(
     photoPath: string,
-    threadId?: number,
+    threadId?: string,
     caption?: string,
-  ): Promise<number | null> {
+  ): Promise<string | null> {
     try {
       const data = fs.readFileSync(photoPath)
       return await this.sendPhotoBlob(new Blob([data]), path.basename(photoPath), threadId, caption)
@@ -401,9 +401,9 @@ export class TelegramClient {
   async sendPhotoBuffer(
     buffer: Buffer,
     filename: string,
-    threadId?: number,
+    threadId?: string,
     caption?: string,
-  ): Promise<number | null> {
+  ): Promise<string | null> {
     try {
       return await this.sendPhotoBlob(new Blob([buffer]), filename, threadId, caption)
     } catch (err) {
@@ -416,18 +416,18 @@ export class TelegramClient {
   private sendPhotoBlob(
     blob: Blob,
     filename: string,
-    threadId?: number,
+    threadId?: string,
     caption?: string,
-  ): Promise<number | null> {
+  ): Promise<string | null> {
     return this.enqueue(() => this.sendPhotoBlobDirect(blob, filename, threadId, caption))
   }
 
   private async sendPhotoBlobDirect(
     blob: Blob,
     filename: string,
-    threadId?: number,
+    threadId?: string,
     caption?: string,
-  ): Promise<number | null> {
+  ): Promise<string | null> {
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
       const form = new FormData()
       form.append("chat_id", this.chatId)
@@ -466,7 +466,7 @@ export class TelegramClient {
       const json = (await res.json()) as { ok: boolean; result: { message_id: number }; description?: string }
       if (!json.ok) throw new TelegramResponseError("sendPhoto", json.description)
 
-      return json.result.message_id
+      return String(json.result.message_id)
     }
     throw new TelegramRetryExhaustedError("sendPhoto", MAX_RETRIES)
   }

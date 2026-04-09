@@ -22,13 +22,13 @@ export interface LoopSchedulerProvider {
 }
 
 export interface LoopTelegramNotifier {
-  sendMessage(html: string, threadId?: number): Promise<{ ok: boolean; messageId: number | null }>
-  deleteForumTopic(threadId: number): Promise<void>
+  sendMessage(html: string, threadId?: string): Promise<{ ok: boolean; messageId: string | null }>
+  deleteForumTopic(threadId: string): Promise<void>
 }
 
 export interface LoopThreadCleaner {
   removeWorkspace(topicSession: import("../domain/session-types.js").TopicSession): Promise<void>
-  deleteTopicSession(threadId: number): void
+  deleteTopicSession(threadId: string): void
   broadcastSessionDeleted(slug: string): void
 }
 

@@ -103,7 +103,7 @@ describe("makeMockActiveSession", () => {
 describe("makeMockTopicSession", () => {
   it("creates a minimal TopicSession", () => {
     const ts = makeMockTopicSession()
-    expect(ts.threadId).toBe(1)
+    expect(ts.threadId).toBe("1")
     expect(ts.slug).toBe("test-slug")
     expect(ts.conversation).toEqual([])
     expect(ts.pendingFeedback).toEqual([])
@@ -112,13 +112,13 @@ describe("makeMockTopicSession", () => {
 
   it("accepts overrides", () => {
     const ts = makeMockTopicSession({
-      threadId: 99,
+      threadId: "99",
       mode: "plan",
-      childThreadIds: [10, 20],
+      childThreadIds: ["10", "20"],
     })
-    expect(ts.threadId).toBe(99)
+    expect(ts.threadId).toBe("99")
     expect(ts.mode).toBe("plan")
-    expect(ts.childThreadIds).toEqual([10, 20])
+    expect(ts.childThreadIds).toEqual(["10", "20"])
   })
 })
 
