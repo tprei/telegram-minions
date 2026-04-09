@@ -1,6 +1,8 @@
 import { execFile as execFileCb } from "node:child_process"
+import path from "node:path"
 import { promisify } from "node:util"
 import { existsSync } from "node:fs"
+import { extractRepoName } from "../commands/command-parser.js"
 import type { DispatcherContext } from "../orchestration/dispatcher-context.js"
 import type { TopicSession } from "../domain/session-types.js"
 import type { DagGraph, DagNode } from "./dag.js"
@@ -108,6 +110,7 @@ export class LandingManager {
     const repo = prNodes.find((n) => n.prUrl)?.prUrl ? repoFromPrUrl(prNodes.find((n) => n.prUrl)!.prUrl!) : undefined
     const baseBranch = await this.detectBaseBranch(repo, topicSession, graph)
 
+    await this.pruneWorktrees(topicSession)
     await this.removeChildWorktrees(topicSession, graph)
 
     await this.ctx.telegram.sendMessage(
@@ -423,22 +426,41 @@ export class LandingManager {
     }
   }
 
+  private async pruneWorktrees(topicSession: TopicSession): Promise<void> {
+    const bareDir = this.resolveBareDir(topicSession)
+    if (!bareDir) return
+    try {
+      await git(["worktree", "prune"], { cwd: bareDir, timeout: 30_000 })
+      log.info({ bareDir }, "pruned stale worktrees before landing")
+    } catch (err) {
+      log.warn({ err, bareDir }, "failed to prune worktrees")
+    }
+  }
+
   private async removeChildWorktrees(topicSession: TopicSession, graph: DagGraph): Promise<void> {
-    const mainCwd = topicSession.cwd
-    if (!mainCwd) return
+    const bareDir = this.resolveBareDir(topicSession)
+    const cwd = bareDir ?? topicSession.cwd
+    if (!cwd) return
 
     for (const node of graph.nodes) {
       if (node.status === "running" || node.status === "pending" || node.status === "ready") continue
       const worktreePath = this.findWorktreePathForBranch(node)
       if (worktreePath && existsSync(worktreePath)) {
         try {
-          await git(["worktree", "remove", "--force", worktreePath], { cwd: mainCwd })
+          await git(["worktree", "remove", "--force", worktreePath], { cwd })
           log.info({ nodeId: node.id, worktreePath }, "removed worktree before landing")
         } catch (err) {
           log.warn({ nodeId: node.id, worktreePath, err }, "failed to remove worktree before landing")
         }
       }
     }
+  }
+
+  private resolveBareDir(topicSession: TopicSession): string | undefined {
+    if (!topicSession.repoUrl) return undefined
+    const repoName = extractRepoName(topicSession.repoUrl)
+    const bareDir = path.join(this.ctx.config.workspace.root, ".repos", `${repoName}.git`)
+    return existsSync(bareDir) ? bareDir : undefined
   }
 
   private findValidCwd(topicSession: TopicSession, graph?: DagGraph): string | undefined {

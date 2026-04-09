@@ -1,4 +1,6 @@
-import { describe, it, expect, vi } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
+import fs from "node:fs"
+import path from "node:path"
 import { LandingManager } from "../src/dag/landing-manager.js"
 import type { DispatcherContext } from "../src/orchestration/dispatcher-context.js"
 import type { TopicSession } from "../src/domain/session-types.js"
@@ -215,6 +217,113 @@ describe("LandingManager", () => {
 
       expect(ctx.telegram.sendMessage).toHaveBeenCalledWith(
         expect.stringContaining("No PRs found"),
+        100,
+      )
+    })
+  })
+
+  describe("worktree pruning before landing", () => {
+    let tmpDir: string
+
+    beforeEach(() => {
+      tmpDir = fs.mkdtempSync(path.join("/tmp", "landing-test-"))
+    })
+
+    afterEach(() => {
+      fs.rmSync(tmpDir, { recursive: true, force: true })
+    })
+
+    it("prunes stale worktrees before landing DAG nodes", async () => {
+      const bareDir = path.join(tmpDir, ".repos", "telegram-minions.git")
+      fs.mkdirSync(bareDir, { recursive: true })
+
+      const ctx = createMockContext({
+        config: {
+          ...createMockContext().config,
+          workspace: { ...createMockContext().config.workspace, root: tmpDir },
+        },
+      })
+      const graph: DagGraph = {
+        id: "dag-1",
+        nodes: [],
+        parentThreadId: 100,
+        repo: "test-repo",
+      }
+      ctx.dags.set("dag-1", graph)
+
+      const manager = new LandingManager(ctx)
+      const session = makeTopicSession({
+        dagId: "dag-1",
+        repoUrl: "https://github.com/org/telegram-minions",
+      })
+
+      await manager.handleLandCommand(session)
+
+      expect(ctx.telegram.sendMessage).toHaveBeenCalledWith(
+        expect.stringContaining("No completed PRs to land"),
+        100,
+      )
+    })
+
+    it("falls back to topicSession.cwd when repoUrl is missing", async () => {
+      const ctx = createMockContext()
+      const graph: DagGraph = {
+        id: "dag-1",
+        nodes: [
+          {
+            id: "a",
+            title: "Task A",
+            description: "",
+            status: "done",
+            dependsOn: [],
+            prUrl: "https://github.com/org/repo/pull/1",
+            branch: "minion/a",
+          },
+        ],
+        parentThreadId: 100,
+        repo: "test-repo",
+      }
+      ctx.dags.set("dag-1", graph)
+
+      const manager = new LandingManager(ctx)
+      const session = makeTopicSession({ dagId: "dag-1" })
+
+      await manager.handleLandCommand(session)
+
+      expect(ctx.telegram.sendMessage).toHaveBeenCalledWith(
+        expect.stringContaining("Landing"),
+        100,
+      )
+    })
+
+    it("resolves bare dir correctly from repoUrl", async () => {
+      const bareDir = path.join(tmpDir, ".repos", "my-repo.git")
+      fs.mkdirSync(bareDir, { recursive: true })
+
+      const ctx = createMockContext({
+        config: {
+          ...createMockContext().config,
+          workspace: { ...createMockContext().config.workspace, root: tmpDir },
+        },
+      })
+      const graph: DagGraph = {
+        id: "dag-1",
+        nodes: [],
+        parentThreadId: 100,
+        repo: "my-repo",
+      }
+      ctx.dags.set("dag-1", graph)
+
+      const manager = new LandingManager(ctx)
+      const session = makeTopicSession({
+        dagId: "dag-1",
+        repoUrl: "https://github.com/org/my-repo",
+      })
+
+      await manager.handleLandCommand(session)
+
+      expect(ctx.telegram.sendMessage).toHaveBeenCalledWith(
+        expect.stringContaining("No completed PRs to land"),
         100,
       )
     })
