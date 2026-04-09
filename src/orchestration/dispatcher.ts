@@ -250,7 +250,15 @@ export class Dispatcher {
         this.observer,
         this.pinnedMessages,
       ))
-      .register(new LoopCompletionHandler({ get: () => this.loopScheduler }, this.telegram))
+      .register(new LoopCompletionHandler(
+        { get: () => this.loopScheduler },
+        this.telegram,
+        {
+          removeWorkspace: (ts) => this.removeWorkspace(ts),
+          deleteTopicSession: (id) => { this.topicSessions.delete(id) },
+          broadcastSessionDeleted: (slug) => this.broadcastSessionDeleted(slug),
+        },
+      ))
       .register(new TaskCompletionHandler(
         this.telegram,
         this.observer,
