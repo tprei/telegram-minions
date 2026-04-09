@@ -1,7 +1,11 @@
+import { execFile } from "node:child_process"
+import { promisify } from "node:util"
 import type { CompletionHandler, SessionCompletionContext } from "./handler-types.js"
 import type { LoopOutcome, LoopOutcomeResult } from "../loops/domain-types.js"
-import { extractPRUrl } from "../ci/ci-babysit.js"
+import { extractPRUrl, findPRByBranch } from "../ci/ci-babysit.js"
 import { createLogger } from "../logger.js"
+
+const execFileAsync = promisify(execFile)
 
 const log = createLogger({ component: "loop-completion-handler" })
 
@@ -46,7 +50,16 @@ export class LoopCompletionHandler implements CompletionHandler {
 
     const loopId = topicSession.loopId
 
-    const prUrl = this.extractPR(ctx)
+    let prUrl = this.extractPR(ctx)
+
+    // If the session completed without a PR, check for unpushed changes and create one
+    if (!prUrl && state === "completed") {
+      prUrl = await this.ensurePR(topicSession.cwd, topicSession.slug).catch((err) => {
+        log.error({ err, loopId, threadId: topicSession.threadId }, "ensurePR failed")
+        return null
+      })
+    }
+
     const result = this.mapOutcomeResult(state, prUrl)
 
     const outcome: LoopOutcome = {
@@ -81,6 +94,63 @@ export class LoopCompletionHandler implements CompletionHandler {
     await this.telegram.deleteForumTopic(threadId)
     await this.cleaner.removeWorkspace(topicSession)
     log.info({ slug: topicSession.slug, threadId }, "auto-closed loop thread")
+  }
+
+  /**
+   * If the agent made commits but didn't push or open a PR, do it now
+   * so the work isn't lost when the worktree is cleaned up.
+   */
+  private async ensurePR(cwd: string, slug: string): Promise<string | null> {
+    // Check if there are commits ahead of the remote tracking branch
+    const branch = (await execFileAsync("git", ["branch", "--show-current"], { cwd })).stdout.trim()
+    if (!branch) return null
+
+    // Check if the branch has an upstream; if not, it was never pushed
+    let hasUpstream = true
+    try {
+      await execFileAsync("git", ["rev-parse", "--abbrev-ref", `${branch}@{upstream}`], { cwd })
+    } catch {
+      hasUpstream = false
+    }
+
+    // Count unpushed commits (or all commits if no upstream)
+    let unpushedCount: number
+    if (hasUpstream) {
+      const result = await execFileAsync("git", ["rev-list", "--count", `${branch}@{upstream}..HEAD`], { cwd })
+      unpushedCount = parseInt(result.stdout.trim(), 10)
+    } else {
+      // No upstream — count commits since the branch diverged from main/master
+      const result = await execFileAsync("git", ["rev-list", "--count", "HEAD", "--not", "--remotes"], { cwd })
+      unpushedCount = parseInt(result.stdout.trim(), 10)
+    }
+
+    if (unpushedCount === 0) return null
+
+    log.info({ branch, unpushedCount, slug }, "loop session has unpushed commits — pushing and creating PR")
+
+    // Push the branch
+    await execFileAsync("git", ["push", "-u", "origin", branch], { cwd })
+
+    // Check if a PR already exists for this branch
+    const existingPr = await findPRByBranch(branch, cwd)
+    if (existingPr) return existingPr
+
+    // Get the first commit message to use as PR title
+    const firstCommitMsg = (
+      await execFileAsync("git", ["log", "--reverse", "--format=%s", `origin/HEAD..${branch}`], { cwd })
+        .catch(() => execFileAsync("git", ["log", "-1", "--format=%s"], { cwd }))
+    ).stdout.trim().split("\n")[0]
+
+    const title = `[minions] ${firstCommitMsg || slug}`
+
+    const prResult = await execFileAsync(
+      "gh",
+      ["pr", "create", "--title", title, "--body", `Automated loop PR from session \`${slug}\`.`, "--head", branch],
+      { cwd },
+    )
+    const prUrl = prResult.stdout.trim()
+    log.info({ prUrl, branch, slug }, "created PR for loop session")
+    return prUrl || null
   }
 
   private extractPR(ctx: SessionCompletionContext): string | null {
