@@ -31,6 +31,14 @@ import {
   formatCIConflicts,
   formatCIResolvingConflicts,
   formatCINoChecks,
+  formatCIWatching,
+  formatCIFailed,
+  formatCIFixing,
+  formatCIPassed,
+  formatCIGaveUp,
+  formatBudgetWarning,
+  formatQuotaResume,
+  formatQuotaExhausted,
   formatUsage,
   formatDagNodeComplete,
   formatDagNodeStarting,
@@ -1905,6 +1913,109 @@ describe("formatPinnedDagStatus", () => {
       const result = formatLandRestacking("<b>task</b>", "feat/<branch>")
       expect(result).toContain("&lt;b&gt;task&lt;/b&gt;")
       expect(result).toContain("feat/&lt;branch&gt;")
+    })
+  })
+
+
+  describe("formatCIWatching", () => {
+    it("includes slug and PR number", () => {
+      const result = formatCIWatching("cool-fox", "https://github.com/org/repo/pull/42")
+      expect(result).toContain("Watching CI")
+      expect(result).toContain("cool-fox")
+      expect(result).toContain("PR #42")
+    })
+
+    it("falls back to full URL when PR number cannot be extracted", () => {
+      const result = formatCIWatching("cool-fox", "https://example.com/not-a-pr")
+      expect(result).toContain("PR #https://example.com/not-a-pr")
+    })
+
+    it("escapes HTML in slug", () => {
+      const result = formatCIWatching("<b>test</b>", "https://github.com/org/repo/pull/1")
+      expect(result).toContain("&lt;b&gt;test&lt;/b&gt;")
+    })
+  })
+
+  describe("formatCIFailed", () => {
+    it("includes slug, attempt info, and failed check names", () => {
+      const result = formatCIFailed("cool-fox", ["build", "lint"], 1, 3)
+      expect(result).toContain("CI failed")
+      expect(result).toContain("cool-fox")
+      expect(result).toContain("attempt 1/3")
+      expect(result).toContain("❌ build")
+      expect(result).toContain("❌ lint")
+    })
+
+    it("escapes HTML in check names", () => {
+      const result = formatCIFailed("slug", ["<script>alert</script>"], 1, 1)
+      expect(result).toContain("&lt;script&gt;alert&lt;/script&gt;")
+    })
+  })
+
+  describe("formatCIFixing", () => {
+    it("includes slug and attempt info", () => {
+      const result = formatCIFixing("cool-fox", 2, 3)
+      expect(result).toContain("Fixing CI")
+      expect(result).toContain("cool-fox")
+      expect(result).toContain("attempt 2/3")
+    })
+  })
+
+  describe("formatCIPassed", () => {
+    it("includes slug and PR number", () => {
+      const result = formatCIPassed("cool-fox", "https://github.com/org/repo/pull/99")
+      expect(result).toContain("CI passed")
+      expect(result).toContain("cool-fox")
+      expect(result).toContain("PR #99")
+    })
+
+    it("falls back to full URL when PR number cannot be extracted", () => {
+      const result = formatCIPassed("slug", "https://example.com/other")
+      expect(result).toContain("PR #https://example.com/other")
+    })
+  })
+
+  describe("formatCIGaveUp", () => {
+    it("includes slug and attempt count", () => {
+      const result = formatCIGaveUp("cool-fox", 3)
+      expect(result).toContain("CI still failing")
+      expect(result).toContain("cool-fox")
+      expect(result).toContain("3 attempts")
+    })
+
+    it("uses singular 'attempt' for maxAttempts=1", () => {
+      const result = formatCIGaveUp("cool-fox", 1)
+      expect(result).toContain("1 attempt")
+      expect(result).not.toContain("1 attempts")
+    })
+  })
+
+  describe("formatBudgetWarning", () => {
+    it("includes slug, token count, and budget", () => {
+      const result = formatBudgetWarning("cool-fox", 250000, 200000)
+      expect(result).toContain("Token budget exceeded")
+      expect(result).toContain("cool-fox")
+      expect(result).toContain("250,000")
+      expect(result).toContain("200,000")
+    })
+  })
+
+  describe("formatQuotaResume", () => {
+    it("includes slug and retry count", () => {
+      const result = formatQuotaResume("cool-fox", 2)
+      expect(result).toContain("Resuming after quota sleep")
+      expect(result).toContain("cool-fox")
+      expect(result).toContain("attempt 2")
+    })
+  })
+
+  describe("formatQuotaExhausted", () => {
+    it("includes slug and max retries", () => {
+      const result = formatQuotaExhausted("cool-fox", 3)
+      expect(result).toContain("Quota retries exhausted")
+      expect(result).toContain("cool-fox")
+      expect(result).toContain("3/3 attempts")
+      expect(result).toContain("/reply")
     })
   })
 })
