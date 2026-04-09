@@ -3,7 +3,7 @@ import { DagOrchestrator } from "../src/dag/dag-orchestrator.js"
 import type { DispatcherContext } from "../src/orchestration/dispatcher-context.js"
 import type { TopicSession } from "../src/domain/session-types.js"
 import type { DagGraph, DagNode } from "../src/dag/dag.js"
-import { createMockContext, makeMockConfig, makeMockTelegram } from "./test-helpers.js"
+import { createMockContext, makeMockConfig, makeMockThreadManager } from "./test-helpers.js"
 
 vi.mock("../src/ci/ci-babysit.js", () => ({
   findPRByBranch: vi.fn(),
@@ -23,7 +23,7 @@ const mockFindPRByBranch = vi.mocked(findPRByBranch)
 
 function makeSession(overrides: Partial<TopicSession> = {}): TopicSession {
   return {
-    threadId: 100,
+    threadId: "100",
     repo: "org/repo",
     repoUrl: "https://github.com/org/repo",
     cwd: "/tmp/workspace",
@@ -43,8 +43,8 @@ function makeContext(overrides: Partial<DispatcherContext> = {}): DispatcherCont
       telegram: { botToken: "test", chatId: "-1001234567890", allowedUserIds: [1] },
       ci: { babysitEnabled: false, maxRetries: 2, pollIntervalMs: 100, pollTimeoutMs: 1000, dagCiPolicy: "skip" },
     }),
-    telegram: makeMockTelegram({
-      createForumTopic: vi.fn().mockResolvedValue({ message_thread_id: 200 }),
+    threads: makeMockThreadManager({
+      createThread: vi.fn().mockResolvedValue({ threadId: "200", name: "test" }),
     }),
     ...overrides,
   })
@@ -74,7 +74,7 @@ describe("DagOrchestrator", () => {
       expect(session.dagId).toBe("dag-parent-slug")
       expect(ctx.dags.size).toBe(1)
       expect(ctx.broadcastDag).toHaveBeenCalledWith(expect.any(Object), "dag_created")
-      expect(ctx.telegram.sendMessage).toHaveBeenCalled()
+      expect(ctx.chat.sendMessage).toHaveBeenCalled()
       expect(ctx.persistTopicSessions).toHaveBeenCalled()
     })
 
@@ -87,7 +87,7 @@ describe("DagOrchestrator", () => {
 
       await orchestrator.startDag(session, items, false)
 
-      const sendMsg = vi.mocked(ctx.telegram.sendMessage)
+      const sendMsg = vi.mocked(ctx.chat.sendMessage)
       expect(sendMsg.mock.calls.some(c => typeof c[0] === "string" && c[0].includes("Invalid DAG"))).toBe(true)
       expect(ctx.dags.size).toBe(0)
     })
@@ -119,7 +119,7 @@ describe("DagOrchestrator", () => {
     function makeGraph(nodes: Partial<DagNode>[]): DagGraph {
       return {
         id: "dag-test",
-        parentThreadId: 100,
+        parentThreadId: "100",
         repo: "org/repo",
         nodes: nodes.map(n => ({
           id: n.id ?? "node",
@@ -144,7 +144,7 @@ describe("DagOrchestrator", () => {
       await orchestrator.scheduleDagNodes(session, graph, false)
 
       expect(graph.nodes[0].status).toBe("running")
-      expect(ctx.telegram.createForumTopic).toHaveBeenCalled()
+      expect(ctx.threads.createThread).toHaveBeenCalled()
     })
 
     it("respects dag concurrency limits", async () => {
@@ -171,8 +171,8 @@ describe("DagOrchestrator", () => {
       const session = makeSession()
       ctx = makeContext({
         ...ctx,
-        telegram: makeMockTelegram({
-          createForumTopic: vi.fn().mockRejectedValue(new Error("topic creation failed")),
+        threads: makeMockThreadManager({
+          createThread: vi.fn().mockRejectedValue(new Error("topic creation failed")),
         }),
       })
       orchestrator = new DagOrchestrator(ctx)
@@ -207,13 +207,13 @@ describe("DagOrchestrator", () => {
 
       const threadId = await orchestrator.spawnDagChild(parent, graph, node, false)
 
-      expect(threadId).toBe(200)
-      expect(ctx.telegram.createForumTopic).toHaveBeenCalled()
+      expect(threadId).toBe("200")
+      expect(ctx.threads.createThread).toHaveBeenCalled()
       expect(ctx.prepareWorkspace).toHaveBeenCalled()
       expect(ctx.spawnTopicAgent).toHaveBeenCalled()
-      expect(ctx.topicSessions.has(200)).toBe(true)
+      expect(ctx.topicSessions.has("200")).toBe(true)
 
-      const childSession = ctx.topicSessions.get(200)!
+      const childSession = ctx.topicSessions.get("200")!
       expect(childSession.dagId).toBe("dag-test")
       expect(childSession.dagNodeId).toBe("a")
       expect(childSession.mode).toBe("task")
@@ -226,7 +226,7 @@ describe("DagOrchestrator", () => {
 
       await orchestrator.spawnDagChild(parent, graph, node, false)
 
-      const sendMsg = vi.mocked(ctx.telegram.sendMessage)
+      const sendMsg = vi.mocked(ctx.chat.sendMessage)
       const startingCall = sendMsg.mock.calls.find(
         c => typeof c[0] === "string" && c[0].includes("Starting"),
       )
@@ -239,7 +239,7 @@ describe("DagOrchestrator", () => {
       const graph = makeGraph()
       const node = graph.nodes[0]
 
-      vi.mocked(ctx.telegram.createForumTopic).mockRejectedValue(new Error("failed"))
+      vi.mocked(ctx.threads.createThread).mockRejectedValue(new Error("failed"))
 
       const threadId = await orchestrator.spawnDagChild(parent, graph, node, false)
       expect(threadId).toBeNull()
@@ -254,7 +254,7 @@ describe("DagOrchestrator", () => {
 
       const threadId = await orchestrator.spawnDagChild(parent, graph, node, false)
       expect(threadId).toBeNull()
-      expect(ctx.telegram.deleteForumTopic).toHaveBeenCalledWith(200)
+      expect(ctx.threads.deleteThread).toHaveBeenCalledWith("200")
     })
 
     it("handles fan-in with multiple upstream branches", async () => {
@@ -314,7 +314,7 @@ describe("DagOrchestrator", () => {
       vi.mocked(ctx.mergeUpstreamBranches).mockReturnValue({ ok: false, conflictFiles: ["test/format.test.ts"] })
 
       const threadId = await orchestrator.spawnDagChild(parent, graph, graph.nodes[2], false)
-      expect(threadId).toBe(200)
+      expect(threadId).toBe("200")
       expect(ctx.spawnTopicAgent).toHaveBeenCalled()
       const taskPrompt = vi.mocked(ctx.spawnTopicAgent).mock.calls[0][1]
       expect(taskPrompt).toContain("Merge conflicts to resolve first")
@@ -403,7 +403,7 @@ describe("DagOrchestrator", () => {
 
       expect(graph.nodes[0].recoveryAttempted).toBe(true)
       expect(ctx.spawnTopicAgent).toHaveBeenCalled()
-      expect(ctx.telegram.sendMessage).toHaveBeenCalledWith(
+      expect(ctx.chat.sendMessage).toHaveBeenCalledWith(
         expect.stringContaining("recovery session"),
         100,
       )
@@ -428,7 +428,7 @@ describe("DagOrchestrator", () => {
       expect(graph.nodes[0].recoveryAttempted).toBe(true)
       expect(graph.nodes[0].status).toBe("failed")
       expect(graph.nodes[0].error).toBe("Recovery blocked: max sessions reached")
-      expect(ctx.telegram.sendMessage).toHaveBeenCalledWith(
+      expect(ctx.chat.sendMessage).toHaveBeenCalledWith(
         expect.stringContaining("Recovery for"),
         100,
       )
@@ -539,7 +539,7 @@ describe("DagOrchestrator", () => {
       await orchestrator.onDagChildComplete(child, "errored")
 
       expect(parent.autoAdvance.phase).toBe("dag")
-      expect(ctx.telegram.sendMessage).toHaveBeenCalledWith(
+      expect(ctx.chat.sendMessage).toHaveBeenCalledWith(
         expect.stringContaining("Ship pipeline halted"),
         parent.threadId,
       )
@@ -558,7 +558,7 @@ describe("DagOrchestrator", () => {
 
       graph.nodes[0].status = "running"
       vi.mocked(ctx.extractPRFromConversation).mockReturnValue("https://github.com/org/repo/pull/42")
-      vi.mocked(ctx.telegram.sendMessage).mockClear()
+      vi.mocked(ctx.chat.sendMessage).mockClear()
 
       await orchestrator.onDagChildComplete(child, "completed")
 
@@ -570,7 +570,7 @@ describe("DagOrchestrator", () => {
 
       await orchestrator.onDagChildComplete(child, "completed")
 
-      expect(ctx.telegram.sendMessage).not.toHaveBeenCalled()
+      expect(ctx.chat.sendMessage).not.toHaveBeenCalled()
     })
 
     it("sends completion message with clickable topic link", async () => {
@@ -579,7 +579,7 @@ describe("DagOrchestrator", () => {
 
       await orchestrator.onDagChildComplete(child, "completed")
 
-      const sendMsg = vi.mocked(ctx.telegram.sendMessage)
+      const sendMsg = vi.mocked(ctx.chat.sendMessage)
       const completeCall = sendMsg.mock.calls.find(
         c => typeof c[0] === "string" && c[0].includes("child-slug") && c[0].includes("complete"),
       )
@@ -677,7 +677,7 @@ describe("DagOrchestrator", () => {
 
       await orchestrator.handleRetryCommand(session)
 
-      expect(ctx.telegram.sendMessage).toHaveBeenCalledWith(
+      expect(ctx.chat.sendMessage).toHaveBeenCalledWith(
         expect.stringContaining("/retry requires a ship pipeline or DAG parent thread"),
         session.threadId,
       )
@@ -693,7 +693,7 @@ describe("DagOrchestrator", () => {
 
       await orchestrator.handleRetryCommand(session)
 
-      expect(ctx.telegram.sendMessage).toHaveBeenCalledWith(
+      expect(ctx.chat.sendMessage).toHaveBeenCalledWith(
         expect.stringContaining("Retrying ship <b>think</b> phase"),
         session.threadId,
       )
@@ -714,7 +714,7 @@ describe("DagOrchestrator", () => {
 
       await orchestrator.handleRetryCommand(session)
 
-      expect(ctx.telegram.sendMessage).toHaveBeenCalledWith(
+      expect(ctx.chat.sendMessage).toHaveBeenCalledWith(
         expect.stringContaining("Retrying ship <b>plan</b> phase"),
         session.threadId,
       )
@@ -730,7 +730,7 @@ describe("DagOrchestrator", () => {
 
       await orchestrator.handleRetryCommand(session)
 
-      expect(ctx.telegram.sendMessage).toHaveBeenCalledWith(
+      expect(ctx.chat.sendMessage).toHaveBeenCalledWith(
         expect.stringContaining("Retrying DAG extraction"),
         session.threadId,
       )
@@ -760,7 +760,7 @@ describe("DagOrchestrator", () => {
 
       await orchestrator.handleRetryCommand(session)
 
-      expect(ctx.telegram.sendMessage).toHaveBeenCalledWith(
+      expect(ctx.chat.sendMessage).toHaveBeenCalledWith(
         "No failed nodes to retry.",
         session.threadId,
       )
@@ -786,7 +786,7 @@ describe("DagOrchestrator", () => {
 
       expect(graph.nodes[0].status).toBe("running")
       expect(ctx.spawnTopicAgent).toHaveBeenCalled()
-      expect(ctx.telegram.sendMessage).toHaveBeenCalledWith(
+      expect(ctx.chat.sendMessage).toHaveBeenCalledWith(
         expect.stringContaining("Retrying"),
         session.threadId,
       )
@@ -821,7 +821,7 @@ describe("DagOrchestrator", () => {
       expect(ctx.spawnTopicAgent).not.toHaveBeenCalled()
       expect(graph.nodes[1].status).toBe("ready")
       expect(graph.nodes[2].status).toBe("ready")
-      expect(ctx.telegram.sendMessage).toHaveBeenCalledWith(
+      expect(ctx.chat.sendMessage).toHaveBeenCalledWith(
         expect.stringContaining("deferred"),
         session.threadId,
       )
@@ -850,7 +850,7 @@ describe("DagOrchestrator", () => {
       await orchestrator.handleRetryCommand(session)
 
       expect(graph.nodes[0].status).toBe("ready")
-      expect(ctx.telegram.sendMessage).toHaveBeenCalledWith(
+      expect(ctx.chat.sendMessage).toHaveBeenCalledWith(
         expect.stringContaining("deferred"),
         session.threadId,
       )
@@ -884,7 +884,7 @@ describe("DagOrchestrator", () => {
 
       await orchestrator.handleForceCommand(session)
 
-      expect(ctx.telegram.sendMessage).toHaveBeenCalledWith(
+      expect(ctx.chat.sendMessage).toHaveBeenCalledWith(
         expect.stringContaining("/force only works"),
         session.threadId,
       )
@@ -900,7 +900,7 @@ describe("DagOrchestrator", () => {
 
       await orchestrator.handleForceCommand(session)
 
-      expect(ctx.telegram.sendMessage).toHaveBeenCalledWith(
+      expect(ctx.chat.sendMessage).toHaveBeenCalledWith(
         "No CI-failed nodes to force-advance.",
         session.threadId,
       )

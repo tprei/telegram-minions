@@ -1,5 +1,5 @@
 import crypto from "node:crypto"
-import type { TelegramClient } from "../telegram/telegram.js"
+import type { ChatPlatform } from "../provider/chat-platform.js"
 import { captureException } from "../sentry.js"
 import { SessionHandle, type SessionConfig } from "../session/session.js"
 import { SDKSessionHandle } from "../session/sdk-session.js"
@@ -7,7 +7,8 @@ import { ReplyQueue } from "../reply-queue.js"
 import { Observer } from "../telegram/observer.js"
 import type { GooseStreamEvent } from "../domain/goose-types.js"
 import type { SessionMeta, SessionDoneState, SessionPort, TopicSession, SessionMode, SessionState, TopicMessage } from "../domain/session-types.js"
-import type { TelegramUpdate, TelegramCallbackQuery, TelegramPhotoSize } from "../domain/telegram-types.js"
+import type { ChatUpdate, CallbackQuery } from "../provider/types.js"
+import type { TelegramPhotoSize } from "../domain/telegram-types.js"
 import type { AutoAdvance } from "../domain/workflow-types.js"
 import { generateSlug, taskToLabel } from "../slugs.js"
 import type { MinionConfig, McpConfig } from "../config/config-types.js"
@@ -87,26 +88,26 @@ const POLL_TIMEOUT = 30
 const SDK_MODES: Set<SessionMode> = new Set(["plan", "think", "review", "ship-think", "ship-plan", "ship-verify"])
 
 export class Dispatcher {
-  private readonly sessions = new Map<number, ActiveSession>()
-  private readonly topicSessions = new Map<number, TopicSession>()
-  private readonly replyQueues = new Map<number, ReplyQueue>()
-  private readonly pendingTasks = new Map<number, PendingTask>()
-  private readonly pendingProfiles = new Map<number, PendingTask>()
+  private readonly sessions = new Map<string, ActiveSession>()
+  private readonly topicSessions = new Map<string, TopicSession>()
+  private readonly replyQueues = new Map<string, ReplyQueue>()
+  private readonly pendingTasks = new Map<string, PendingTask>()
+  private readonly pendingProfiles = new Map<string, PendingTask>()
   private readonly store: SessionStore
   private readonly dagStore: DagStore
   private readonly profileStore: ProfileStore
   private readonly dags = new Map<string, DagGraph>()
-  private readonly abortControllers = new Map<number, AbortController>()
+  private readonly abortControllers = new Map<string, AbortController>()
   private readonly broadcaster?: StateBroadcaster
   private offset = 0
   private running = false
   private cleanupTimer: ReturnType<typeof setInterval> | null = null
   private readonly stats: StatsTracker
 
-  private readonly quotaEvents = new Map<number, { resetAt?: number; rawMessage: string }>()
+  private readonly quotaEvents = new Map<string, { resetAt?: number; rawMessage: string }>()
   private readonly loopStore: LoopStore
   private loopScheduler: LoopScheduler | null = null
-  private readonly quotaSleepTimers = new Map<number, ReturnType<typeof setTimeout>>()
+  private readonly quotaSleepTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
   private readonly ciBabysitter: CIBabysitter
   private readonly landingManager: LandingManager
@@ -120,7 +121,7 @@ export class Dispatcher {
   private readonly completionChain: CompletionHandlerChain
 
   constructor(
-    private readonly telegram: TelegramClient,
+    private readonly platform: ChatPlatform,
     private readonly observer: Observer,
     private readonly config: MinionConfig,
     eventBus: EventBus,
@@ -135,16 +136,19 @@ export class Dispatcher {
     this.profileStore = new ProfileStore(this.config.workspace.root)
     this.stats = new StatsTracker(this.config.workspace.root)
     this.pinnedMessages = new PinnedMessageManager({
-      telegram: this.telegram,
+      chat: this.platform.chat,
+      threads: this.platform.threads,
       topicSessions: this.topicSessions,
       workspaceRoot: this.config.workspace.root,
-      chatId: this.config.telegram.chatId,
+      chatId: this.platform.chatId,
     })
 
     // Build context for extracted orchestrator modules
     const ctx: DispatcherContext = {
       config: this.config,
-      telegram: this.telegram,
+      chat: this.platform.chat,
+      threads: this.platform.threads,
+      ui: this.platform.ui,
       observer: this.observer,
       stats: this.stats,
       profileStore: this.profileStore,
@@ -217,7 +221,7 @@ export class Dispatcher {
     )
 
     const qualityGateHandler = new QualityGateHandler(
-      this.telegram,
+      this.platform.chat,
       { pushToConversation: (s, m) => this.pushToConversation(s, m) },
     )
     const digestHandler = new DigestHandler(
@@ -238,7 +242,7 @@ export class Dispatcher {
         { handleQuotaSleep: (ts, msg) => this.handleQuotaSleep(ts, msg) },
       ))
       .register(new ShipAdvanceHandler(
-        this.telegram,
+        this.platform.chat,
         this.observer,
         this.shipPipeline,
         this.pinnedMessages,
@@ -246,13 +250,16 @@ export class Dispatcher {
         { persistTopicSessions: () => this.persistTopicSessions() },
       ))
       .register(new ModeCompletionHandler(
-        this.telegram,
+        this.platform.chat,
         this.observer,
         this.pinnedMessages,
       ))
       .register(new LoopCompletionHandler(
         { get: () => this.loopScheduler },
-        this.telegram,
+        {
+          sendMessage: (html, threadId) => this.platform.chat.sendMessage(html, threadId),
+          deleteThread: (threadId) => this.platform.threads.deleteThread(threadId),
+        },
         {
           removeWorkspace: (ts) => this.removeWorkspace(ts),
           deleteTopicSession: (id) => { this.topicSessions.delete(id) },
@@ -260,7 +267,7 @@ export class Dispatcher {
         },
       ))
       .register(new TaskCompletionHandler(
-        this.telegram,
+        this.platform.chat,
         this.observer,
         this.pinnedMessages,
         { cleanBuildArtifacts: (cwd) => this.cleanBuildArtifacts(cwd) },
@@ -337,7 +344,7 @@ export class Dispatcher {
 
       if (session.interruptedAt) {
         log.info({ slug: session.slug, threadId }, "session was interrupted, notifying")
-        this.telegram.sendMessage(
+        this.platform.chat.sendMessage(
           `⚡ This session was interrupted by a deploy. Send <b>/reply</b> to continue.`,
           threadId,
         ).catch((err) => {
@@ -357,7 +364,7 @@ export class Dispatcher {
     if (expired.size > 0) {
       log.info({ count: expired.size }, "cleaning expired sessions")
       for (const [threadId, session] of expired) {
-        await this.telegram.deleteForumTopic(threadId)
+        await this.platform.threads.deleteThread(threadId)
         await this.removeWorkspace(session)
         log.info({ slug: session.slug, threadId }, "cleaned expired session")
       }
@@ -386,7 +393,7 @@ export class Dispatcher {
       await queue.markDelivered(reply.id)
     }
 
-    this.telegram.sendMessage(
+    this.platform.chat.sendMessage(
       `🔄 Recovered ${pending.length} undelivered ${pending.length === 1 ? "reply" : "replies"} from before the restart.`,
       topicSession.threadId,
     ).catch(() => {})
@@ -420,7 +427,7 @@ export class Dispatcher {
 
         const parent = this.topicSessions.get(graph.parentThreadId)
         if (parent) {
-          this.telegram.sendMessage(
+          this.platform.chat.sendMessage(
             `⚡ DAG recovered after restart — some nodes were transitioned. Use <code>/retry</code> to re-run failed nodes.\n\n${renderDagStatus(graph)}`,
             graph.parentThreadId,
           ).catch((err) => {
@@ -476,32 +483,32 @@ export class Dispatcher {
 
   // ── Public command handlers (called by tests and external API) ────────
 
-  async handleReplyCommand(threadId: number, text: string): Promise<void> {
+  async handleReplyCommand(threadId: string, text: string): Promise<void> {
     const topicSession = this.topicSessions.get(threadId)
     if (!topicSession) {
-      await this.telegram.sendMessage(`❌ Thread ${threadId} not found or no active session`, threadId)
+      await this.platform.chat.sendMessage(`❌ Thread ${threadId} not found or no active session`, threadId)
       return
     }
     if (!topicSession.activeSessionId) {
-      await this.telegram.sendMessage(`❌ No active session in thread ${threadId}`, threadId)
+      await this.platform.chat.sendMessage(`❌ No active session in thread ${threadId}`, threadId)
       return
     }
     await this.handleTopicFeedback(topicSession, text)
   }
 
-  async handleStopCommand(threadId: number): Promise<void> {
+  async handleStopCommand(threadId: string): Promise<void> {
     const topicSession = this.topicSessions.get(threadId)
     if (!topicSession) {
-      await this.telegram.sendMessage(`❌ Thread ${threadId} not found or no active session`, threadId)
+      await this.platform.chat.sendMessage(`❌ Thread ${threadId} not found or no active session`, threadId)
       return
     }
     await this.handleStopCommandInternal(topicSession)
   }
 
-  async handleCloseCommand(threadId: number): Promise<void> {
+  async handleCloseCommand(threadId: string): Promise<void> {
     const topicSession = this.topicSessions.get(threadId)
     if (!topicSession) {
-      await this.telegram.sendMessage(`❌ Thread ${threadId} not found or no active session`, threadId)
+      await this.platform.chat.sendMessage(`❌ Thread ${threadId} not found or no active session`, threadId)
       return
     }
     await this.handleCloseCommandInternal(topicSession)
@@ -535,7 +542,7 @@ export class Dispatcher {
   async handleLoopsCommand(args: string): Promise<void> {
     const scheduler = this.loopScheduler
     if (!scheduler) {
-      await this.telegram.sendMessage("🔄 <b>Loops</b>\n\nNo loops configured.")
+      await this.platform.chat.sendMessage("🔄 <b>Loops</b>\n\nNo loops configured.")
       return
     }
 
@@ -544,23 +551,23 @@ export class Dispatcher {
 
     if (!subcommand) {
       const entries = this.buildLoopStatusEntries(scheduler)
-      await this.telegram.sendMessage(formatLoopStatus(entries))
+      await this.platform.chat.sendMessage(formatLoopStatus(entries))
       return
     }
 
     if (subcommand === "enable" || subcommand === "disable") {
       const loopId = parts[1]
       if (!loopId) {
-        await this.telegram.sendMessage(`Usage: <code>/loops ${subcommand} &lt;id&gt;</code>`)
+        await this.platform.chat.sendMessage(`Usage: <code>/loops ${subcommand} &lt;id&gt;</code>`)
         return
       }
       const ok = subcommand === "enable"
         ? scheduler.enableLoop(loopId)
         : scheduler.disableLoop(loopId)
       if (ok) {
-        await this.telegram.sendMessage(`✅ Loop <code>${escapeHtml(loopId)}</code> ${subcommand}d.`)
+        await this.platform.chat.sendMessage(`✅ Loop <code>${escapeHtml(loopId)}</code> ${subcommand}d.`)
       } else {
-        await this.telegram.sendMessage(`❌ Loop <code>${escapeHtml(loopId)}</code> not found.`)
+        await this.platform.chat.sendMessage(`❌ Loop <code>${escapeHtml(loopId)}</code> not found.`)
       }
       return
     }
@@ -568,7 +575,7 @@ export class Dispatcher {
     if (subcommand === "fire") {
       const loopId = parts[1]
       if (!loopId) {
-        await this.telegram.sendMessage(`Usage: <code>/loops fire &lt;id&gt;</code>`)
+        await this.platform.chat.sendMessage(`Usage: <code>/loops fire &lt;id&gt;</code>`)
         return
       }
       const defs = scheduler.getDefinitions()
@@ -576,15 +583,15 @@ export class Dispatcher {
       const def = defs.get(loopId)
       const state = states.get(loopId)
       if (!def || !state) {
-        await this.telegram.sendMessage(`❌ Loop <code>${escapeHtml(loopId)}</code> not found.`)
+        await this.platform.chat.sendMessage(`❌ Loop <code>${escapeHtml(loopId)}</code> not found.`)
         return
       }
-      await this.telegram.sendMessage(`🔄 Firing loop <code>${escapeHtml(loopId)}</code>…`)
+      await this.platform.chat.sendMessage(`🔄 Firing loop <code>${escapeHtml(loopId)}</code>…`)
       const threadId = await this.startLoopSession(loopId, def, state)
       if (threadId != null) {
         scheduler.getActiveLoopThreads().set(loopId, threadId)
       } else {
-        await this.telegram.sendMessage(`❌ Failed to start loop <code>${escapeHtml(loopId)}</code>.`)
+        await this.platform.chat.sendMessage(`❌ Failed to start loop <code>${escapeHtml(loopId)}</code>.`)
       }
       return
     }
@@ -593,21 +600,21 @@ export class Dispatcher {
       const loopId = parts[1]
       const hours = parts[2] ? parseFloat(parts[2]) : NaN
       if (!loopId || isNaN(hours) || hours <= 0) {
-        await this.telegram.sendMessage(`Usage: <code>/loops interval &lt;id&gt; &lt;hours&gt;</code>`)
+        await this.platform.chat.sendMessage(`Usage: <code>/loops interval &lt;id&gt; &lt;hours&gt;</code>`)
         return
       }
       const defs = scheduler.getDefinitions()
       const def = defs.get(loopId)
       if (!def) {
-        await this.telegram.sendMessage(`❌ Loop <code>${escapeHtml(loopId)}</code> not found.`)
+        await this.platform.chat.sendMessage(`❌ Loop <code>${escapeHtml(loopId)}</code> not found.`)
         return
       }
       def.intervalMs = hours * 3_600_000
-      await this.telegram.sendMessage(`✅ Loop <code>${escapeHtml(loopId)}</code> interval set to ${hours}h.`)
+      await this.platform.chat.sendMessage(`✅ Loop <code>${escapeHtml(loopId)}</code> interval set to ${hours}h.`)
       return
     }
 
-    await this.telegram.sendMessage(
+    await this.platform.chat.sendMessage(
       [
         `<b>Loop commands</b>`,
         ``,
@@ -644,35 +651,35 @@ export class Dispatcher {
     return entries
   }
 
-  private async startLoopSession(loopId: string, def: LoopDefinition, state: LoopState): Promise<number | null> {
+  private async startLoopSession(loopId: string, def: LoopDefinition, state: LoopState): Promise<string | null> {
     const sessionId = crypto.randomUUID()
     const slug = generateSlug(sessionId)
     const repo = def.repo ? extractRepoName(def.repo) : "local"
     const repoUrl = def.repo || undefined
     const topicHandle = `🔄 ${slug}/${def.name}`
 
-    let topic: { message_thread_id: number }
+    let topic: { threadId: string }
     try {
-      topic = await this.telegram.createForumTopic(topicHandle)
+      topic = await this.platform.threads.createThread(topicHandle)
     } catch (err) {
       log.error({ err, loopId }, "failed to create loop topic")
       captureException(err, { operation: "createLoopTopic", loopId })
       return null
     }
 
-    const threadId = topic.message_thread_id
+    const threadId = topic.threadId
 
     const cwd = await this.prepareWorkspace(slug, repoUrl)
     if (!cwd) {
-      await this.telegram.sendMessage(`❌ Failed to prepare workspace for loop.`, threadId)
-      await this.telegram.deleteForumTopic(threadId)
+      await this.platform.chat.sendMessage(`❌ Failed to prepare workspace for loop.`, threadId)
+      await this.platform.threads.deleteThread(threadId)
       return null
     }
 
     const shouldSkip = await this.loopScheduler?.checkDuplicatePR(loopId, cwd)
     if (shouldSkip) {
-      await this.telegram.sendMessage(`⏭️ Skipping — previous PR still open.`, threadId)
-      await this.telegram.deleteForumTopic(threadId)
+      await this.platform.chat.sendMessage(`⏭️ Skipping — previous PR still open.`, threadId)
+      await this.platform.threads.deleteThread(threadId)
       await this.removeWorkspace({ cwd, slug, threadId, repo, conversation: [], pendingFeedback: [], mode: "task", lastActivityAt: 0 })
       this.loopScheduler?.recordOutcome(loopId, {
         runNumber: state.totalRuns + 1,
@@ -706,7 +713,7 @@ export class Dispatcher {
     const spawned = await this.spawnTopicAgent(topicSession, def.prompt)
     if (!spawned) {
       this.topicSessions.delete(threadId)
-      await this.telegram.deleteForumTopic(threadId)
+      await this.platform.threads.deleteThread(threadId)
       await this.removeWorkspace(topicSession)
       return null
     }
@@ -741,7 +748,7 @@ export class Dispatcher {
   private async cleanupStaleSessions(): Promise<void> {
     const now = Date.now()
     const staleTtlMs = this.config.workspace.staleTtlMs
-    const stale: [number, TopicSession][] = []
+    const stale: [string, TopicSession][] = []
 
     for (const [threadId, session] of this.topicSessions) {
       if (session.activeSessionId) continue
@@ -761,7 +768,7 @@ export class Dispatcher {
         this.broadcastDagDeleted(session.dagId)
       }
       await this.closeChildSessions(session)
-      await this.telegram.deleteForumTopic(threadId)
+      await this.platform.threads.deleteThread(threadId)
       await this.removeWorkspace(session)
       this.topicSessions.delete(threadId)
       log.info({ slug: session.slug, threadId }, "cleaned up stale session")
@@ -772,7 +779,7 @@ export class Dispatcher {
   }
 
   private async persistTopicSessions(markInterrupted = false): Promise<void> {
-    const toSave = new Map<number, TopicSession>()
+    const toSave = new Map<string, TopicSession>()
     const now = Date.now()
     for (const [threadId, session] of this.topicSessions) {
       if (markInterrupted && session.activeSessionId) {
@@ -796,41 +803,48 @@ export class Dispatcher {
   // ── Polling & update handling ─────────────────────────────────────────
 
   private async poll(): Promise<void> {
-    const updates = await this.telegram.getUpdates(this.offset, POLL_TIMEOUT)
+    const updates = await this.platform.input.poll(String(this.offset), POLL_TIMEOUT)
 
     for (const update of updates) {
       try {
         await this.handleUpdate(update)
       } catch (err) {
-        log.error({ err, updateId: update.update_id }, "error handling update")
-        captureException(err, { updateId: update.update_id })
+        log.error({ err }, "error handling update")
+        captureException(err)
       }
     }
 
     if (updates.length > 0) {
-      this.offset = Math.max(...updates.map((u) => u.update_id)) + 1
+      this.platform.input.advanceCursor(updates)
+      this.offset = Number(this.platform.input.getCursor())
       await this.persistTopicSessions()
     }
   }
 
-  private async handleUpdate(update: TelegramUpdate): Promise<void> {
-    if (update.callback_query) {
-      await this.handleCallbackQuery(update.callback_query)
+  private async handleUpdate(update: ChatUpdate): Promise<void> {
+    if (update.type === "callback_query") {
+      await this.handleCallbackQuery(update.query)
       return
     }
 
     const message = update.message
     if (!message) return
-    if (message.chat.id.toString() !== this.config.telegram.chatId) return
 
-    const userId = message.from?.id ?? -1
+    const userId = Number(message.from?.id ?? -1)
     if (!this.config.telegram.allowedUserIds.includes(userId)) return
 
     const text = (message.text ?? message.caption)?.trim()
-    const photos = message.photo
-    if (!text && !photos) return
+    const chatPhotos = message.photos
+    if (!text && !chatPhotos) return
+    const photos = chatPhotos?.map((p) => ({
+      file_id: p.fileId,
+      file_unique_id: p.fileId,
+      width: p.width,
+      height: p.height,
+      file_size: p.fileSize,
+    })) as TelegramPhotoSize[] | undefined
 
-    const threadId = message.message_thread_id
+    const threadId = message.threadId
     const topicSession = threadId !== undefined ? this.topicSessions.get(threadId) : undefined
 
     const routed = routeCommand(text, threadId, topicSession?.mode, !!topicSession, photos)
@@ -876,15 +890,15 @@ export class Dispatcher {
 
   // ── Callback queries ──────────────────────────────────────────────────
 
-  private async handleCallbackQuery(query: TelegramCallbackQuery): Promise<void> {
-    if (!this.config.telegram.allowedUserIds.includes(query.from.id)) {
-      await this.telegram.answerCallbackQuery(query.id, "Not authorized")
+  private async handleCallbackQuery(query: CallbackQuery): Promise<void> {
+    if (!this.config.telegram.allowedUserIds.includes(Number(query.from.id))) {
+      await this.platform.ui!.answerCallbackQuery(query.queryId, "Not authorized")
       return
     }
 
     const data = query.data
     if (!data) {
-      await this.telegram.answerCallbackQuery(query.id)
+      await this.platform.ui!.answerCallbackQuery(query.queryId)
       return
     }
 
@@ -894,7 +908,7 @@ export class Dispatcher {
     }
 
     if (!data.startsWith("repo:") && !data.startsWith("plan-repo:") && !data.startsWith("think-repo:") && !data.startsWith("review-repo:") && !data.startsWith("ship-repo:")) {
-      await this.telegram.answerCallbackQuery(query.id)
+      await this.platform.ui!.answerCallbackQuery(query.queryId)
       return
     }
 
@@ -913,18 +927,18 @@ export class Dispatcher {
       : data.slice("repo:".length)
     const repoUrl = this.config.repos[repoSlug]
     if (!repoUrl) {
-      await this.telegram.answerCallbackQuery(query.id, "Unknown repo")
+      await this.platform.ui!.answerCallbackQuery(query.queryId, "Unknown repo")
       return
     }
 
-    const messageId = query.message?.message_id
+    const messageId = query.messageId
 
     if (messageId) {
       const pending = this.pendingTasks.get(messageId)
       if (pending) {
         this.pendingTasks.delete(messageId)
-        await this.telegram.answerCallbackQuery(query.id, `Selected: ${repoSlug}`)
-        await this.telegram.deleteMessage(messageId)
+        await this.platform.ui!.answerCallbackQuery(query.queryId, `Selected: ${repoSlug}`)
+        await this.platform.chat.deleteMessage(messageId)
 
         pending.repoSlug = repoSlug
         pending.repoUrl = repoUrl
@@ -940,7 +954,7 @@ export class Dispatcher {
           if (profiles.length > 1) {
             const label = pending.mode === "ship-think" ? "ship" : pending.mode
             const keyboard = buildProfileKeyboard(profiles)
-            const msgId = await this.telegram.sendMessageWithKeyboard(
+            const msgId = await this.platform.ui!.sendMessageWithKeyboard(
               `Pick a profile for ${label}: <i>${escapeHtml(pending.task)}</i>`,
               keyboard,
               pending.threadId,
@@ -956,39 +970,39 @@ export class Dispatcher {
       }
     }
 
-    await this.telegram.answerCallbackQuery(query.id)
+    await this.platform.ui!.answerCallbackQuery(query.queryId)
   }
 
-  private async handleProfileCallback(query: TelegramCallbackQuery, profileId: string): Promise<void> {
+  private async handleProfileCallback(query: CallbackQuery, profileId: string): Promise<void> {
     const profile = this.profileStore.get(profileId)
     if (!profile) {
-      await this.telegram.answerCallbackQuery(query.id, "Unknown profile")
+      await this.platform.ui!.answerCallbackQuery(query.queryId, "Unknown profile")
       return
     }
 
-    const messageId = query.message?.message_id
+    const messageId = query.messageId
     if (messageId) {
       const pending = this.pendingProfiles.get(messageId)
       if (pending) {
         this.pendingProfiles.delete(messageId)
-        await this.telegram.answerCallbackQuery(query.id, `Selected: ${profile.name}`)
-        await this.telegram.deleteMessage(messageId)
+        await this.platform.ui!.answerCallbackQuery(query.queryId, `Selected: ${profile.name}`)
+        await this.platform.chat.deleteMessage(messageId)
         await this.startTopicSession(pending.repoUrl, pending.task, pending.mode, undefined, profileId, pending.autoAdvance)
         return
       }
     }
 
-    await this.telegram.answerCallbackQuery(query.id)
+    await this.platform.ui!.answerCallbackQuery(query.queryId)
   }
 
   // ── Session-creating commands ─────────────────────────────────────────
 
-  private async handlePlanCommand(args: string, replyThreadId?: number, photos?: TelegramPhotoSize[]): Promise<void> {
+  private async handlePlanCommand(args: string, replyThreadId?: string, photos?: TelegramPhotoSize[]): Promise<void> {
     const { repoUrl, task } = parseTaskArgs(this.config.repos, args)
 
     if (!task) {
       if (replyThreadId !== undefined) {
-        await this.telegram.sendMessage(`Usage: <code>/plan [repo] description of what to plan</code>`, replyThreadId)
+        await this.platform.chat.sendMessage(`Usage: <code>/plan [repo] description of what to plan</code>`, replyThreadId)
       }
       return
     }
@@ -997,7 +1011,7 @@ export class Dispatcher {
       const repoKeys = Object.keys(this.config.repos)
       if (repoKeys.length > 0) {
         const keyboard = buildRepoKeyboard(repoKeys, "plan")
-        const msgId = await this.telegram.sendMessageWithKeyboard(
+        const msgId = await this.platform.ui!.sendMessageWithKeyboard(
           `Pick a repo for plan: <i>${escapeHtml(task)}</i>`,
           keyboard,
           replyThreadId,
@@ -1012,12 +1026,12 @@ export class Dispatcher {
     await this.startWithProfileSelection(repoUrl, task, "plan", replyThreadId, photos)
   }
 
-  private async handleThinkCommand(args: string, replyThreadId?: number, photos?: TelegramPhotoSize[]): Promise<void> {
+  private async handleThinkCommand(args: string, replyThreadId?: string, photos?: TelegramPhotoSize[]): Promise<void> {
     const { repoUrl, task } = parseTaskArgs(this.config.repos, args)
 
     if (!task) {
       if (replyThreadId !== undefined) {
-        await this.telegram.sendMessage(`Usage: <code>/think [repo] question or topic to research</code>`, replyThreadId)
+        await this.platform.chat.sendMessage(`Usage: <code>/think [repo] question or topic to research</code>`, replyThreadId)
       }
       return
     }
@@ -1026,7 +1040,7 @@ export class Dispatcher {
       const repoKeys = Object.keys(this.config.repos)
       if (repoKeys.length > 0) {
         const keyboard = buildRepoKeyboard(repoKeys, "think")
-        const msgId = await this.telegram.sendMessageWithKeyboard(
+        const msgId = await this.platform.ui!.sendMessageWithKeyboard(
           `Pick a repo for research: <i>${escapeHtml(task)}</i>`,
           keyboard,
           replyThreadId,
@@ -1041,12 +1055,12 @@ export class Dispatcher {
     await this.startWithProfileSelection(repoUrl, task, "think", replyThreadId, photos)
   }
 
-  private async handleShipCommand(args: string, replyThreadId?: number): Promise<void> {
+  private async handleShipCommand(args: string, replyThreadId?: string): Promise<void> {
     const { repoUrl, task } = parseTaskArgs(this.config.repos, args)
 
     if (!task) {
       if (replyThreadId !== undefined) {
-        await this.telegram.sendMessage(
+        await this.platform.chat.sendMessage(
           `Usage: <code>/ship [repo] description of the feature to build</code>`,
           replyThreadId,
         )
@@ -1060,7 +1074,7 @@ export class Dispatcher {
       const repoKeys = Object.keys(this.config.repos)
       if (repoKeys.length > 0) {
         const keyboard = buildRepoKeyboard(repoKeys, "ship")
-        const msgId = await this.telegram.sendMessageWithKeyboard(
+        const msgId = await this.platform.ui!.sendMessageWithKeyboard(
           `Pick a repo for ship: <i>${escapeHtml(task)}</i>`,
           keyboard,
           replyThreadId,
@@ -1079,7 +1093,7 @@ export class Dispatcher {
     repoUrl: string | undefined,
     task: string,
     mode: "task" | "plan" | "think" | "review" | "ship-think",
-    replyThreadId?: number,
+    replyThreadId?: string,
     photos?: TelegramPhotoSize[],
     autoAdvance?: AutoAdvance,
   ): Promise<void> {
@@ -1093,7 +1107,7 @@ export class Dispatcher {
     if (profiles.length > 1) {
       const keyboard = buildProfileKeyboard(profiles)
       const label = mode === "ship-think" ? "ship" : mode
-      const msgId = await this.telegram.sendMessageWithKeyboard(
+      const msgId = await this.platform.ui!.sendMessageWithKeyboard(
         `Pick a profile for ${label}: <i>${escapeHtml(task)}</i>`,
         keyboard,
         replyThreadId,
@@ -1133,21 +1147,21 @@ export class Dispatcher {
       : ""
     const topicName = emoji ? `${emoji} ${topicHandle}` : topicHandle
 
-    let topic: { message_thread_id: number }
+    let topic: { threadId: string }
     try {
-      topic = await this.telegram.createForumTopic(topicName)
+      topic = await this.platform.threads.createThread(topicName)
     } catch (err) {
       log.error({ err, topicName }, "failed to create topic")
       captureException(err, { operation: "createForumTopic" })
       return
     }
 
-    const threadId = topic.message_thread_id
+    const threadId = topic.threadId
 
     const cwd = await this.prepareWorkspace(slug, repoUrl)
     if (!cwd) {
-      await this.telegram.sendMessage(`❌ Failed to prepare workspace.`, threadId)
-      await this.telegram.deleteForumTopic(threadId)
+      await this.platform.chat.sendMessage(`❌ Failed to prepare workspace.`, threadId)
+      await this.platform.threads.deleteThread(threadId)
       return
     }
 
@@ -1180,7 +1194,7 @@ export class Dispatcher {
   private async updateTopicTitle(topicSession: TopicSession, stateEmoji: string): Promise<void> {
     const handle = topicSession.topicHandle ?? topicSession.slug
     const name = `${stateEmoji} ${handle}`
-    await this.telegram.editForumTopic(topicSession.threadId, name).catch(() => {})
+    await this.platform.threads.editThread(topicSession.threadId, name).catch(() => {})
   }
 
   // ── Agent spawning ────────────────────────────────────────────────────
@@ -1189,7 +1203,7 @@ export class Dispatcher {
     this.rebootstrapDependencies(topicSession.cwd)
     await this.tokenProvider?.refreshEnv()
     if (this.sessions.size >= this.config.workspace.maxConcurrentSessions) {
-      await this.telegram.sendMessage(
+      await this.platform.chat.sendMessage(
         `⚠️ Max concurrent sessions reached. Try again later.`,
         topicSession.threadId,
       )
@@ -1237,7 +1251,7 @@ export class Dispatcher {
 
       if (event.type === "complete" && meta.totalTokens != null && meta.totalTokens > this.config.workspace.sessionTokenBudget) {
         log.warn({ sessionId, totalTokens: meta.totalTokens, budget: this.config.workspace.sessionTokenBudget }, "session exceeded token budget")
-        this.telegram.sendMessage(
+        this.platform.chat.sendMessage(
           formatBudgetWarning(topicSession.slug, meta.totalTokens, this.config.workspace.sessionTokenBudget),
           topicSession.threadId,
         ).catch(() => {})
@@ -1298,7 +1312,7 @@ export class Dispatcher {
       topicSession.lastState = "quota_exhausted"
       topicSession.quotaRetryCount = retryCount
       this.pinnedMessages.updateTopicTitle(topicSession, "💤").catch(() => {})
-      this.telegram.sendMessage(
+      this.platform.chat.sendMessage(
         formatQuotaExhausted(topicSession.slug, retryMax),
         topicSession.threadId,
       ).catch(() => {})
@@ -1318,7 +1332,7 @@ export class Dispatcher {
     )
 
     this.pinnedMessages.updateTopicTitle(topicSession, "💤").catch(() => {})
-    this.telegram.sendMessage(
+    this.platform.chat.sendMessage(
       formatQuotaSleep(topicSession.slug, sleepMs, retryCount, retryMax),
       topicSession.threadId,
     ).catch(() => {})
@@ -1367,7 +1381,7 @@ export class Dispatcher {
 
     log.info({ slug: topicSession.slug, retryCount }, "resuming after quota sleep")
 
-    await this.telegram.sendMessage(
+    await this.platform.chat.sendMessage(
       formatQuotaResume(topicSession.slug, retryCount),
       topicSession.threadId,
     )
@@ -1380,7 +1394,7 @@ export class Dispatcher {
     this.persistTopicSessions().catch(() => {})
   }
 
-  private clearQuotaSleepTimer(threadId: number): void {
+  private clearQuotaSleepTimer(threadId: string): void {
     const timer = this.quotaSleepTimers.get(threadId)
     if (timer) {
       clearTimeout(timer)
@@ -1499,13 +1513,13 @@ export class Dispatcher {
           text: fullFeedback,
           images: imagePaths.length > 0 ? imagePaths : undefined,
         })
-        await this.telegram.sendMessage(
+        await this.platform.chat.sendMessage(
           `💬 Reply injected — agent will see it before its next action.`,
           topicSession.threadId,
         )
       } else {
         topicSession.pendingFeedback.push(fullFeedback)
-        await this.telegram.sendMessage(
+        await this.platform.chat.sendMessage(
           `📝 Reply queued — will be applied when the current iteration finishes.`,
           topicSession.threadId,
         )
@@ -1522,13 +1536,13 @@ export class Dispatcher {
     const iteration = Math.floor(topicSession.conversation.filter((m) => m.role === "user").length)
 
     if (topicSession.mode === "think") {
-      await this.telegram.sendMessage(formatThinkIteration(topicSession.slug, iteration), topicSession.threadId)
+      await this.platform.chat.sendMessage(formatThinkIteration(topicSession.slug, iteration), topicSession.threadId)
     } else if (topicSession.mode === "review") {
-      await this.telegram.sendMessage(formatReviewIteration(topicSession.slug, iteration), topicSession.threadId)
+      await this.platform.chat.sendMessage(formatReviewIteration(topicSession.slug, iteration), topicSession.threadId)
     } else if (topicSession.mode === "plan") {
-      await this.telegram.sendMessage(formatPlanIteration(topicSession.slug, iteration), topicSession.threadId)
+      await this.platform.chat.sendMessage(formatPlanIteration(topicSession.slug, iteration), topicSession.threadId)
     } else {
-      await this.telegram.sendMessage(formatFollowUpIteration(topicSession.slug, iteration), topicSession.threadId)
+      await this.platform.chat.sendMessage(formatFollowUpIteration(topicSession.slug, iteration), topicSession.threadId)
     }
 
     const contextTask = buildContextPrompt(topicSession)
@@ -1557,7 +1571,7 @@ export class Dispatcher {
     parent: TopicSession,
     item: { title: string; description: string },
     allItems: { title: string; description: string }[],
-  ): Promise<number | null> {
+  ): Promise<string | null> {
     const sessionId = crypto.randomUUID()
     const slug = generateSlug(sessionId)
     const repo = parent.repo
@@ -1565,21 +1579,21 @@ export class Dispatcher {
     const topicHandle = `${parent.slug}/${childLabel}`
     const topicName = `⚡ ${topicHandle}`
 
-    let topic: { message_thread_id: number }
+    let topic: { threadId: string }
     try {
-      topic = await this.telegram.createForumTopic(topicName)
+      topic = await this.platform.threads.createThread(topicName)
     } catch (err) {
       log.error({ err }, "failed to create child topic for split")
       captureException(err, { operation: "createForumTopic", parentSlug: parent.slug })
       return null
     }
 
-    const threadId = topic.message_thread_id
+    const threadId = topic.threadId
 
     const cwd = await this.prepareWorkspace(slug, parent.repoUrl)
     if (!cwd) {
-      await this.telegram.sendMessage(`❌ Failed to prepare workspace.`, threadId)
-      await this.telegram.deleteForumTopic(threadId)
+      await this.platform.chat.sendMessage(`❌ Failed to prepare workspace.`, threadId)
+      await this.platform.threads.deleteThread(threadId)
       return null
     }
 
@@ -1625,7 +1639,7 @@ export class Dispatcher {
   // ── Child session management ──────────────────────────────────────────
 
   private async closeChildSessions(parent: TopicSession): Promise<void> {
-    const childrenToClose = new Map<number, TopicSession>()
+    const childrenToClose = new Map<string, TopicSession>()
 
     if (parent.childThreadIds) {
       for (const childId of parent.childThreadIds) {
@@ -1668,7 +1682,7 @@ export class Dispatcher {
     }
     this.topicSessions.delete(childId)
     this.broadcastSessionDeleted(child.slug)
-    await this.telegram.deleteForumTopic(childId).catch(() => {})
+    await this.platform.threads.deleteThread(childId).catch(() => {})
     await this.removeWorkspace(child).catch(() => {})
     log.info({ slug: child.slug, threadId: childId }, "closed child topic")
   }
@@ -1692,7 +1706,7 @@ export class Dispatcher {
     this.broadcastSessionDeleted(topicSession.slug)
     await this.persistTopicSessions()
     this.pinnedMessages.updatePinnedSummary()
-    await this.telegram.deleteForumTopic(threadId)
+    await this.platform.threads.deleteThread(threadId)
     log.info({ slug: topicSession.slug, threadId }, "closed and deleted topic")
 
     if (topicSession.activeSessionId) {
@@ -1724,13 +1738,13 @@ export class Dispatcher {
       topicSession.lastState = undefined
       topicSession.pendingFeedback = []
       this.persistTopicSessions()
-      await this.telegram.sendMessage(`⏹️ Quota sleep cancelled. Send <b>/reply</b> to continue.`, threadId)
+      await this.platform.chat.sendMessage(`⏹️ Quota sleep cancelled. Send <b>/reply</b> to continue.`, threadId)
       log.info({ slug: topicSession.slug, threadId }, "cancelled quota sleep")
       return
     }
 
     if (!topicSession.activeSessionId) {
-      await this.telegram.sendMessage(`⚠️ No active session to stop.`, threadId)
+      await this.platform.chat.sendMessage(`⚠️ No active session to stop.`, threadId)
       return
     }
 
@@ -1744,7 +1758,7 @@ export class Dispatcher {
     topicSession.pendingFeedback = []
     this.persistTopicSessions()
 
-    await this.telegram.sendMessage(`⏹️ Session stopped. Send <b>/reply</b> to continue.`, threadId)
+    await this.platform.chat.sendMessage(`⏹️ Session stopped. Send <b>/reply</b> to continue.`, threadId)
     log.info({ slug: topicSession.slug, threadId }, "stopped session")
   }
 
@@ -1779,7 +1793,8 @@ export class Dispatcher {
   }
 
   private async downloadPhotos(photos: TelegramPhotoSize[] | undefined, _cwd: string): Promise<string[]> {
-    return downloadPhotos(photos, this.telegram)
+    if (!this.platform.files) return []
+    return downloadPhotos(photos, this.platform.files)
   }
 
   private mergeUpstreamBranches(workDir: string, additionalBranches: string[]) {
@@ -1792,11 +1807,11 @@ export class Dispatcher {
     return this.sessions.size
   }
 
-  getSessions(): Map<number, ActiveSession> {
+  getSessions(): Map<string, ActiveSession> {
     return this.sessions
   }
 
-  getTopicSessions(): Map<number, TopicSession> {
+  getTopicSessions(): Map<string, TopicSession> {
     return this.topicSessions
   }
 
@@ -1804,12 +1819,12 @@ export class Dispatcher {
     return this.dags
   }
 
-  getSessionState(threadId: number): SessionState | undefined {
+  getSessionState(threadId: string): SessionState | undefined {
     const session = this.sessions.get(threadId)
     return session?.handle.getState()
   }
 
-  async apiSendReply(threadId: number, message: string): Promise<void> {
+  async apiSendReply(threadId: string, message: string): Promise<void> {
     const topicSession = this.topicSessions.get(threadId)
     if (!topicSession) {
       throw new SessionNotFoundError(threadId, Array.from(this.topicSessions.keys()))
@@ -1827,14 +1842,14 @@ export class Dispatcher {
     }
   }
 
-  apiStopSession(threadId: number): void {
+  apiStopSession(threadId: string): void {
     const session = this.sessions.get(threadId)
     if (session) {
       session.handle.interrupt()
     }
   }
 
-  async apiCloseSession(threadId: number): Promise<void> {
+  async apiCloseSession(threadId: string): Promise<void> {
     const topicSession = this.topicSessions.get(threadId)
     if (!topicSession) {
       throw new SessionNotFoundError(threadId, Array.from(this.topicSessions.keys()))
@@ -1846,7 +1861,7 @@ export class Dispatcher {
       this.sessions.delete(threadId)
     }
 
-    await this.telegram.deleteForumTopic(threadId)
+    await this.platform.threads.deleteThread(threadId)
     await this.removeWorkspace(topicSession)
     this.topicSessions.delete(threadId)
     this.broadcastSessionDeleted(topicSession.slug)

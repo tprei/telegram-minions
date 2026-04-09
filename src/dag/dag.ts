@@ -1,5 +1,6 @@
 import { execFile as execFileCb } from "node:child_process"
 import { promisify } from "node:util"
+import type { ThreadId } from "../provider/types.js"
 import { DagCycleError, DagSelfDependencyError, UnknownNodeError } from "../errors.js"
 
 const execFile = promisify(execFileCb)
@@ -12,7 +13,7 @@ export interface DagNode {
   description: string
   dependsOn: string[]
   status: DagNodeStatus
-  threadId?: number
+  threadId?: ThreadId
   branch?: string
   prUrl?: string
   error?: string
@@ -23,7 +24,7 @@ export interface DagNode {
 export interface DagGraph {
   id: string
   nodes: DagNode[]
-  parentThreadId: number
+  parentThreadId: ThreadId
   repoUrl?: string
   repo: string
   createdAt: number
@@ -88,7 +89,7 @@ function findCycle(nodes: DagNode[] | DagInput[]): string[] {
 export function buildDag(
   dagId: string,
   items: DagInput[],
-  parentThreadId: number,
+  parentThreadId: ThreadId,
   repo: string,
   repoUrl?: string,
 ): DagGraph {
@@ -147,7 +148,7 @@ export function buildDag(
 export function buildLinearDag(
   dagId: string,
   items: { title: string; description: string }[],
-  parentThreadId: number,
+  parentThreadId: ThreadId,
   repo: string,
   repoUrl?: string,
 ): DagGraph {

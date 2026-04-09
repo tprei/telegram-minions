@@ -97,7 +97,7 @@ export class ConfigManager {
 
     const now = Date.now()
     const staleTtlMs = this.ctx.config.workspace.staleTtlMs
-    const idle: [number, TopicSession][] = []
+    const idle: [string, TopicSession][] = []
     for (const [threadId, session] of this.ctx.topicSessions) {
       const isIdle = !session.activeSessionId
       const isStaleInterrupted =
@@ -130,7 +130,7 @@ export class ConfigManager {
       const entryPath = path.join(root, entry.name)
       if (entryPath === parentHome) continue
       if (activeCwds.has(entryPath)) continue
-      if (this.ctx.sessions.has(Number(entry.name))) continue
+      if (this.ctx.sessions.has(entry.name)) continue
 
       freedBytes += dirSizeBytes(entryPath)
       try {

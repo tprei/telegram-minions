@@ -9,7 +9,7 @@ const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000 // 24 hours
 const log = loggers.store
 
 interface StoreData {
-  sessions: [number, TopicSession][]
+  sessions: [string, TopicSession][]
   offset: number
 }
 
@@ -25,12 +25,12 @@ export class SessionStore {
     this.ttlMs = ttlMs
   }
 
-  async save(sessions: Map<number, TopicSession>, offset: number = 0): Promise<void> {
+  async save(sessions: Map<string, TopicSession>, offset: number = 0): Promise<void> {
     this.saveQueue = this.saveQueue.then(() => this.doSave(sessions, offset), () => this.doSave(sessions, offset))
     return this.saveQueue
   }
 
-  private async doSave(sessions: Map<number, TopicSession>, offset: number): Promise<void> {
+  private async doSave(sessions: Map<string, TopicSession>, offset: number): Promise<void> {
     const entries = Array.from(sessions.entries())
     const data: StoreData = { sessions: entries, offset }
     const tmp = this.filePath + ".tmp"
@@ -49,9 +49,9 @@ export class SessionStore {
     }
   }
 
-  async load(): Promise<{ active: Map<number, TopicSession>; expired: Map<number, TopicSession>; offset: number }> {
-    const active = new Map<number, TopicSession>()
-    const expired = new Map<number, TopicSession>()
+  async load(): Promise<{ active: Map<string, TopicSession>; expired: Map<string, TopicSession>; offset: number }> {
+    const active = new Map<string, TopicSession>()
+    const expired = new Map<string, TopicSession>()
     let offset = 0
 
     const result = await this.loadFile(this.filePath)
@@ -90,12 +90,13 @@ export class SessionStore {
     }
   }
 
-  private parseEntries(parsed: unknown, _raw: string, active: Map<number, TopicSession>, expired: Map<number, TopicSession>): void {
-    let entries: [number, TopicSession][]
+  private parseEntries(parsed: unknown, _raw: string, active: Map<string, TopicSession>, expired: Map<string, TopicSession>): void {
+    let entries: [string, TopicSession][]
     if (Array.isArray(parsed)) {
-      entries = parsed as [number, TopicSession][]
+      entries = (parsed as [unknown, TopicSession][]).map(([k, v]) => [String(k), v])
     } else if (parsed && typeof parsed === "object") {
-      entries = (parsed as StoreData).sessions ?? []
+      const rawEntries = (parsed as StoreData).sessions ?? []
+      entries = (rawEntries as [unknown, TopicSession][]).map(([k, v]) => [String(k), v])
     } else {
       entries = []
     }

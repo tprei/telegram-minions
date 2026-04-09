@@ -10,7 +10,7 @@ import { vi } from "vitest"
 import type { ChildProcess } from "node:child_process"
 import type { TelegramClient } from "../src/telegram/telegram.js"
 import type { Observer, TextCaptureCallback } from "../src/telegram/observer.js"
-import type { ChatProvider, FileHandler } from "../src/provider/index.js"
+import type { ChatProvider, FileHandler, ThreadManager } from "../src/provider/index.js"
 import type { StatsTracker, SessionRecord, AggregateStats } from "../src/stats.js"
 import type { ProfileStore } from "../src/profile-store.js"
 import type { DispatcherContext } from "../src/orchestration/dispatcher-context.js"
@@ -36,18 +36,18 @@ import type { StateBroadcaster } from "../src/api-server.js"
 export function makeMockTelegram(overrides: Partial<TelegramClient> = {}): TelegramClient {
   return {
     getUpdates: vi.fn(async () => []),
-    sendMessage: vi.fn(async () => ({ ok: true, messageId: 1 })),
+    sendMessage: vi.fn(async () => ({ ok: true, messageId: "1" })),
     editMessage: vi.fn(async () => true),
     createForumTopic: vi.fn(async () => ({ message_thread_id: 100, name: "test", icon_color: 0 })),
     editForumTopic: vi.fn(async () => {}),
     pinChatMessage: vi.fn(async () => {}),
     closeForumTopic: vi.fn(async () => {}),
-    sendMessageWithKeyboard: vi.fn(async () => 1),
+    sendMessageWithKeyboard: vi.fn(async () => "1"),
     answerCallbackQuery: vi.fn(async () => {}),
     deleteMessage: vi.fn(async () => {}),
     deleteForumTopic: vi.fn(async () => {}),
-    sendPhoto: vi.fn(async () => 1),
-    sendPhotoBuffer: vi.fn(async () => 1),
+    sendPhoto: vi.fn(async () => "1"),
+    sendPhotoBuffer: vi.fn(async () => "1"),
     downloadFile: vi.fn(async () => true),
     ...overrides,
   } as unknown as TelegramClient
@@ -72,6 +72,18 @@ export function makeMockFileHandler(overrides: Partial<FileHandler> = {}): FileH
     sendPhoto: vi.fn(async () => "1"),
     sendPhotoBuffer: vi.fn(async () => "1"),
     downloadFile: vi.fn(async () => true),
+    ...overrides,
+  }
+}
+
+// ── ThreadManager ─────────────────────────────────────────────────────
+
+export function makeMockThreadManager(overrides: Partial<ThreadManager> = {}): ThreadManager {
+  return {
+    createThread: vi.fn(async () => ({ threadId: "100", name: "test" })),
+    editThread: vi.fn(async () => {}),
+    closeThread: vi.fn(async () => {}),
+    deleteThread: vi.fn(async () => {}),
     ...overrides,
   }
 }
@@ -131,7 +143,7 @@ export function makeMockProfileStore(overrides: Partial<ProfileStore> = {}): Pro
 export function makeMockSessionPort(overrides: Partial<SessionPort> = {}): SessionPort {
   const meta: SessionMeta = {
     sessionId: "test-session-1",
-    threadId: 1,
+    threadId: "1",
     topicName: "test-topic",
     repo: "test-repo",
     cwd: "/tmp/test",
@@ -171,7 +183,7 @@ export function makeMockActiveSession(overrides: Partial<ActiveSession> = {}): A
 
 export function makeMockTopicSession(overrides: Partial<TopicSession> = {}): TopicSession {
   return {
-    threadId: 1,
+    threadId: "1",
     repo: "test-repo",
     cwd: "/tmp/test",
     slug: "test-slug",
@@ -249,7 +261,12 @@ export function makeMockConfig(overrides: Partial<MinionConfig> = {}): MinionCon
 export function createMockContext(overrides: Partial<DispatcherContext> = {}): DispatcherContext {
   return {
     config: makeMockConfig(),
-    telegram: makeMockTelegram(),
+    chat: makeMockChatProvider(),
+    threads: makeMockThreadManager(),
+    ui: {
+      sendMessageWithKeyboard: vi.fn(async () => "1"),
+      answerCallbackQuery: vi.fn(async () => {}),
+    },
     observer: makeMockObserver(),
     stats: makeMockStats(),
     profileStore: makeMockProfileStore(),
@@ -320,7 +337,7 @@ export function makeMockDagGraph(overrides: Partial<DagGraph> = {}): DagGraph {
   return {
     id: "dag-1",
     nodes: [],
-    parentThreadId: 1,
+    parentThreadId: "1",
     repo: "test-repo",
     createdAt: Date.now(),
     ...overrides,

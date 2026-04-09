@@ -1,5 +1,6 @@
 // Session types
 
+import type { ThreadId, MessageId } from "../provider/types.js"
 import type { AutoAdvance, VerificationState } from "./workflow-types.js"
 
 export type SessionDoneState = "completed" | "errored" | "quota_exhausted"
@@ -29,7 +30,7 @@ export type SessionMode = "task" | "plan" | "think" | "review" | "ci-fix" | "dag
 
 export interface SessionMeta {
   sessionId: string
-  threadId: number
+  threadId: ThreadId
   topicName: string
   repo: string
   cwd: string
@@ -46,7 +47,7 @@ export interface TopicMessage {
 }
 
 export interface TopicSession {
-  threadId: number
+  threadId: ThreadId
   repo: string
   repoUrl?: string
   cwd: string
@@ -58,8 +59,8 @@ export interface TopicSession {
   mode: SessionMode
   lastActivityAt: number
   profileId?: string
-  parentThreadId?: number
-  childThreadIds?: number[]
+  parentThreadId?: ThreadId
+  childThreadIds?: ThreadId[]
   splitLabel?: string
   interruptedAt?: number
   branch?: string
@@ -69,7 +70,7 @@ export interface TopicSession {
   dagNodeId?: string
   pendingSplitItems?: { title: string; description: string }[]
   allSplitItems?: { title: string; description: string }[]
-  pinnedMessageId?: number
+  pinnedMessageId?: MessageId
   pendingDagItems?: PendingDagItem[]
   quotaRetryCount?: number
   quotaSleepUntil?: number
@@ -85,5 +86,6 @@ export interface PendingDagItem {
   dependsOn: string[]
 }
 
-// Re-export workflow types that TopicSession depends on
+// Re-export types that TopicSession depends on
 export type { AutoAdvance, VerificationState }
+export type { ThreadId, MessageId }

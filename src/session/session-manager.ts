@@ -27,7 +27,7 @@ export interface ActiveSession {
 
 export interface PendingTask {
   task: string
-  threadId?: number
+  threadId?: string
   repoSlug?: string
   repoUrl?: string
   mode: "task" | "plan" | "think" | "review" | "ship-think"

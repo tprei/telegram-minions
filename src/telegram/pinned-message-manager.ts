@@ -1,6 +1,8 @@
 import path from "node:path"
 import fs from "node:fs"
-import type { TelegramClient } from "./telegram.js"
+import type { ChatProvider } from "../provider/chat-provider.js"
+import type { ThreadManager } from "../provider/thread-manager.js"
+import type { MessageId, ThreadId } from "../provider/types.js"
 import type { TopicSession } from "../domain/session-types.js"
 import type { DagGraph } from "../dag/dag.js"
 import {
@@ -15,14 +17,15 @@ import { loggers } from "../logger.js"
 const log = loggers.dispatcher
 
 export interface PinnedMessageDeps {
-  readonly telegram: TelegramClient
-  readonly topicSessions: Map<number, TopicSession>
+  readonly chat: ChatProvider
+  readonly threads: ThreadManager
+  readonly topicSessions: Map<ThreadId, TopicSession>
   readonly workspaceRoot: string
-  readonly chatId?: number | string
+  readonly chatId?: string
 }
 
 export class PinnedMessageManager {
-  private pinnedSummaryMessageId: number | null = null
+  private pinnedSummaryMessageId: MessageId | null = null
   private readonly deps: PinnedMessageDeps
 
   constructor(deps: PinnedMessageDeps) {
@@ -37,12 +40,12 @@ export class PinnedMessageManager {
   private loadPinnedMessageId(): void {
     try {
       const raw = fs.readFileSync(this.pinnedSummaryPath, "utf-8")
-      const data = JSON.parse(raw) as { messageId?: number | null }
-      this.pinnedSummaryMessageId = data.messageId ?? null
+      const data = JSON.parse(raw) as { messageId?: string | number | null }
+      this.pinnedSummaryMessageId = data.messageId != null ? String(data.messageId) : null
     } catch { /* file doesn't exist yet */ }
   }
 
-  private savePinnedMessageId(id: number | null): void {
+  private savePinnedMessageId(id: MessageId | null): void {
     try {
       fs.writeFileSync(this.pinnedSummaryPath, JSON.stringify({ messageId: id }))
     } catch { /* ignore */ }
@@ -53,7 +56,7 @@ export class PinnedMessageManager {
     if (sessions.length === 0) return "No active minion sessions."
 
     const chatId = this.deps.chatId
-    const childSet = new Set<number>()
+    const childSet = new Set<ThreadId>()
     for (const s of sessions) {
       if (s.parentThreadId != null) childSet.add(s.threadId)
     }
@@ -102,14 +105,14 @@ export class PinnedMessageManager {
     const html = this.formatPinnedSummary()
     ;(async () => {
       if (this.pinnedSummaryMessageId !== null) {
-        const ok = await this.deps.telegram.editMessage(this.pinnedSummaryMessageId, html)
+        const ok = await this.deps.chat.editMessage(this.pinnedSummaryMessageId, html)
         if (ok) return
         this.pinnedSummaryMessageId = null
         this.savePinnedMessageId(null)
       }
-      const { ok, messageId } = await this.deps.telegram.sendMessage(html)
+      const { ok, messageId } = await this.deps.chat.sendMessage(html)
       if (ok && messageId !== null) {
-        await this.deps.telegram.pinChatMessage(messageId)
+        await this.deps.chat.pinMessage(messageId)
         this.pinnedSummaryMessageId = messageId
         this.savePinnedMessageId(messageId)
       }
@@ -122,13 +125,13 @@ export class PinnedMessageManager {
     const threadId = session.threadId
     try {
       if (session.pinnedMessageId != null) {
-        const ok = await this.deps.telegram.editMessage(session.pinnedMessageId, html, threadId)
+        const ok = await this.deps.chat.editMessage(session.pinnedMessageId, html, threadId)
         if (ok) return
         session.pinnedMessageId = undefined
       }
-      const { ok, messageId } = await this.deps.telegram.sendMessage(html, threadId)
+      const { ok, messageId } = await this.deps.chat.sendMessage(html, threadId)
       if (ok && messageId != null) {
-        await this.deps.telegram.pinChatMessage(messageId)
+        await this.deps.chat.pinMessage(messageId)
         session.pinnedMessageId = messageId
       }
     } catch (err) {
@@ -139,7 +142,7 @@ export class PinnedMessageManager {
   async updatePinnedSplitStatus(parent: TopicSession): Promise<void> {
     if (!parent.childThreadIds || parent.childThreadIds.length === 0) return
 
-    const children: { slug: string; label: string; prUrl?: string; threadId?: number; status: "running" | "done" | "failed" }[] = []
+    const children: { slug: string; label: string; prUrl?: string; threadId?: ThreadId; status: "running" | "done" | "failed" }[] = []
 
     for (const id of parent.childThreadIds) {
       const child = this.deps.topicSessions.get(id)
@@ -178,6 +181,6 @@ export class PinnedMessageManager {
 
   async updateTopicTitle(topicSession: TopicSession, stateEmoji: string): Promise<void> {
     const name = `${stateEmoji} ${topicSession.repo} · ${topicSession.slug}`
-    await this.deps.telegram.editForumTopic(topicSession.threadId, name).catch(() => {})
+    await this.deps.threads.editThread(topicSession.threadId, name).catch(() => {})
   }
 }

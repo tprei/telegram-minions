@@ -19,7 +19,7 @@ import type { DispatcherContext } from "../src/orchestration/dispatcher-context.
 describe("makeMockTelegram", () => {
   it("returns a mock with all TelegramClient methods", async () => {
     const tg = makeMockTelegram()
-    expect(await tg.sendMessage("hi")).toEqual({ ok: true, messageId: 1 })
+    expect(await tg.sendMessage("hi")).toEqual({ ok: true, messageId: "1" })
     expect(await tg.editMessage(1, "hi")).toBe(true)
     expect(await tg.getUpdates(0, 1)).toEqual([])
     const topic = await tg.createForumTopic("test")
@@ -103,7 +103,7 @@ describe("makeMockActiveSession", () => {
 describe("makeMockTopicSession", () => {
   it("creates a minimal TopicSession", () => {
     const ts = makeMockTopicSession()
-    expect(ts.threadId).toBe(1)
+    expect(ts.threadId).toBe("1")
     expect(ts.slug).toBe("test-slug")
     expect(ts.conversation).toEqual([])
     expect(ts.pendingFeedback).toEqual([])
@@ -112,13 +112,13 @@ describe("makeMockTopicSession", () => {
 
   it("accepts overrides", () => {
     const ts = makeMockTopicSession({
-      threadId: 99,
+      threadId: "99",
       mode: "plan",
-      childThreadIds: [10, 20],
+      childThreadIds: ["10", "20"],
     })
-    expect(ts.threadId).toBe(99)
+    expect(ts.threadId).toBe("99")
     expect(ts.mode).toBe("plan")
-    expect(ts.childThreadIds).toEqual([10, 20])
+    expect(ts.childThreadIds).toEqual(["10", "20"])
   })
 })
 
@@ -156,7 +156,9 @@ describe("createMockContext", () => {
   it("produces a complete DispatcherContext with all required properties", () => {
     const ctx = createMockContext()
     expect(ctx.config).toBeDefined()
-    expect(ctx.telegram).toBeDefined()
+    expect(ctx.chat).toBeDefined()
+    expect(ctx.threads).toBeDefined()
+    expect(ctx.ui).toBeDefined()
     expect(ctx.observer).toBeDefined()
     expect(ctx.stats).toBeDefined()
     expect(ctx.profileStore).toBeDefined()
