@@ -14,6 +14,7 @@ import type {
   TelegramQueueConfig,
   GitHubAppConfig,
   QuotaConfig,
+  ChatPlatformConfig,
 } from "./config-types.js"
 
 export class ConfigValidationError extends Error {
@@ -482,6 +483,57 @@ export function validateQuotaConfig(config: unknown, path = "quota"): Validation
   return { valid: errors.length === 0, errors }
 }
 
+export function validatePlatformConfig(config: unknown, path = "platform"): ValidationResult {
+  const errors: ConfigValidationError[] = []
+  if (config === undefined || config === null) {
+    return { valid: true, errors }
+  }
+  if (typeof config !== "object") {
+    errors.push(error(path, "expected object or undefined"))
+    return { valid: false, errors }
+  }
+  const c = config as Partial<ChatPlatformConfig>
+
+  if (c.type === "telegram") {
+    const botTokenErr = validateNonEmptyString((c as Record<string, unknown>)["botToken"], `${path}.botToken`)
+    if (botTokenErr) errors.push(botTokenErr)
+
+    const chatIdErr = validateNonEmptyString((c as Record<string, unknown>)["chatId"], `${path}.chatId`)
+    if (chatIdErr) errors.push(chatIdErr)
+
+    const intervalErr = validateNumber((c as Record<string, unknown>)["minSendIntervalMs"], `${path}.minSendIntervalMs`, { min: 0 })
+    if (intervalErr) errors.push(intervalErr)
+
+    const allowedErr = validateArray((c as Record<string, unknown>)["allowedUserIds"], `${path}.allowedUserIds`, (item, itemPath) => {
+      if (typeof item !== "number") {
+        return error(itemPath, `expected number, got ${typeof item}`)
+      }
+      if (!Number.isInteger(item) || item <= 0) {
+        return error(itemPath, "expected positive integer")
+      }
+      return null
+    })
+    if (allowedErr) errors.push(allowedErr)
+  } else if (c.type === "custom") {
+    const allowedErr = validateArray((c as Record<string, unknown>)["allowedUserIds"], `${path}.allowedUserIds`, (item, itemPath) => {
+      if (typeof item !== "string") {
+        return error(itemPath, `expected string, got ${typeof item}`)
+      }
+      if ((item as string).trim().length === 0) {
+        return error(itemPath, "expected non-empty string")
+      }
+      return null
+    })
+    if (allowedErr) errors.push(allowedErr)
+  } else if (c.type !== undefined) {
+    errors.push(error(`${path}.type`, `expected "telegram" or "custom", got "${c.type}"`))
+  } else {
+    errors.push(error(`${path}.type`, "required"))
+  }
+
+  return { valid: errors.length === 0, errors }
+}
+
 export function validateMinionConfig(config: unknown): ValidationResult {
   const errors: ConfigValidationError[] = []
 
@@ -531,6 +583,9 @@ export function validateMinionConfig(config: unknown): ValidationResult {
 
   const apiResult = validateApiServerConfig(c.api)
   errors.push(...apiResult.errors)
+
+  const platformResult = validatePlatformConfig(c.platform)
+  errors.push(...platformResult.errors)
 
   // Optional arrays
   const passthroughErr = validateOptionalArray(c.sessionEnvPassthrough, "sessionEnvPassthrough", (item, itemPath) => {

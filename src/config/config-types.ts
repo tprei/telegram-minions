@@ -118,6 +118,14 @@ export interface MinionConfig {
   api?: ApiServerConfig
   /** Loop scheduler configuration */
   loops?: LoopConfig
+  /**
+   * Chat platform configuration. When omitted, defaults to `{ type: "telegram" }`
+   * using the `telegram` and `telegramQueue` fields above.
+   *
+   * When set to `{ type: "custom" }`, the caller must supply a ChatPlatform
+   * instance via `MinionOptions.platform`.
+   */
+  platform?: ChatPlatformConfig
 }
 
 export interface ApiServerConfig {
@@ -145,3 +153,36 @@ export interface ProviderProfile {
   sonnetModel?: string
   haikuModel?: string
 }
+
+// ── Chat platform configuration ──────────────────────────────────────
+
+/**
+ * Telegram platform config — used when the minion is controlled via Telegram.
+ * This is the default platform when `platform` is omitted from MinionConfig.
+ */
+export interface TelegramPlatformConfig {
+  type: "telegram"
+  botToken: string
+  chatId: string
+  allowedUserIds: number[]
+  minSendIntervalMs: number
+}
+
+/**
+ * Custom platform config — the caller provides a pre-built ChatPlatform instance
+ * and an authorization callback. Use this for Discord, Slack, or custom UIs.
+ *
+ * The `allowedUserIds` list uses string IDs (platform-agnostic).
+ */
+export interface CustomPlatformConfig {
+  type: "custom"
+  allowedUserIds: string[]
+}
+
+/**
+ * Discriminated union for chat platform configuration.
+ *
+ * - `"telegram"` — built-in Telegram adapter (default)
+ * - `"custom"` — caller supplies a ChatPlatform instance via MinionOptions
+ */
+export type ChatPlatformConfig = TelegramPlatformConfig | CustomPlatformConfig

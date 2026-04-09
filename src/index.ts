@@ -1,5 +1,5 @@
-export { createMinion } from "./minion.js"
-export type { MinionInstance } from "./minion.js"
+export { createMinion, buildPlatform } from "./minion.js"
+export type { MinionInstance, MinionOptions } from "./minion.js"
 export { configFromEnv } from "./config/config-env.js"
 export type {
   MinionConfig,
@@ -17,6 +17,9 @@ export type {
   DagCiPolicy,
   ProviderProfile,
   GitHubAppConfig,
+  ChatPlatformConfig,
+  TelegramPlatformConfig,
+  CustomPlatformConfig,
 } from "./config/config-types.js"
 export {
   validateMinionConfig,
@@ -35,9 +38,34 @@ export {
   validateApiServerConfig,
   validateProviderProfile,
   validateGitHubAppConfig,
+  validatePlatformConfig,
 } from "./config/config-validator.js"
 export type { ValidationResult } from "./config/config-validator.js"
 export { DEFAULT_PROMPTS, DEFAULT_TASK_PROMPT, DEFAULT_PLAN_PROMPT, DEFAULT_THINK_PROMPT, DEFAULT_REVIEW_PROMPT, DEFAULT_SHIP_PLAN_PROMPT, DEFAULT_SHIP_VERIFY_PROMPT } from "./config/prompts.js"
+// Provider interfaces — multi-platform chat abstraction
+export type {
+  ChatPlatform,
+  ChatProvider,
+  ThreadManager,
+  ChatInputSource,
+  InteractiveUI,
+  FileHandler,
+  MessageFormatter,
+  ContentBlock,
+  ThreadId,
+  MessageId,
+  SendResult,
+  ThreadInfo,
+  KeyboardButton,
+  ChatUser,
+  ChatPhoto,
+  IncomingMessage,
+  CallbackQuery,
+  ChatUpdate,
+} from "./provider/index.js"
+
+// Telegram platform adapter
+export { TelegramPlatform, createTelegramPlatform } from "./telegram/platform.js"
 export { TelegramClient } from "./telegram/telegram.js"
 export { Observer } from "./telegram/observer.js"
 export { Dispatcher } from "./orchestration/dispatcher.js"

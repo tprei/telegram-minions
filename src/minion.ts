@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url"
 import http from "node:http"
 import fs from "node:fs"
 import type { MinionConfig } from "./config/config-types.js"
+import type { ChatPlatform } from "./provider/chat-platform.js"
 import { TelegramClient } from "./telegram/telegram.js"
 import { createTelegramPlatform } from "./telegram/platform.js"
 import { Observer } from "./telegram/observer.js"
@@ -24,6 +25,12 @@ export interface MinionInstance {
 
 export interface MinionOptions {
   apiPort?: number
+  /**
+   * Pre-built ChatPlatform instance. Required when `config.platform.type` is
+   * `"custom"`. Ignored when platform type is `"telegram"` (the built-in
+   * adapter is constructed automatically from config).
+   */
+  platform?: ChatPlatform
 }
 
 function findUiDistPath(): string {
@@ -51,13 +58,42 @@ function findUiDistPath(): string {
   return path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "ui", "dist")
 }
 
+/**
+ * Build a ChatPlatform from config + options.
+ *
+ * - `"telegram"` (default): constructs TelegramClient and wraps it in the
+ *   Telegram adapter. Uses `config.telegram` / `config.telegramQueue`.
+ * - `"custom"`: returns the caller-supplied `options.platform`.
+ *   Throws if `options.platform` is not provided.
+ */
+export function buildPlatform(config: MinionConfig, options?: MinionOptions): ChatPlatform {
+  const platformConfig = config.platform
+
+  if (platformConfig?.type === "custom") {
+    if (!options?.platform) {
+      throw new Error(
+        'MinionConfig.platform.type is "custom" but no ChatPlatform instance was provided in MinionOptions.platform',
+      )
+    }
+    return options.platform
+  }
+
+  const botToken = platformConfig?.type === "telegram" ? platformConfig.botToken : config.telegram.botToken
+  const chatId = platformConfig?.type === "telegram" ? platformConfig.chatId : config.telegram.chatId
+  const minSendIntervalMs = platformConfig?.type === "telegram"
+    ? platformConfig.minSendIntervalMs
+    : config.telegramQueue.minSendIntervalMs
+
+  const telegram = new TelegramClient(botToken, chatId, minSendIntervalMs)
+  return createTelegramPlatform(telegram, chatId)
+}
+
 export function createMinion(config: MinionConfig, options?: MinionOptions): MinionInstance {
-  const telegram = new TelegramClient(config.telegram.botToken, config.telegram.chatId, config.telegramQueue.minSendIntervalMs)
-  const platform = createTelegramPlatform(telegram, config.telegram.chatId)
+  const platform = buildPlatform(config, options)
   const observer = new Observer(platform.chat, config.observer.activityThrottleMs, {
     textFlushDebounceMs: config.observer.textFlushDebounceMs,
     activityEditDebounceMs: config.observer.activityEditDebounceMs,
-  }, platform.files)
+  }, platform.files ?? undefined)
   const broadcaster = new StateBroadcaster()
   const eventBus = new EventBus()
   const tokenProvider = new GitHubTokenProvider(config.githubApp)
@@ -84,7 +120,7 @@ export function createMinion(config: MinionConfig, options?: MinionOptions): Min
     apiServer = createApiServer(dispatcherApi, {
       port: apiPort,
       uiDistPath,
-      chatId: config.telegram.chatId,
+      chatId: platform.chatId,
       botToken: config.telegram.botToken,
       broadcaster,
     })
