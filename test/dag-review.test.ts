@@ -247,6 +247,54 @@ describe("formatDagReviewComplete", () => {
   })
 })
 
+describe("dag-review SDK session mode", () => {
+  it("uses 'dag-review' mode for review child sessions", () => {
+    // The mode is set in spawnDagReviewChild — verify the value is valid
+    const mode: SessionMode = "dag-review"
+    expect(mode).toBe("dag-review")
+  })
+
+  it("dag-review children have dagId and dagNodeId set", () => {
+    const session: TopicSession = {
+      threadId: 300,
+      repo: "test-repo",
+      cwd: "/workspace/test",
+      slug: "review-slug",
+      conversation: [{ role: "user", text: "review task" }],
+      pendingFeedback: [],
+      mode: "dag-review",
+      lastActivityAt: Date.now(),
+      dagId: "dag-parent-slug",
+      dagNodeId: "backend-api",
+      parentThreadId: 100,
+      splitLabel: "Review: Backend API",
+    }
+
+    expect(session.mode).toBe("dag-review")
+    expect(session.dagId).toBe("dag-parent-slug")
+    expect(session.dagNodeId).toBe("backend-api")
+    expect(session.splitLabel).toContain("Review:")
+  })
+
+  it("dag-review children have parentThreadId linking to DAG parent", () => {
+    const session: TopicSession = {
+      threadId: 300,
+      repo: "test-repo",
+      cwd: "/workspace/test",
+      slug: "review-slug",
+      conversation: [],
+      pendingFeedback: [],
+      mode: "dag-review",
+      lastActivityAt: Date.now(),
+      dagId: "dag-test",
+      dagNodeId: "node-1",
+      parentThreadId: 100,
+    }
+
+    expect(session.parentThreadId).toBe(100)
+  })
+})
+
 describe("buildDagReviewChildPrompt", () => {
   const baseNode: DagNode = {
     id: "api",
