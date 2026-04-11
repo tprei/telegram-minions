@@ -2,6 +2,7 @@ import { execFile } from "node:child_process"
 import { promisify } from "node:util"
 import type { CompletionHandler, SessionCompletionContext } from "./handler-types.js"
 import type { LoopOutcome, LoopOutcomeResult } from "../loops/domain-types.js"
+import type { ChatPlatform } from "../provider/chat-platform.js"
 import { extractPRUrl, findPRByBranch } from "../ci/ci-babysit.js"
 import { createLogger } from "../logger.js"
 
@@ -21,11 +22,6 @@ export interface LoopSchedulerProvider {
   get(): LoopOutcomeRecorder | null
 }
 
-export interface LoopTelegramNotifier {
-  sendMessage(html: string, threadId?: number): Promise<{ ok: boolean; messageId: number | null }>
-  deleteForumTopic(threadId: number): Promise<void>
-}
-
 export interface LoopThreadCleaner {
   removeWorkspace(topicSession: import("../domain/session-types.js").TopicSession): Promise<void>
   deleteTopicSession(threadId: number): void
@@ -37,7 +33,7 @@ export class LoopCompletionHandler implements CompletionHandler {
 
   constructor(
     private readonly schedulerProvider: LoopSchedulerProvider,
-    private readonly telegram: LoopTelegramNotifier,
+    private readonly platform: ChatPlatform,
     private readonly cleaner: LoopThreadCleaner,
   ) {}
 
@@ -91,7 +87,7 @@ export class LoopCompletionHandler implements CompletionHandler {
     const threadId = topicSession.threadId
     this.cleaner.deleteTopicSession(threadId)
     this.cleaner.broadcastSessionDeleted(topicSession.slug)
-    await this.telegram.deleteForumTopic(threadId)
+    await this.platform.threads.deleteThread(String(threadId))
     await this.cleaner.removeWorkspace(topicSession)
     log.info({ slug: topicSession.slug, threadId }, "auto-closed loop thread")
   }
@@ -213,7 +209,7 @@ export class LoopCompletionHandler implements CompletionHandler {
     ].join("\n")
 
     try {
-      await this.telegram.sendMessage(html)
+      await this.platform.chat.sendMessage(html)
     } catch (err) {
       log.error({ err, loopId }, "failed to send loop error alert")
     }

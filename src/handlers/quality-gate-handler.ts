@@ -1,4 +1,4 @@
-import type { TelegramClient } from "../telegram/telegram.js"
+import type { ChatPlatform } from "../provider/chat-platform.js"
 import type { TopicSession, TopicMessage } from "../domain/session-types.js"
 import type { CompletionHandler, SessionCompletionContext } from "./handler-types.js"
 import { runQualityGates } from "../ci/quality-gates.js"
@@ -16,7 +16,7 @@ export class QualityGateHandler implements CompletionHandler {
   readonly name = "QualityGateHandler"
 
   constructor(
-    private readonly telegram: TelegramClient,
+    private readonly platform: ChatPlatform,
     private readonly conversationPusher: ConversationPusher,
   ) {}
 
@@ -30,9 +30,9 @@ export class QualityGateHandler implements CompletionHandler {
       ctx.qualityReport = qualityReport
 
       if (qualityReport.results.length > 0) {
-        await this.telegram.sendMessage(
+        await this.platform.chat.sendMessage(
           formatQualityReport(qualityReport.results),
-          topicSession.threadId,
+          String(topicSession.threadId),
         )
       }
       if (!qualityReport.allPassed) {
