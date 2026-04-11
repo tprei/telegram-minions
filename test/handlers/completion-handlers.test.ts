@@ -13,7 +13,7 @@ import { ParentNotifyHandler } from "../../src/handlers/parent-notify-handler.js
 import { PendingFeedbackHandler } from "../../src/handlers/pending-feedback-handler.js"
 import { CompletionHandlerChain } from "../../src/handlers/completion-handler-chain.js"
 import { EventBus } from "../../src/events/event-bus.js"
-import { makeMockTelegram, makeMockObserver, makeMockStats } from "../test-helpers.js"
+import { makeMockTelegram, makeMockPlatform, makeMockObserver, makeMockStats } from "../test-helpers.js"
 
 vi.mock("../../src/logger.js", () => ({
   createLogger: () => ({
@@ -182,7 +182,7 @@ describe("QuotaHandler", () => {
 describe("ShipAdvanceHandler", () => {
   function makeShipDeps() {
     return {
-      telegram: makeMockTelegram({ sendMessage: vi.fn().mockResolvedValue(undefined) }),
+      platform: makeMockPlatform(),
       observer: makeMockObserver({
         flushAndComplete: vi.fn().mockResolvedValue(undefined),
         onSessionComplete: vi.fn().mockResolvedValue(undefined),
@@ -197,7 +197,7 @@ describe("ShipAdvanceHandler", () => {
   it("skips non-ship modes", async () => {
     const deps = makeShipDeps()
     const handler = new ShipAdvanceHandler(
-      deps.telegram, deps.observer, deps.shipPipeline,
+      deps.platform, deps.observer, deps.shipPipeline,
       deps.pinnedMessages, deps.artifactCleaner, deps.sessionPersister,
     )
     const ctx = makeCtx()
@@ -211,7 +211,7 @@ describe("ShipAdvanceHandler", () => {
   it("advances ship pipeline on completion", async () => {
     const deps = makeShipDeps()
     const handler = new ShipAdvanceHandler(
-      deps.telegram, deps.observer, deps.shipPipeline,
+      deps.platform, deps.observer, deps.shipPipeline,
       deps.pinnedMessages, deps.artifactCleaner, deps.sessionPersister,
     )
     const ts = makeTopicSession({
@@ -229,7 +229,7 @@ describe("ShipAdvanceHandler", () => {
   it("sends paused message on error state", async () => {
     const deps = makeShipDeps()
     const handler = new ShipAdvanceHandler(
-      deps.telegram, deps.observer, deps.shipPipeline,
+      deps.platform, deps.observer, deps.shipPipeline,
       deps.pinnedMessages, deps.artifactCleaner, deps.sessionPersister,
     )
     const ts = makeTopicSession({
@@ -241,9 +241,9 @@ describe("ShipAdvanceHandler", () => {
     await handler.handle(ctx)
 
     expect(ctx.handled).toBe(true)
-    expect(deps.telegram.sendMessage).toHaveBeenCalledWith(
+    expect(deps.platform.chat.sendMessage).toHaveBeenCalledWith(
       expect.stringContaining("Ship pipeline paused"),
-      ts.threadId,
+      String(ts.threadId),
     )
     expect(deps.pinnedMessages.updateTopicTitle).toHaveBeenCalledWith(ts, "⚠️")
   })
@@ -254,7 +254,7 @@ describe("ShipAdvanceHandler", () => {
 describe("ModeCompletionHandler", () => {
   function makeModeDeps() {
     return {
-      telegram: makeMockTelegram({ sendMessage: vi.fn().mockResolvedValue(undefined) }),
+      platform: makeMockPlatform(),
       observer: makeMockObserver({ onSessionComplete: vi.fn().mockResolvedValue(undefined) }),
       pinnedMessages: { updateTopicTitle: vi.fn().mockResolvedValue(undefined) },
     }
@@ -262,7 +262,7 @@ describe("ModeCompletionHandler", () => {
 
   it("handles think mode completion", async () => {
     const deps = makeModeDeps()
-    const handler = new ModeCompletionHandler(deps.telegram, deps.observer, deps.pinnedMessages)
+    const handler = new ModeCompletionHandler(deps.platform, deps.observer, deps.pinnedMessages)
     const ts = makeTopicSession({ mode: "think" })
     const ctx = makeCtx({ topicSession: ts })
 
@@ -270,36 +270,36 @@ describe("ModeCompletionHandler", () => {
 
     expect(ctx.handled).toBe(true)
     expect(deps.pinnedMessages.updateTopicTitle).toHaveBeenCalledWith(ts, "💬")
-    expect(deps.telegram.sendMessage).toHaveBeenCalledWith("think done: test-slug", ts.threadId)
+    expect(deps.platform.chat.sendMessage).toHaveBeenCalledWith("think done: test-slug", String(ts.threadId))
   })
 
   it("handles review mode completion", async () => {
     const deps = makeModeDeps()
-    const handler = new ModeCompletionHandler(deps.telegram, deps.observer, deps.pinnedMessages)
+    const handler = new ModeCompletionHandler(deps.platform, deps.observer, deps.pinnedMessages)
     const ts = makeTopicSession({ mode: "review" })
     const ctx = makeCtx({ topicSession: ts })
 
     await handler.handle(ctx)
 
     expect(ctx.handled).toBe(true)
-    expect(deps.telegram.sendMessage).toHaveBeenCalledWith("review done: test-slug", ts.threadId)
+    expect(deps.platform.chat.sendMessage).toHaveBeenCalledWith("review done: test-slug", String(ts.threadId))
   })
 
   it("handles plan mode completion", async () => {
     const deps = makeModeDeps()
-    const handler = new ModeCompletionHandler(deps.telegram, deps.observer, deps.pinnedMessages)
+    const handler = new ModeCompletionHandler(deps.platform, deps.observer, deps.pinnedMessages)
     const ts = makeTopicSession({ mode: "plan" })
     const ctx = makeCtx({ topicSession: ts })
 
     await handler.handle(ctx)
 
     expect(ctx.handled).toBe(true)
-    expect(deps.telegram.sendMessage).toHaveBeenCalledWith("plan done: test-slug", ts.threadId)
+    expect(deps.platform.chat.sendMessage).toHaveBeenCalledWith("plan done: test-slug", String(ts.threadId))
   })
 
   it("handles errored state", async () => {
     const deps = makeModeDeps()
-    const handler = new ModeCompletionHandler(deps.telegram, deps.observer, deps.pinnedMessages)
+    const handler = new ModeCompletionHandler(deps.platform, deps.observer, deps.pinnedMessages)
     const ctx = makeCtx({ state: "errored" })
 
     await handler.handle(ctx)
@@ -311,7 +311,7 @@ describe("ModeCompletionHandler", () => {
 
   it("passes through for completed task mode", async () => {
     const deps = makeModeDeps()
-    const handler = new ModeCompletionHandler(deps.telegram, deps.observer, deps.pinnedMessages)
+    const handler = new ModeCompletionHandler(deps.platform, deps.observer, deps.pinnedMessages)
     const ctx = makeCtx({ state: "completed" })
 
     await handler.handle(ctx)
@@ -328,15 +328,15 @@ describe("QualityGateHandler", () => {
     const mockRunQG = vi.mocked(runQualityGates)
     mockRunQG.mockReturnValue({ results: [{ gate: "tsc", passed: true, output: "ok" }], allPassed: true })
 
-    const telegram = makeMockTelegram({ sendMessage: vi.fn().mockResolvedValue(undefined) })
+    const platform = makeMockPlatform()
     const pusher = { pushToConversation: vi.fn() }
-    const handler = new QualityGateHandler(telegram, pusher)
+    const handler = new QualityGateHandler(platform, pusher)
     const ctx = makeCtx()
 
     await handler.handle(ctx)
 
     expect(ctx.qualityReport).toEqual({ results: [{ gate: "tsc", passed: true, output: "ok" }], allPassed: true })
-    expect(telegram.sendMessage).toHaveBeenCalledWith("quality report", 100)
+    expect(platform.chat.sendMessage).toHaveBeenCalledWith("quality report", "100")
   })
 
   it("pushes context on failed quality gates", async () => {
@@ -344,9 +344,9 @@ describe("QualityGateHandler", () => {
     const mockRunQG = vi.mocked(runQualityGates)
     mockRunQG.mockReturnValue({ results: [{ gate: "tsc", passed: false, output: "errors" }], allPassed: false })
 
-    const telegram = makeMockTelegram({ sendMessage: vi.fn().mockResolvedValue(undefined) })
+    const platform = makeMockPlatform()
     const pusher = { pushToConversation: vi.fn() }
-    const handler = new QualityGateHandler(telegram, pusher)
+    const handler = new QualityGateHandler(platform, pusher)
     const ctx = makeCtx()
 
     await handler.handle(ctx)
@@ -358,9 +358,9 @@ describe("QualityGateHandler", () => {
   })
 
   it("skips for non-completed state", async () => {
-    const telegram = makeMockTelegram({ sendMessage: vi.fn() })
+    const platform = makeMockPlatform()
     const pusher = { pushToConversation: vi.fn() }
-    const handler = new QualityGateHandler(telegram, pusher)
+    const handler = new QualityGateHandler(platform, pusher)
     const ctx = makeCtx({ state: "errored" })
 
     await handler.handle(ctx)
@@ -549,7 +549,7 @@ describe("PendingFeedbackHandler", () => {
 describe("TaskCompletionHandler", () => {
   function makeTaskDeps() {
     return {
-      telegram: makeMockTelegram({ sendMessage: vi.fn().mockResolvedValue(undefined) }),
+      platform: makeMockPlatform(),
       observer: makeMockObserver({ flushAndComplete: vi.fn().mockResolvedValue(undefined) }),
       pinnedMessages: { updateTopicTitle: vi.fn().mockResolvedValue(undefined) },
       artifactCleaner: { cleanBuildArtifacts: vi.fn() },
@@ -560,7 +560,7 @@ describe("TaskCompletionHandler", () => {
     const deps = makeTaskDeps()
     const innerHandler = { name: "mock", handle: vi.fn().mockResolvedValue(undefined) }
     const handler = new TaskCompletionHandler(
-      deps.telegram, deps.observer,
+      deps.platform, deps.observer,
       deps.pinnedMessages, deps.artifactCleaner, [innerHandler],
     )
     const ctx = makeCtx()
@@ -570,7 +570,7 @@ describe("TaskCompletionHandler", () => {
     expect(ctx.handled).toBe(true)
     expect(ctx.topicSession.lastState).toBe("completed")
     expect(deps.observer.flushAndComplete).toHaveBeenCalled()
-    expect(deps.telegram.sendMessage).toHaveBeenCalledWith("task done: test-slug", 100)
+    expect(deps.platform.chat.sendMessage).toHaveBeenCalledWith("task done: test-slug", "100")
     expect(innerHandler.handle).toHaveBeenCalledWith(ctx)
     expect(deps.artifactCleaner.cleanBuildArtifacts).toHaveBeenCalledWith("/tmp/repo")
   })
@@ -578,7 +578,7 @@ describe("TaskCompletionHandler", () => {
   it("skips non-completed state", async () => {
     const deps = makeTaskDeps()
     const handler = new TaskCompletionHandler(
-      deps.telegram, deps.observer,
+      deps.platform, deps.observer,
       deps.pinnedMessages, deps.artifactCleaner, [],
     )
     const ctx = makeCtx({ state: "errored" })
@@ -593,7 +593,7 @@ describe("TaskCompletionHandler", () => {
     const deps = makeTaskDeps()
     deps.observer.flushAndComplete.mockRejectedValue(new Error("flush error"))
     const handler = new TaskCompletionHandler(
-      deps.telegram, deps.observer,
+      deps.platform, deps.observer,
       deps.pinnedMessages, deps.artifactCleaner, [],
     )
     const ctx = makeCtx()

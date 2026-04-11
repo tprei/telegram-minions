@@ -1,4 +1,4 @@
-import type { TelegramClient } from "../telegram/telegram.js"
+import type { ChatPlatform } from "../provider/chat-platform.js"
 import type { Observer } from "../telegram/observer.js"
 import type { TopicSession } from "../domain/session-types.js"
 import type { CompletionHandler, SessionCompletionContext } from "./handler-types.js"
@@ -27,7 +27,7 @@ export class ShipAdvanceHandler implements CompletionHandler {
   readonly name = "ShipAdvanceHandler"
 
   constructor(
-    private readonly telegram: TelegramClient,
+    private readonly platform: ChatPlatform,
     private readonly observer: Observer,
     private readonly shipPipeline: ShipPipeline,
     private readonly pinnedMessages: PinnedMessages,
@@ -55,9 +55,9 @@ export class ShipAdvanceHandler implements CompletionHandler {
           await this.shipPipeline.handleShipAdvance(topicSession)
         } catch (err) {
           loggers.ship.error({ err, slug: topicSession.slug }, "ship advance error")
-          this.telegram.sendMessage(
+          this.platform.chat.sendMessage(
             `❌ Ship pipeline error during ${topicSession.autoAdvance!.phase} phase: ${err instanceof Error ? err.message : String(err)}`,
-            topicSession.threadId,
+            String(topicSession.threadId),
           ).catch(() => {})
         }
       } finally {
@@ -67,9 +67,9 @@ export class ShipAdvanceHandler implements CompletionHandler {
       this.pinnedMessages.updateTopicTitle(topicSession, "⚠️").catch(() => {})
       this.observer.onSessionComplete(meta, state, durationMs).catch(() => {})
       const phase = topicSession.autoAdvance.phase
-      this.telegram.sendMessage(
+      this.platform.chat.sendMessage(
         `⚠️ Ship pipeline paused: ${topicSession.mode} phase errored during <b>${phase}</b>.\n\nRecovery options:\n• /retry — re-run the current phase\n• /dag — retry DAG extraction\n• /execute — run as a single task\n• /split — split into parallel sub-tasks\n• /close — abandon this ship`,
-        topicSession.threadId,
+        String(topicSession.threadId),
       ).catch(() => {})
       writeSessionLog(topicSession, meta, state, durationMs)
     }

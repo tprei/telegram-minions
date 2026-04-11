@@ -1,10 +1,10 @@
+import type { ChatPlatform } from "../provider/chat-platform.js"
 import type { Observer } from "../telegram/observer.js"
 import type { TopicSession } from "../domain/session-types.js"
 import type { CompletionHandler, SessionCompletionContext } from "./handler-types.js"
 import { formatTaskComplete } from "../telegram/format.js"
 import { writeSessionLog } from "../session/session-log.js"
 import { loggers } from "../logger.js"
-import type { TelegramClient } from "../telegram/telegram.js"
 
 export interface ArtifactCleaner {
   cleanBuildArtifacts(cwd: string): void
@@ -29,7 +29,7 @@ export class TaskCompletionHandler implements CompletionHandler {
   readonly name = "TaskCompletionHandler"
 
   constructor(
-    private readonly telegram: TelegramClient,
+    private readonly platform: ChatPlatform,
     private readonly observer: Observer,
     private readonly pinnedMessages: PinnedMessages,
     private readonly artifactCleaner: ArtifactCleaner,
@@ -47,9 +47,9 @@ export class TaskCompletionHandler implements CompletionHandler {
     try {
       await this.observer.flushAndComplete(meta, state, durationMs)
 
-      await this.telegram.sendMessage(
+      await this.platform.chat.sendMessage(
         formatTaskComplete(topicSession.slug, durationMs, meta.totalTokens),
-        topicSession.threadId,
+        String(topicSession.threadId),
       )
 
       // Run inner handlers (quality gates, digest, CI babysit) sequentially

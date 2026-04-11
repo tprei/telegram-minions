@@ -249,7 +249,7 @@ export class Dispatcher {
     )
 
     const qualityGateHandler = new QualityGateHandler(
-      telegramCompat,
+      this.platform,
       { pushToConversation: (s, m) => this.pushToConversation(s, m) },
     )
     const digestHandler = new DigestHandler(
@@ -270,7 +270,7 @@ export class Dispatcher {
         { handleQuotaSleep: (ts, msg) => this.handleQuotaSleep(ts, msg) },
       ))
       .register(new ShipAdvanceHandler(
-        telegramCompat,
+        this.platform,
         this.observer,
         this.shipPipeline,
         this.pinnedMessages,
@@ -278,13 +278,13 @@ export class Dispatcher {
         { persistTopicSessions: () => this.persistTopicSessions() },
       ))
       .register(new ModeCompletionHandler(
-        telegramCompat,
+        this.platform,
         this.observer,
         this.pinnedMessages,
       ))
       .register(new LoopCompletionHandler(
         { get: () => this.loopScheduler },
-        telegramCompat,
+        this.platform,
         {
           removeWorkspace: (ts) => this.removeWorkspace(ts),
           deleteTopicSession: (id) => { this.topicSessions.delete(id) },
@@ -292,7 +292,7 @@ export class Dispatcher {
         },
       ))
       .register(new TaskCompletionHandler(
-        telegramCompat,
+        this.platform,
         this.observer,
         this.pinnedMessages,
         { cleanBuildArtifacts: (cwd) => this.cleanBuildArtifacts(cwd) },
