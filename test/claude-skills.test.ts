@@ -4,7 +4,7 @@ import path from "node:path"
 
 const SKILLS_DIR = path.resolve("assets/.claude/skills")
 
-const REQUIRED_SKILLS = ["commit", "explore", "review-pr", "update-config"]
+const REQUIRED_SKILLS = ["commit", "explore", "review-dag", "review-pr", "update-config"]
 
 const REQUIRED_FRONTMATTER_FIELDS = ["name", "description", "user_invocable"]
 
