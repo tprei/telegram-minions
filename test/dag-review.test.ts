@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest"
 import type { PendingDagItem, SessionMode, TopicSession } from "../src/domain/session-types.js"
+import { DEFAULT_DAG_REVIEW_PROMPT, DEFAULT_PROMPTS } from "../src/config/prompts.js"
+import {
+  formatDagReviewStart,
+  formatDagReviewChildStarting,
+  formatDagReviewComplete,
+} from "../src/telegram/format.js"
+
 describe("PendingDagItem type", () => {
   it("should define a valid pending DAG item", () => {
     const item: PendingDagItem = {
@@ -153,5 +160,87 @@ describe("TopicSession with pendingDagItems", () => {
     expect(session.parentThreadId).toBe(50)
     expect(session.conversation).toHaveLength(2)
     expect(session.pendingDagItems).toHaveLength(2)
+  })
+})
+
+describe("DEFAULT_DAG_REVIEW_PROMPT", () => {
+  it("is a non-empty string", () => {
+    expect(typeof DEFAULT_DAG_REVIEW_PROMPT).toBe("string")
+    expect(DEFAULT_DAG_REVIEW_PROMPT.length).toBeGreaterThan(0)
+  })
+
+  it("mentions read-only and disabled tools", () => {
+    expect(DEFAULT_DAG_REVIEW_PROMPT).toContain("READ-ONLY")
+    expect(DEFAULT_DAG_REVIEW_PROMPT).toContain("Edit, Write, and NotebookEdit")
+  })
+
+  it("mentions DAG context", () => {
+    expect(DEFAULT_DAG_REVIEW_PROMPT).toContain("DAG")
+    expect(DEFAULT_DAG_REVIEW_PROMPT).toContain("dependency graph")
+  })
+
+  it("includes gh pr workflow instructions", () => {
+    expect(DEFAULT_DAG_REVIEW_PROMPT).toContain("gh pr diff")
+    expect(DEFAULT_DAG_REVIEW_PROMPT).toContain("gh pr review")
+  })
+
+  it("caps at 5 findings", () => {
+    expect(DEFAULT_DAG_REVIEW_PROMPT).toContain("Cap at 5 findings")
+  })
+
+  it("is included in DEFAULT_PROMPTS", () => {
+    expect(DEFAULT_PROMPTS.dag_review).toBe(DEFAULT_DAG_REVIEW_PROMPT)
+  })
+})
+
+describe("formatDagReviewStart", () => {
+  it("includes DAG review header, repo, slug, and task", () => {
+    const msg = formatDagReviewStart("my-repo", "cool-slug", "Review DAG PRs")
+    expect(msg).toContain("DAG review started")
+    expect(msg).toContain("my-repo")
+    expect(msg).toContain("cool-slug")
+    expect(msg).toContain("Review DAG PRs")
+  })
+
+  it("includes /reply instructions", () => {
+    const msg = formatDagReviewStart("repo", "slug", "task")
+    expect(msg).toContain("/reply")
+  })
+
+  it("truncates long tasks", () => {
+    const longTask = "x".repeat(300)
+    const msg = formatDagReviewStart("repo", "slug", longTask)
+    expect(msg).toContain("…")
+    expect(msg.length).toBeLessThan(longTask.length + 200)
+  })
+
+  it("escapes HTML in task text", () => {
+    const msg = formatDagReviewStart("repo", "slug", "<script>alert('xss')</script>")
+    expect(msg).toContain("&lt;script&gt;")
+    expect(msg).not.toContain("<script>")
+  })
+})
+
+describe("formatDagReviewChildStarting", () => {
+  it("includes node title and PR number", () => {
+    const msg = formatDagReviewChildStarting("cool-slug", "Backend API", 42)
+    expect(msg).toContain("Reviewing")
+    expect(msg).toContain("Backend API")
+    expect(msg).toContain("#42")
+    expect(msg).toContain("cool-slug")
+  })
+
+  it("escapes HTML in node title", () => {
+    const msg = formatDagReviewChildStarting("slug", "<b>bad</b>", 1)
+    expect(msg).toContain("&lt;b&gt;bad&lt;/b&gt;")
+  })
+})
+
+describe("formatDagReviewComplete", () => {
+  it("includes slug and /reply instructions", () => {
+    const msg = formatDagReviewComplete("cool-slug")
+    expect(msg).toContain("DAG review complete")
+    expect(msg).toContain("cool-slug")
+    expect(msg).toContain("/reply")
   })
 })

@@ -8,7 +8,7 @@ import type { SessionMeta, SessionState, SessionPort, SessionDoneState } from ".
 import { translateClaudeEvents } from "./claude-stream.js"
 import { captureException, setContext, addBreadcrumb } from "../sentry.js"
 import { isQuotaError, parseResetTime } from "./quota-detection.js"
-import { DEFAULT_TASK_PROMPT, DEFAULT_PLAN_PROMPT, DEFAULT_THINK_PROMPT, DEFAULT_REVIEW_PROMPT, DEFAULT_SHIP_PLAN_PROMPT, DEFAULT_SHIP_VERIFY_PROMPT } from "../config/prompts.js"
+import { DEFAULT_TASK_PROMPT, DEFAULT_PLAN_PROMPT, DEFAULT_THINK_PROMPT, DEFAULT_REVIEW_PROMPT, DEFAULT_DAG_REVIEW_PROMPT, DEFAULT_SHIP_PLAN_PROMPT, DEFAULT_SHIP_VERIFY_PROMPT } from "../config/prompts.js"
 import { createSessionLogger } from "../logger.js"
 import { injectAgentFiles } from "./inject-assets.js"
 
@@ -97,6 +97,11 @@ export class SessionHandle implements SessionPort {
     }),
     review: (cfg) => ({
       systemPrompt: DEFAULT_REVIEW_PROMPT,
+      model: cfg.claude.reviewModel,
+      disallowedTools: READONLY_DISALLOWED_TOOLS,
+    }),
+    "dag-review": (cfg) => ({
+      systemPrompt: DEFAULT_DAG_REVIEW_PROMPT,
       model: cfg.claude.reviewModel,
       disallowedTools: READONLY_DISALLOWED_TOOLS,
     }),

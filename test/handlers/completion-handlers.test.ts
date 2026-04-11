@@ -44,6 +44,7 @@ vi.mock("../../src/ci/quality-gates.js", () => ({
 vi.mock("../../src/telegram/format.js", () => ({
   formatThinkComplete: vi.fn((slug: string) => `think done: ${slug}`),
   formatReviewComplete: vi.fn((slug: string) => `review done: ${slug}`),
+  formatDagReviewComplete: vi.fn((slug: string) => `dag-review done: ${slug}`),
   formatPlanComplete: vi.fn((slug: string) => `plan done: ${slug}`),
   formatTaskComplete: vi.fn((slug: string) => `task done: ${slug}`),
   formatQualityReport: vi.fn(() => "quality report"),
@@ -283,6 +284,19 @@ describe("ModeCompletionHandler", () => {
 
     expect(ctx.handled).toBe(true)
     expect(deps.telegram.sendMessage).toHaveBeenCalledWith("review done: test-slug", ts.threadId)
+  })
+
+  it("handles dag-review mode completion", async () => {
+    const deps = makeModeDeps()
+    const handler = new ModeCompletionHandler(deps.telegram, deps.observer, deps.pinnedMessages)
+    const ts = makeTopicSession({ mode: "dag-review" })
+    const ctx = makeCtx({ topicSession: ts })
+
+    await handler.handle(ctx)
+
+    expect(ctx.handled).toBe(true)
+    expect(deps.pinnedMessages.updateTopicTitle).toHaveBeenCalledWith(ts, "💬")
+    expect(deps.telegram.sendMessage).toHaveBeenCalledWith("dag-review done: test-slug", ts.threadId)
   })
 
   it("handles plan mode completion", async () => {

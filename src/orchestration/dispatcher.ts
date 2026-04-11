@@ -84,7 +84,7 @@ const log = loggers.dispatcher
 const POLL_TIMEOUT = 30
 
 /** Modes that use Claude CLI (not Goose) and support mid-execution reply injection via SDK */
-const SDK_MODES: Set<SessionMode> = new Set(["plan", "think", "review", "ship-think", "ship-plan", "ship-verify"])
+const SDK_MODES: Set<SessionMode> = new Set(["plan", "think", "review", "dag-review", "ship-think", "ship-plan", "ship-verify"])
 
 export class Dispatcher {
   private readonly sessions = new Map<number, ActiveSession>()

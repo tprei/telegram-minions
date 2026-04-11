@@ -14,6 +14,7 @@ import {
   formatPlanStart,
   formatThinkStart,
   formatReviewStart,
+  formatDagReviewStart,
   formatShipThinkStart,
   formatShipPlanStart,
   formatShipVerifyStart,
@@ -111,6 +112,8 @@ export class Observer {
       ? formatPlanStart(meta.repo, meta.topicName, task)
       : meta.mode === "review"
       ? formatReviewStart(meta.repo, meta.topicName, task)
+      : meta.mode === "dag-review"
+      ? formatDagReviewStart(meta.repo, meta.topicName, task)
       : formatSessionStart(meta.repo, meta.topicName, task)
     await this.safeSendMessage(meta, msg)
   }

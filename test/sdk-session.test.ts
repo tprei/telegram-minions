@@ -95,7 +95,7 @@ describe("SDKSessionHandle", () => {
 
     it("has entries for all claude modes", () => {
       expect(Object.keys(configs).sort()).toEqual([
-        "plan", "review", "ship-plan", "ship-think", "ship-verify", "think",
+        "dag-review", "plan", "review", "ship-plan", "ship-think", "ship-verify", "think",
       ])
     })
 

@@ -5,6 +5,7 @@ import type { CompletionHandler, SessionCompletionContext } from "./handler-type
 import {
   formatThinkComplete,
   formatReviewComplete,
+  formatDagReviewComplete,
   formatPlanComplete,
 } from "../telegram/format.js"
 import { writeSessionLog } from "../session/session-log.js"
@@ -14,11 +15,12 @@ export interface PinnedMessages {
   updateTopicTitle(topicSession: TopicSession, stateEmoji: string): Promise<void>
 }
 
-const CONVERSATIONAL_MODES = new Set(["think", "review", "plan"])
+const CONVERSATIONAL_MODES = new Set(["think", "review", "dag-review", "plan"])
 
 const MODE_FORMATTERS: Record<string, (slug: string) => string> = {
   think: formatThinkComplete,
   review: formatReviewComplete,
+  "dag-review": formatDagReviewComplete,
   plan: formatPlanComplete,
 }
 
