@@ -1,4 +1,5 @@
 export { TelegramClient } from "./telegram.js"
+export { TelegramPlatform } from "./telegram-platform.js"
 export { Observer } from "./observer.js"
 export type { TextCaptureCallback } from "./observer.js"
 export { PinnedMessageManager } from "./pinned-message-manager.js"
