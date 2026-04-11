@@ -63,6 +63,7 @@ When your coding work is complete, **always call `post-task-router` first** inst
 - `/commit` — run quality checks, generate summary, route to git specialist
 - `/explore` — deep codebase exploration (architecture, call chains, data flow)
 - `/review-pr` — review a PR for bugs, security, and correctness
+- `/review-dag` — review a DAG/stack of related PRs for cross-PR issues and correctness
 - `/update-config` — safely update config files (`.env.example`, CI, build settings)
 
 ## When ambiguous

@@ -152,7 +152,7 @@ When a session starts, `injectAgentFiles()` copies bundled agents, skills, and g
 | Source | Destination | Contents |
 |---|---|---|
 | `assets/agents/` | `.claude/agents/` | Claude agent definitions (post-task-router, explorer, planner, etc.) |
-| `assets/.claude/skills/` | `.claude/skills/` | Claude Code skills (commit, explore, review-pr, update-config) |
+| `assets/.claude/skills/` | `.claude/skills/` | Claude Code skills (commit, explore, review-pr, review-dag, update-config) |
 | `assets/templates/.claude/CLAUDE.md` | `.claude/CLAUDE.md` | Default workspace guidance |
 | `assets/.goosehints` | `.goosehints` | Goose project hints (structure, commands, conventions) |
 | `assets/settings.json` | `.claude/settings.json` | Claude Code environment settings (token limits, permissions) |
@@ -193,6 +193,7 @@ Skills are slash-command shortcuts available to Claude Code sessions. They live 
 | `/commit` | Run quality checks, generate a session summary, and route to git specialist |
 | `/explore` | Deep codebase exploration — architecture, call chains, data flow |
 | `/review-pr` | Review a PR for bugs, security issues, and correctness (max 5 findings) |
+| `/review-dag` | Review a DAG/stack of related PRs for cross-PR issues and per-PR correctness |
 | `/update-config` | Safely update config files (`.env.example`, CI, build settings) |
 
 ## Goose skills and goosehints
