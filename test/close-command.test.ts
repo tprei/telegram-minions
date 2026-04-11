@@ -80,8 +80,9 @@ describe("handleCloseCommand ordering", () => {
   it("deletes topic before starting workspace cleanup", async () => {
     const telegram = makeMockTelegram()
     const config = makeConfig()
-    const observer = new Observer(telegram, 1)
-    const dispatcher = new Dispatcher(new TelegramPlatform(telegram, String(config.telegram.chatId)), observer, config, new EventBus())
+    const platform = new TelegramPlatform(telegram, String(config.telegram.chatId))
+    const observer = new Observer(platform, 1)
+    const dispatcher = new Dispatcher(platform, observer, config, new EventBus())
 
     const callOrder: string[] = []
     // Track call order
@@ -113,8 +114,9 @@ describe("handleCloseCommand ordering", () => {
   it("deletes topic before killing active session process", async () => {
     const telegram = makeMockTelegram()
     const config = makeConfig()
-    const observer = new Observer(telegram, 1)
-    const dispatcher = new Dispatcher(new TelegramPlatform(telegram, String(config.telegram.chatId)), observer, config, new EventBus())
+    const platform = new TelegramPlatform(telegram, String(config.telegram.chatId))
+    const observer = new Observer(platform, 1)
+    const dispatcher = new Dispatcher(platform, observer, config, new EventBus())
     const callOrder: string[] = []
     ;(telegram.deleteForumTopic as ReturnType<typeof vi.fn>).mockImplementation(async () => {
       callOrder.push("deleteForumTopic")
@@ -162,8 +164,9 @@ describe("closeChildSessions warning for high child count", () => {
   it("logs warning when closing more than 10 children", async () => {
     const telegram = makeMockTelegram()
     const config = makeConfig()
-    const observer = new Observer(telegram, 1)
-    const dispatcher = new Dispatcher(new TelegramPlatform(telegram, String(config.telegram.chatId)), observer, config, new EventBus())
+    const platform = new TelegramPlatform(telegram, String(config.telegram.chatId))
+    const observer = new Observer(platform, 1)
+    const dispatcher = new Dispatcher(platform, observer, config, new EventBus())
     const topicSessions = (dispatcher as unknown as { topicSessions: Map<number, TopicSession> }).topicSessions
     // Create parent session
     const parentSession: TopicSession = {
@@ -208,8 +211,9 @@ describe("closeChildSessions warning for high child count", () => {
   it("does not log warning when closing 10 or fewer children", async () => {
     const telegram = makeMockTelegram()
     const config = makeConfig()
-    const observer = new Observer(telegram, 1)
-    const dispatcher = new Dispatcher(new TelegramPlatform(telegram, String(config.telegram.chatId)), observer, config, new EventBus())
+    const platform = new TelegramPlatform(telegram, String(config.telegram.chatId))
+    const observer = new Observer(platform, 1)
+    const dispatcher = new Dispatcher(platform, observer, config, new EventBus())
     const topicSessions = (dispatcher as unknown as { topicSessions: Map<number, TopicSession> }).topicSessions
     // Create parent session
     const parentSession: TopicSession = {
@@ -249,8 +253,9 @@ describe("closeChildSessions orphan detection", () => {
   it("only closes actual children, not unrelated sessions", async () => {
     const telegram = makeMockTelegram()
     const config = makeConfig()
-    const observer = new Observer(telegram, 1)
-    const dispatcher = new Dispatcher(new TelegramPlatform(telegram, String(config.telegram.chatId)), observer, config, new EventBus())
+    const platform = new TelegramPlatform(telegram, String(config.telegram.chatId))
+    const observer = new Observer(platform, 1)
+    const dispatcher = new Dispatcher(platform, observer, config, new EventBus())
     const topicSessions = (dispatcher as unknown as { topicSessions: Map<number, TopicSession> }).topicSessions
     // Create parent session
     const parentSession: TopicSession = {
@@ -340,8 +345,9 @@ describe("closeChildSessions orphan detection", () => {
   it("handles orphaned children not in childThreadIds array", async () => {
     const telegram = makeMockTelegram()
     const config = makeConfig()
-    const observer = new Observer(telegram, 1)
-    const dispatcher = new Dispatcher(new TelegramPlatform(telegram, String(config.telegram.chatId)), observer, config, new EventBus())
+    const platform = new TelegramPlatform(telegram, String(config.telegram.chatId))
+    const observer = new Observer(platform, 1)
+    const dispatcher = new Dispatcher(platform, observer, config, new EventBus())
     const topicSessions = (dispatcher as unknown as { topicSessions: Map<number, TopicSession> }).topicSessions
     // Create parent session
     const parentSession: TopicSession = {

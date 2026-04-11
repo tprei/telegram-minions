@@ -60,8 +60,9 @@ describe("handleStopCommand", () => {
   it("kills active session and clears activeSessionId", async () => {
     const telegram = makeMockTelegram()
     const config = makeConfig()
-    const observer = new Observer(telegram, 1)
-    const dispatcher = new Dispatcher(new TelegramPlatform(telegram, String(config.telegram.chatId)), observer, config, new EventBus())
+    const platform = new TelegramPlatform(telegram, String(config.telegram.chatId))
+    const observer = new Observer(platform, 1)
+    const dispatcher = new Dispatcher(platform, observer, config, new EventBus())
 
     const mockKill = vi.fn().mockResolvedValue(undefined)
 
@@ -108,8 +109,9 @@ describe("handleStopCommand", () => {
   it("shows warning when no active session", async () => {
     const telegram = makeMockTelegram()
     const config = makeConfig()
-    const observer = new Observer(telegram, 1)
-    const dispatcher = new Dispatcher(new TelegramPlatform(telegram, String(config.telegram.chatId)), observer, config, new EventBus())
+    const platform = new TelegramPlatform(telegram, String(config.telegram.chatId))
+    const observer = new Observer(platform, 1)
+    const dispatcher = new Dispatcher(platform, observer, config, new EventBus())
 
     const topicSession: TopicSession = {
       threadId: 200,
@@ -141,8 +143,9 @@ describe("handleStopCommand", () => {
   it("preserves conversation history", async () => {
     const telegram = makeMockTelegram()
     const config = makeConfig()
-    const observer = new Observer(telegram, 1)
-    const dispatcher = new Dispatcher(new TelegramPlatform(telegram, String(config.telegram.chatId)), observer, config, new EventBus())
+    const platform = new TelegramPlatform(telegram, String(config.telegram.chatId))
+    const observer = new Observer(platform, 1)
+    const dispatcher = new Dispatcher(platform, observer, config, new EventBus())
 
     const mockKill = vi.fn().mockResolvedValue(undefined)
 
@@ -181,8 +184,9 @@ describe("handleStopCommand", () => {
   it("persists topic sessions after stop", async () => {
     const telegram = makeMockTelegram()
     const config = makeConfig()
-    const observer = new Observer(telegram, 1)
-    const dispatcher = new Dispatcher(new TelegramPlatform(telegram, String(config.telegram.chatId)), observer, config, new EventBus())
+    const platform = new TelegramPlatform(telegram, String(config.telegram.chatId))
+    const observer = new Observer(platform, 1)
+    const dispatcher = new Dispatcher(platform, observer, config, new EventBus())
 
     const mockKill = vi.fn().mockResolvedValue(undefined)
 
@@ -221,8 +225,9 @@ describe("handleStopCommand", () => {
   it("handles session not in sessions map gracefully", async () => {
     const telegram = makeMockTelegram()
     const config = makeConfig()
-    const observer = new Observer(telegram, 1)
-    const dispatcher = new Dispatcher(new TelegramPlatform(telegram, String(config.telegram.chatId)), observer, config, new EventBus())
+    const platform = new TelegramPlatform(telegram, String(config.telegram.chatId))
+    const observer = new Observer(platform, 1)
+    const dispatcher = new Dispatcher(platform, observer, config, new EventBus())
 
     const topicSession: TopicSession = {
       threadId: 500,

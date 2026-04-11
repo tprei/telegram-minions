@@ -114,9 +114,10 @@ describe("Dispatcher EventBus integration", () => {
   it("accepts EventBus in constructor", () => {
     const telegram = makeMockTelegram()
     const config = makeConfig()
-    const observer = new Observer(telegram, 123)
+    const platform = new TelegramPlatform(telegram, String(config.telegram.chatId))
+    const observer = new Observer(platform, 123)
     const eventBus = new EventBus()
-    const dispatcher = new Dispatcher(new TelegramPlatform(telegram, String(config.telegram.chatId)), observer, config, eventBus)
+    const dispatcher = new Dispatcher(platform, observer, config, eventBus)
 
     expect(dispatcher).toBeDefined()
   })
@@ -124,9 +125,10 @@ describe("Dispatcher EventBus integration", () => {
   it("has completionChain as private property", () => {
     const telegram = makeMockTelegram()
     const config = makeConfig()
-    const observer = new Observer(telegram, 123)
+    const platform = new TelegramPlatform(telegram, String(config.telegram.chatId))
+    const observer = new Observer(platform, 123)
     const eventBus = new EventBus()
-    const dispatcher = new Dispatcher(new TelegramPlatform(telegram, String(config.telegram.chatId)), observer, config, eventBus)
+    const dispatcher = new Dispatcher(platform, observer, config, eventBus)
 
     const d = dispatcher as unknown as { completionChain: unknown }
     expect(d.completionChain).toBeDefined()
@@ -135,9 +137,10 @@ describe("Dispatcher EventBus integration", () => {
   it("subscribes completion chain to EventBus", () => {
     const telegram = makeMockTelegram()
     const config = makeConfig()
-    const observer = new Observer(telegram, 123)
+    const platform = new TelegramPlatform(telegram, String(config.telegram.chatId))
+    const observer = new Observer(platform, 123)
     const eventBus = new EventBus()
-    new Dispatcher(new TelegramPlatform(telegram, String(config.telegram.chatId)), observer, config, eventBus)
+    new Dispatcher(platform, observer, config, eventBus)
 
     // The chain subscribes to session.completed
     expect(eventBus.listenerCountFor("session.completed")).toBeGreaterThanOrEqual(1)
@@ -146,9 +149,10 @@ describe("Dispatcher EventBus integration", () => {
   it("handleSessionComplete emits session.completed event", async () => {
     const telegram = makeMockTelegram()
     const config = makeConfig()
-    const observer = new Observer(telegram, 123)
+    const platform = new TelegramPlatform(telegram, String(config.telegram.chatId))
+    const observer = new Observer(platform, 123)
     const eventBus = new EventBus()
-    const dispatcher = new Dispatcher(new TelegramPlatform(telegram, String(config.telegram.chatId)), observer, config, eventBus)
+    const dispatcher = new Dispatcher(platform, observer, config, eventBus)
 
     const d = dispatcher as unknown as {
       topicSessions: Map<number, TopicSession>
@@ -183,9 +187,10 @@ describe("Dispatcher EventBus integration", () => {
   it("completion chain processes session.completed events end-to-end", async () => {
     const telegram = makeMockTelegram()
     const config = makeConfig()
-    const observer = new Observer(telegram, 123)
+    const platform = new TelegramPlatform(telegram, String(config.telegram.chatId))
+    const observer = new Observer(platform, 123)
     const eventBus = new EventBus()
-    const dispatcher = new Dispatcher(new TelegramPlatform(telegram, String(config.telegram.chatId)), observer, config, eventBus)
+    const dispatcher = new Dispatcher(platform, observer, config, eventBus)
 
     const d = dispatcher as unknown as {
       topicSessions: Map<number, TopicSession>
@@ -241,9 +246,10 @@ describe("Dispatcher EventBus integration", () => {
   it("ignores session.completed events for unknown topics", async () => {
     const telegram = makeMockTelegram()
     const config = makeConfig()
-    const observer = new Observer(telegram, 123)
+    const platform = new TelegramPlatform(telegram, String(config.telegram.chatId))
+    const observer = new Observer(platform, 123)
     const eventBus = new EventBus()
-    new Dispatcher(new TelegramPlatform(telegram, String(config.telegram.chatId)), observer, config, eventBus)
+    new Dispatcher(platform, observer, config, eventBus)
 
     // Emit event for unknown threadId — should not throw
     await eventBus.emit({
@@ -257,9 +263,10 @@ describe("Dispatcher EventBus integration", () => {
   it("ignores session.completed events for mismatched sessionId", async () => {
     const telegram = makeMockTelegram()
     const config = makeConfig()
-    const observer = new Observer(telegram, 123)
+    const platform = new TelegramPlatform(telegram, String(config.telegram.chatId))
+    const observer = new Observer(platform, 123)
     const eventBus = new EventBus()
-    const dispatcher = new Dispatcher(new TelegramPlatform(telegram, String(config.telegram.chatId)), observer, config, eventBus)
+    const dispatcher = new Dispatcher(platform, observer, config, eventBus)
 
     const d = dispatcher as unknown as {
       topicSessions: Map<number, TopicSession>
@@ -284,9 +291,10 @@ describe("Dispatcher EventBus integration", () => {
   it("processes errored task sessions correctly", async () => {
     const telegram = makeMockTelegram()
     const config = makeConfig()
-    const observer = new Observer(telegram, 123)
+    const platform = new TelegramPlatform(telegram, String(config.telegram.chatId))
+    const observer = new Observer(platform, 123)
     const eventBus = new EventBus()
-    const dispatcher = new Dispatcher(new TelegramPlatform(telegram, String(config.telegram.chatId)), observer, config, eventBus)
+    const dispatcher = new Dispatcher(platform, observer, config, eventBus)
 
     const d = dispatcher as unknown as {
       topicSessions: Map<number, TopicSession>

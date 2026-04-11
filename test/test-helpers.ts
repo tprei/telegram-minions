@@ -29,6 +29,7 @@ import type { QualityReport } from "../src/ci/quality-gates.js"
 import type { TelegramPhotoSize } from "../src/domain/telegram-types.js"
 import type { AutoAdvance } from "../src/domain/workflow-types.js"
 import type { StateBroadcaster } from "../src/api-server.js"
+import type { ChatPlatform } from "../src/provider/chat-platform.js"
 
 // ── TelegramClient ─────────────────────────────────────────────────────
 
@@ -50,6 +51,44 @@ export function makeMockTelegram(overrides: Partial<TelegramClient> = {}): Teleg
     downloadFile: vi.fn(async () => true),
     ...overrides,
   } as unknown as TelegramClient
+}
+
+// ── ChatPlatform ──────────────────────────────────────────────────────
+
+export function makeMockPlatform(overrides: Partial<ChatPlatform> = {}): ChatPlatform {
+  return {
+    name: "test",
+    chatId: "123",
+    chat: {
+      sendMessage: vi.fn(async () => ({ ok: true, messageId: "1" })),
+      editMessage: vi.fn(async () => true),
+      deleteMessage: vi.fn(async () => {}),
+      pinMessage: vi.fn(async () => {}),
+    },
+    threads: {
+      createThread: vi.fn(async () => ({ threadId: "100", name: "test" })),
+      editThread: vi.fn(async () => {}),
+      closeThread: vi.fn(async () => {}),
+      deleteThread: vi.fn(async () => {}),
+    },
+    input: {
+      poll: vi.fn(async () => []),
+      getCursor: vi.fn(() => "0"),
+      advanceCursor: vi.fn(),
+    },
+    ui: {
+      sendMessageWithKeyboard: vi.fn(async () => "1"),
+      answerCallbackQuery: vi.fn(async () => {}),
+    },
+    files: {
+      sendPhoto: vi.fn(async () => "1"),
+      sendPhotoBuffer: vi.fn(async () => "1"),
+      downloadFile: vi.fn(async () => true),
+    },
+    formatter: null,
+    threadLink: vi.fn(() => undefined),
+    ...overrides,
+  } as unknown as ChatPlatform
 }
 
 // ── Observer ───────────────────────────────────────────────────────────

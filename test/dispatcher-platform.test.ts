@@ -85,7 +85,7 @@ describe("Dispatcher ChatPlatform integration", () => {
     const telegram = makeMockTelegram()
     const config = makeConfig()
     const platform = new TelegramPlatform(telegram, config.telegram.chatId)
-    const observer = new Observer(telegram, 0)
+    const observer = new Observer(platform, 0)
     const dispatcher = new Dispatcher(platform, observer, config, new EventBus())
 
     expect(dispatcher).toBeDefined()
@@ -97,7 +97,7 @@ describe("Dispatcher ChatPlatform integration", () => {
     const telegram = makeMockTelegram()
     const config = makeConfig()
     const platform = new TelegramPlatform(telegram, config.telegram.chatId)
-    const observer = new Observer(telegram, 0)
+    const observer = new Observer(platform, 0)
     const dispatcher = new Dispatcher(platform, observer, config, new EventBus())
 
     await dispatcher.handleReplyCommand(999, "hello")
@@ -113,7 +113,7 @@ describe("Dispatcher ChatPlatform integration", () => {
     const telegram = makeMockTelegram()
     const config = makeConfig()
     const platform = new TelegramPlatform(telegram, config.telegram.chatId)
-    const observer = new Observer(telegram, 0)
+    const observer = new Observer(platform, 0)
     const dispatcher = new Dispatcher(platform, observer, config, new EventBus())
 
     // Set up a topic session to close
@@ -140,7 +140,7 @@ describe("Dispatcher ChatPlatform integration", () => {
     const telegram = makeMockTelegram()
     const config = makeConfig()
     const platform = new TelegramPlatform(telegram, config.telegram.chatId)
-    const observer = new Observer(telegram, 0)
+    const observer = new Observer(platform, 0)
     const dispatcher = new Dispatcher(platform, observer, config, new EventBus())
 
     await dispatcher.handleStopCommand(999)
@@ -155,7 +155,7 @@ describe("Dispatcher ChatPlatform integration", () => {
     const telegram = makeMockTelegram()
     const config = makeConfig()
     const platform = new TelegramPlatform(telegram, config.telegram.chatId)
-    const observer = new Observer(telegram, 0)
+    const observer = new Observer(platform, 0)
     const dispatcher = new Dispatcher(platform, observer, config, new EventBus())
 
     // Dispatcher should construct without errors and expose the same API
@@ -185,7 +185,7 @@ describe("Dispatcher poll uses platform.input", () => {
     ])
 
     const platform = new TelegramPlatform(telegram, config.telegram.chatId)
-    const observer = new Observer(telegram, 0)
+    const observer = new Observer(platform, 0)
     const dispatcher = new Dispatcher(platform, observer, config, new EventBus())
 
     // Access private poll method via internal cast
@@ -215,7 +215,7 @@ describe("Dispatcher poll uses platform.input", () => {
     ])
 
     const platform = new TelegramPlatform(telegram, config.telegram.chatId)
-    const observer = new Observer(telegram, 0)
+    const observer = new Observer(platform, 0)
     const dispatcher = new Dispatcher(platform, observer, config, new EventBus())
 
     const pollMethod = (dispatcher as unknown as { poll: () => Promise<void> }).poll.bind(dispatcher)
@@ -240,7 +240,7 @@ describe("Dispatcher poll uses platform.input", () => {
     ])
 
     const platform = new TelegramPlatform(telegram, config.telegram.chatId)
-    const observer = new Observer(telegram, 0)
+    const observer = new Observer(platform, 0)
     const dispatcher = new Dispatcher(platform, observer, config, new EventBus())
 
     const pollMethod = (dispatcher as unknown as { poll: () => Promise<void> }).poll.bind(dispatcher)

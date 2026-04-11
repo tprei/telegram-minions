@@ -1,6 +1,7 @@
 import fs from "node:fs"
 import path from "node:path"
-import type { TelegramClient } from "./telegram.js"
+import type { ChatPlatform } from "../provider/chat-platform.js"
+import type { MessageId } from "../provider/types.js"
 import type { GooseStreamEvent, GooseMessage, GooseToolRequestContent, GooseToolResponseContent } from "../domain/goose-types.js"
 import { isTextContent, isToolRequestContent, isToolResponseContent } from "../domain/goose-types.js"
 import type { SessionMeta, SessionDoneState } from "../domain/session-types.js"
@@ -48,7 +49,7 @@ interface SessionState {
   lastTextAt: number // timestamp of last text chunk
   flushInterval: ReturnType<typeof setInterval> | null
   // Tool activity tracking (per-flush window)
-  activityMessageId: number | null
+  activityMessageId: MessageId | null
   activityLastSentAt: number
   toolCount: number
   activityLog: string[]
@@ -70,7 +71,7 @@ export class Observer {
   private readonly activityEditDebounceMs: number
 
   constructor(
-    private readonly telegram: TelegramClient,
+    private readonly platform: ChatPlatform,
     private readonly throttleMs: number,
     opts?: { textFlushDebounceMs?: number; activityEditDebounceMs?: number },
   ) {
@@ -118,9 +119,9 @@ export class Observer {
   private async safeSendMessage(
     meta: SessionMeta,
     html: string,
-  ): Promise<{ ok: boolean; messageId: number | null }> {
+  ): Promise<{ ok: boolean; messageId: MessageId | null }> {
     try {
-      return await this.telegram.sendMessage(html, meta.threadId)
+      return await this.platform.chat.sendMessage(html, String(meta.threadId))
     } catch (err) {
       if (isThreadNotFoundError(err)) {
         log.warn({ threadId: meta.threadId, slug: meta.topicName }, "thread not found, triggering cleanup")
@@ -164,7 +165,7 @@ export class Observer {
 
         const filePath = path.join(dir, entry)
         state.sentScreenshots.add(entry)
-        await this.telegram.sendPhoto(filePath, meta.threadId, `📸 ${entry}`)
+        await this.platform.files?.sendPhoto(filePath, String(meta.threadId), `📸 ${entry}`)
       }
     } catch {
       // Directory may not exist yet
@@ -215,7 +216,7 @@ export class Observer {
         try {
           const buffer = Buffer.from(imageItem.data, "base64")
           const ext = imageItem.mimeType === "image/jpeg" ? "jpg" : "png"
-          await this.telegram.sendPhotoBuffer(buffer, `screenshot.${ext}`, meta.threadId)
+          await this.platform.files?.sendPhotoBuffer(buffer, `screenshot.${ext}`, String(meta.threadId))
         } catch (err) {
           log.warn({ err, sessionId: meta.sessionId }, "failed to send base64 screenshot")
         }
@@ -335,7 +336,7 @@ export class Observer {
       state.activityEditTimer = setTimeout(() => {
         state.activityEditTimer = null
         const latestHtml = formatActivityLog(state.activityLog, state.toolCount)
-        this.telegram.editMessage(messageId, latestHtml, meta.threadId).catch((err) => {
+        this.platform.chat.editMessage(messageId, latestHtml, String(meta.threadId)).catch((err) => {
           log.warn({ err, sessionId: meta.sessionId }, "edit error")
         })
       }, this.activityEditDebounceMs)

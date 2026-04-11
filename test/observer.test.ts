@@ -5,7 +5,7 @@ import path from "node:path"
 import { Observer } from "../src/telegram/observer.js"
 import type { GooseStreamEvent } from "../src/domain/goose-types.js"
 import type { SessionMeta } from "../src/domain/session-types.js"
-import { makeMockTelegram } from "./test-helpers.js"
+import { makeMockPlatform } from "./test-helpers.js"
 
 function makeMeta(overrides: Partial<SessionMeta> = {}): SessionMeta {
   return {
@@ -31,62 +31,62 @@ describe("Observer", () => {
 
   describe("onSessionStart", () => {
     it("sends a session start message for task mode", async () => {
-      const telegram = makeMockTelegram()
-      const observer = new Observer(telegram, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
+      const platform = makeMockPlatform()
+      const observer = new Observer(platform, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
       const meta = makeMeta({ mode: "task" })
 
       await observer.onSessionStart(meta, "fix the bug")
 
-      expect(telegram.sendMessage).toHaveBeenCalledOnce()
-      const msg = telegram.sendMessage.mock.calls[0][0]
+      expect(platform.chat.sendMessage).toHaveBeenCalledOnce()
+      const msg = (platform.chat.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0][0]
       expect(msg).toContain("Session started")
       expect(msg).toContain("bold-arc")
     })
 
     it("sends a plan start message for plan mode", async () => {
-      const telegram = makeMockTelegram()
-      const observer = new Observer(telegram, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
+      const platform = makeMockPlatform()
+      const observer = new Observer(platform, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
       const meta = makeMeta({ mode: "plan" })
 
       await observer.onSessionStart(meta, "plan the feature")
 
-      const msg = telegram.sendMessage.mock.calls[0][0]
+      const msg = (platform.chat.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0][0]
       expect(msg).toContain("Planning started")
       expect(msg).toContain("/execute")
     })
 
     it("sends a ship-think start message for ship-think mode", async () => {
-      const telegram = makeMockTelegram()
-      const observer = new Observer(telegram, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
+      const platform = makeMockPlatform()
+      const observer = new Observer(platform, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
       const meta = makeMeta({ mode: "ship-think" })
 
       await observer.onSessionStart(meta, "build auth system")
 
-      const msg = telegram.sendMessage.mock.calls[0][0]
+      const msg = (platform.chat.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0][0]
       expect(msg).toContain("Ship: researching")
       expect(msg).toContain("Auto-advancing")
     })
 
     it("sends a ship-plan start message for ship-plan mode", async () => {
-      const telegram = makeMockTelegram()
-      const observer = new Observer(telegram, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
+      const platform = makeMockPlatform()
+      const observer = new Observer(platform, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
       const meta = makeMeta({ mode: "ship-plan" })
 
       await observer.onSessionStart(meta, "build auth system")
 
-      const msg = telegram.sendMessage.mock.calls[0][0]
+      const msg = (platform.chat.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0][0]
       expect(msg).toContain("Ship: planning")
       expect(msg).toContain("implementation plan")
     })
 
     it("sends a ship-verify start message for ship-verify mode", async () => {
-      const telegram = makeMockTelegram()
-      const observer = new Observer(telegram, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
+      const platform = makeMockPlatform()
+      const observer = new Observer(platform, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
       const meta = makeMeta({ mode: "ship-verify" })
 
       await observer.onSessionStart(meta, "build auth system")
 
-      const msg = telegram.sendMessage.mock.calls[0][0]
+      const msg = (platform.chat.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0][0]
       expect(msg).toContain("Ship: verifying")
       expect(msg).toContain("quality gates")
     })
@@ -94,12 +94,12 @@ describe("Observer", () => {
 
   describe("onEvent — text buffering", () => {
     it("buffers text and flushes after debounce timeout", async () => {
-      const telegram = makeMockTelegram()
-      const observer = new Observer(telegram, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
+      const platform = makeMockPlatform()
+      const observer = new Observer(platform, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
       const meta = makeMeta()
 
       await observer.onSessionStart(meta, "task")
-      telegram.sendMessage.mockClear()
+      ;(platform.chat.sendMessage as ReturnType<typeof vi.fn>).mockClear()
 
       const textEvent: GooseStreamEvent = {
         type: "message",
@@ -112,23 +112,23 @@ describe("Observer", () => {
 
       await observer.onEvent(meta, textEvent)
 
-      expect(telegram.sendMessage).not.toHaveBeenCalled()
+      expect(platform.chat.sendMessage).not.toHaveBeenCalled()
 
       // Advance past debounce + interval check to ensure flush triggers
       await vi.advanceTimersByTimeAsync(1700)
 
-      expect(telegram.sendMessage).toHaveBeenCalledOnce()
-      const msg = telegram.sendMessage.mock.calls[0][0]
+      expect(platform.chat.sendMessage).toHaveBeenCalledOnce()
+      const msg = (platform.chat.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0][0]
       expect(msg).toContain("Reply")
     })
 
     it("does not flush text shorter than MIN_TEXT_LENGTH", async () => {
-      const telegram = makeMockTelegram()
-      const observer = new Observer(telegram, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
+      const platform = makeMockPlatform()
+      const observer = new Observer(platform, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
       const meta = makeMeta()
 
       await observer.onSessionStart(meta, "task")
-      telegram.sendMessage.mockClear()
+      ;(platform.chat.sendMessage as ReturnType<typeof vi.fn>).mockClear()
 
       await observer.onEvent(meta, {
         type: "message",
@@ -141,19 +141,19 @@ describe("Observer", () => {
 
       await vi.advanceTimersByTimeAsync(1700)
 
-      expect(telegram.sendMessage).not.toHaveBeenCalled()
+      expect(platform.chat.sendMessage).not.toHaveBeenCalled()
     })
 
     it("calls onTextCapture callback when flushing", async () => {
-      const telegram = makeMockTelegram()
-      const observer = new Observer(telegram, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
+      const platform = makeMockPlatform()
+      const observer = new Observer(platform, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
       const meta = makeMeta()
       const captured: string[] = []
 
       await observer.onSessionStart(meta, "task", (_sid, text) => {
         captured.push(text)
       })
-      telegram.sendMessage.mockClear()
+      ;(platform.chat.sendMessage as ReturnType<typeof vi.fn>).mockClear()
 
       await observer.onEvent(meta, {
         type: "message",
@@ -171,12 +171,12 @@ describe("Observer", () => {
     })
 
     it("accumulates multiple text chunks before flushing", async () => {
-      const telegram = makeMockTelegram()
-      const observer = new Observer(telegram, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
+      const platform = makeMockPlatform()
+      const observer = new Observer(platform, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
       const meta = makeMeta()
 
       await observer.onSessionStart(meta, "task")
-      telegram.sendMessage.mockClear()
+      ;(platform.chat.sendMessage as ReturnType<typeof vi.fn>).mockClear()
 
       for (let i = 0; i < 5; i++) {
         await observer.onEvent(meta, {
@@ -191,16 +191,16 @@ describe("Observer", () => {
 
       await vi.advanceTimersByTimeAsync(1700)
 
-      expect(telegram.sendMessage).toHaveBeenCalledOnce()
+      expect(platform.chat.sendMessage).toHaveBeenCalledOnce()
     })
 
     it("uses single interval instead of per-chunk timers", async () => {
-      const telegram = makeMockTelegram()
-      const observer = new Observer(telegram, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
+      const platform = makeMockPlatform()
+      const observer = new Observer(platform, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
       const meta = makeMeta()
 
       await observer.onSessionStart(meta, "task")
-      telegram.sendMessage.mockClear()
+      ;(platform.chat.sendMessage as ReturnType<typeof vi.fn>).mockClear()
 
       // Send multiple chunks rapidly - should use single interval, not create N timers
       const setIntervalSpy = vi.spyOn(global, "setInterval")
@@ -227,12 +227,12 @@ describe("Observer", () => {
     })
 
     it("resets debounce when new text arrives during wait period", async () => {
-      const telegram = makeMockTelegram()
-      const observer = new Observer(telegram, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
+      const platform = makeMockPlatform()
+      const observer = new Observer(platform, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
       const meta = makeMeta()
 
       await observer.onSessionStart(meta, "task")
-      telegram.sendMessage.mockClear()
+      ;(platform.chat.sendMessage as ReturnType<typeof vi.fn>).mockClear()
 
       // Send first chunk
       await observer.onEvent(meta, {
@@ -258,26 +258,26 @@ describe("Observer", () => {
       })
 
       // Should not have flushed yet
-      expect(telegram.sendMessage).not.toHaveBeenCalled()
+      expect(platform.chat.sendMessage).not.toHaveBeenCalled()
 
       // Advance by another 1000ms - still not enough (debounce was reset)
       await vi.advanceTimersByTimeAsync(1000)
-      expect(telegram.sendMessage).not.toHaveBeenCalled()
+      expect(platform.chat.sendMessage).not.toHaveBeenCalled()
 
       // Advance past the full debounce period from last chunk
       await vi.advanceTimersByTimeAsync(1000)
-      expect(telegram.sendMessage).toHaveBeenCalledOnce()
+      expect(platform.chat.sendMessage).toHaveBeenCalledOnce()
     })
   })
 
   describe("onEvent — tool requests", () => {
     it("sends a tool activity message", async () => {
-      const telegram = makeMockTelegram()
-      const observer = new Observer(telegram, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
+      const platform = makeMockPlatform()
+      const observer = new Observer(platform, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
       const meta = makeMeta()
 
       await observer.onSessionStart(meta, "task")
-      telegram.sendMessage.mockClear()
+      ;(platform.chat.sendMessage as ReturnType<typeof vi.fn>).mockClear()
 
       await observer.onEvent(meta, {
         type: "message",
@@ -292,18 +292,18 @@ describe("Observer", () => {
         },
       })
 
-      expect(telegram.sendMessage).toHaveBeenCalledOnce()
-      const msg = telegram.sendMessage.mock.calls[0][0]
+      expect(platform.chat.sendMessage).toHaveBeenCalledOnce()
+      const msg = (platform.chat.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0][0]
       expect(msg).toContain("Activity")
     })
 
     it("debounces edits to existing activity message within throttle window", async () => {
-      const telegram = makeMockTelegram()
-      const observer = new Observer(telegram, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
+      const platform = makeMockPlatform()
+      const observer = new Observer(platform, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
       const meta = makeMeta()
 
       await observer.onSessionStart(meta, "task")
-      telegram.sendMessage.mockClear()
+      ;(platform.chat.sendMessage as ReturnType<typeof vi.fn>).mockClear()
 
       await observer.onEvent(meta, {
         type: "message",
@@ -331,21 +331,21 @@ describe("Observer", () => {
         },
       })
 
-      expect(telegram.sendMessage).toHaveBeenCalledOnce()
-      expect(telegram.editMessage).not.toHaveBeenCalled()
+      expect(platform.chat.sendMessage).toHaveBeenCalledOnce()
+      expect(platform.chat.editMessage).not.toHaveBeenCalled()
 
       await vi.advanceTimersByTimeAsync(2000)
 
-      expect(telegram.editMessage).toHaveBeenCalledOnce()
+      expect(platform.chat.editMessage).toHaveBeenCalledOnce()
     })
 
     it("sends new activity message after throttle window expires", async () => {
-      const telegram = makeMockTelegram()
-      const observer = new Observer(telegram, 1000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
+      const platform = makeMockPlatform()
+      const observer = new Observer(platform, 1000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
       const meta = makeMeta()
 
       await observer.onSessionStart(meta, "task")
-      telegram.sendMessage.mockClear()
+      ;(platform.chat.sendMessage as ReturnType<typeof vi.fn>).mockClear()
 
       await observer.onEvent(meta, {
         type: "message",
@@ -375,16 +375,16 @@ describe("Observer", () => {
         },
       })
 
-      expect(telegram.sendMessage).toHaveBeenCalledTimes(2)
+      expect(platform.chat.sendMessage).toHaveBeenCalledTimes(2)
     })
 
     it("flushes text buffer before tool request", async () => {
-      const telegram = makeMockTelegram()
-      const observer = new Observer(telegram, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
+      const platform = makeMockPlatform()
+      const observer = new Observer(platform, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
       const meta = makeMeta()
 
       await observer.onSessionStart(meta, "task")
-      telegram.sendMessage.mockClear()
+      ;(platform.chat.sendMessage as ReturnType<typeof vi.fn>).mockClear()
 
       await observer.onEvent(meta, {
         type: "message",
@@ -408,18 +408,18 @@ describe("Observer", () => {
         },
       })
 
-      expect(telegram.sendMessage).toHaveBeenCalledTimes(2)
-      expect(telegram.sendMessage.mock.calls[0][0]).toContain("Reply")
-      expect(telegram.sendMessage.mock.calls[1][0]).toContain("Activity")
+      expect(platform.chat.sendMessage).toHaveBeenCalledTimes(2)
+      expect((platform.chat.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0][0]).toContain("Reply")
+      expect((platform.chat.sendMessage as ReturnType<typeof vi.fn>).mock.calls[1][0]).toContain("Activity")
     })
 
     it("skips tool requests with errors", async () => {
-      const telegram = makeMockTelegram()
-      const observer = new Observer(telegram, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
+      const platform = makeMockPlatform()
+      const observer = new Observer(platform, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
       const meta = makeMeta()
 
       await observer.onSessionStart(meta, "task")
-      telegram.sendMessage.mockClear()
+      ;(platform.chat.sendMessage as ReturnType<typeof vi.fn>).mockClear()
 
       await observer.onEvent(meta, {
         type: "message",
@@ -434,23 +434,23 @@ describe("Observer", () => {
         },
       })
 
-      expect(telegram.sendMessage).not.toHaveBeenCalled()
+      expect(platform.chat.sendMessage).not.toHaveBeenCalled()
     })
   })
 
   describe("onEvent — errors", () => {
     it("sends error message on error event", async () => {
-      const telegram = makeMockTelegram()
-      const observer = new Observer(telegram, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
+      const platform = makeMockPlatform()
+      const observer = new Observer(platform, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
       const meta = makeMeta()
 
       await observer.onSessionStart(meta, "task")
-      telegram.sendMessage.mockClear()
+      ;(platform.chat.sendMessage as ReturnType<typeof vi.fn>).mockClear()
 
       await observer.onEvent(meta, { type: "error", error: "something broke" })
 
-      expect(telegram.sendMessage).toHaveBeenCalledOnce()
-      const msg = telegram.sendMessage.mock.calls[0][0]
+      expect(platform.chat.sendMessage).toHaveBeenCalledOnce()
+      const msg = (platform.chat.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0][0]
       expect(msg).toContain("Error")
       expect(msg).toContain("something broke")
     })
@@ -458,12 +458,12 @@ describe("Observer", () => {
 
   describe("onEvent — ignores non-assistant messages", () => {
     it("ignores user role messages", async () => {
-      const telegram = makeMockTelegram()
-      const observer = new Observer(telegram, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
+      const platform = makeMockPlatform()
+      const observer = new Observer(platform, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
       const meta = makeMeta()
 
       await observer.onSessionStart(meta, "task")
-      telegram.sendMessage.mockClear()
+      ;(platform.chat.sendMessage as ReturnType<typeof vi.fn>).mockClear()
 
       await observer.onEvent(meta, {
         type: "message",
@@ -475,48 +475,48 @@ describe("Observer", () => {
       })
 
       await vi.advanceTimersByTimeAsync(2000)
-      expect(telegram.sendMessage).not.toHaveBeenCalled()
+      expect(platform.chat.sendMessage).not.toHaveBeenCalled()
     })
   })
 
   describe("onSessionComplete", () => {
     it("sends completion message for completed sessions", async () => {
-      const telegram = makeMockTelegram()
-      const observer = new Observer(telegram, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
+      const platform = makeMockPlatform()
+      const observer = new Observer(platform, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
       const meta = makeMeta()
 
       await observer.onSessionStart(meta, "task")
-      telegram.sendMessage.mockClear()
+      ;(platform.chat.sendMessage as ReturnType<typeof vi.fn>).mockClear()
 
       await observer.onSessionComplete(meta, "completed", 60000)
 
-      expect(telegram.sendMessage).toHaveBeenCalledOnce()
-      const msg = telegram.sendMessage.mock.calls[0][0]
+      expect(platform.chat.sendMessage).toHaveBeenCalledOnce()
+      const msg = (platform.chat.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0][0]
       expect(msg).toContain("Complete")
     })
 
     it("sends error message for errored sessions", async () => {
-      const telegram = makeMockTelegram()
-      const observer = new Observer(telegram, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
+      const platform = makeMockPlatform()
+      const observer = new Observer(platform, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
       const meta = makeMeta()
 
       await observer.onSessionStart(meta, "task")
-      telegram.sendMessage.mockClear()
+      ;(platform.chat.sendMessage as ReturnType<typeof vi.fn>).mockClear()
 
       await observer.onSessionComplete(meta, "errored", 30000)
 
-      expect(telegram.sendMessage).toHaveBeenCalledOnce()
-      const msg = telegram.sendMessage.mock.calls[0][0]
+      expect(platform.chat.sendMessage).toHaveBeenCalledOnce()
+      const msg = (platform.chat.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0][0]
       expect(msg).toContain("Error")
     })
 
     it("flushes remaining text buffer before completing", async () => {
-      const telegram = makeMockTelegram()
-      const observer = new Observer(telegram, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
+      const platform = makeMockPlatform()
+      const observer = new Observer(platform, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
       const meta = makeMeta()
 
       await observer.onSessionStart(meta, "task")
-      telegram.sendMessage.mockClear()
+      ;(platform.chat.sendMessage as ReturnType<typeof vi.fn>).mockClear()
 
       await observer.onEvent(meta, {
         type: "message",
@@ -529,20 +529,20 @@ describe("Observer", () => {
 
       await observer.onSessionComplete(meta, "completed", 60000)
 
-      expect(telegram.sendMessage).toHaveBeenCalledTimes(2)
-      expect(telegram.sendMessage.mock.calls[0][0]).toContain("Reply")
-      expect(telegram.sendMessage.mock.calls[1][0]).toContain("Complete")
+      expect(platform.chat.sendMessage).toHaveBeenCalledTimes(2)
+      expect((platform.chat.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0][0]).toContain("Reply")
+      expect((platform.chat.sendMessage as ReturnType<typeof vi.fn>).mock.calls[1][0]).toContain("Complete")
     })
   })
 
   describe("flushAndComplete", () => {
     it("flushes text and cleans up session without sending completion message", async () => {
-      const telegram = makeMockTelegram()
-      const observer = new Observer(telegram, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
+      const platform = makeMockPlatform()
+      const observer = new Observer(platform, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
       const meta = makeMeta()
 
       await observer.onSessionStart(meta, "task")
-      telegram.sendMessage.mockClear()
+      ;(platform.chat.sendMessage as ReturnType<typeof vi.fn>).mockClear()
 
       await observer.onEvent(meta, {
         type: "message",
@@ -555,8 +555,8 @@ describe("Observer", () => {
 
       await observer.flushAndComplete(meta, "completed", 60000)
 
-      expect(telegram.sendMessage).toHaveBeenCalledOnce()
-      expect(telegram.sendMessage.mock.calls[0][0]).toContain("Reply")
+      expect(platform.chat.sendMessage).toHaveBeenCalledOnce()
+      expect((platform.chat.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0][0]).toContain("Reply")
     })
   })
 
@@ -575,12 +575,12 @@ describe("Observer", () => {
     })
 
     it("sends screenshot photo after detecting browser_take_screenshot tool", async () => {
-      const telegram = makeMockTelegram()
-      const observer = new Observer(telegram, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
+      const platform = makeMockPlatform()
+      const observer = new Observer(platform, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
       const meta = makeMeta({ cwd: tmpDir })
 
       await observer.onSessionStart(meta, "task")
-      telegram.sendMessage.mockClear()
+      ;(platform.chat.sendMessage as ReturnType<typeof vi.fn>).mockClear()
 
       await observer.onEvent(meta, {
         type: "message",
@@ -606,21 +606,21 @@ describe("Observer", () => {
         },
       })
 
-      expect(telegram.sendPhoto).toHaveBeenCalledOnce()
-      expect(telegram.sendPhoto).toHaveBeenCalledWith(
+      expect(platform.files!.sendPhoto).toHaveBeenCalledOnce()
+      expect(platform.files!.sendPhoto).toHaveBeenCalledWith(
         path.join(screenshotDir, "screenshot-1.png"),
-        42,
+        "42",
         "📸 screenshot-1.png",
       )
     })
 
     it("does not send the same screenshot twice", async () => {
-      const telegram = makeMockTelegram()
-      const observer = new Observer(telegram, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
+      const platform = makeMockPlatform()
+      const observer = new Observer(platform, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
       const meta = makeMeta({ cwd: tmpDir })
 
       await observer.onSessionStart(meta, "task")
-      telegram.sendMessage.mockClear()
+      ;(platform.chat.sendMessage as ReturnType<typeof vi.fn>).mockClear()
 
       fs.writeFileSync(path.join(screenshotDir, "screenshot-1.png"), Buffer.from("fake-png"))
 
@@ -668,16 +668,16 @@ describe("Observer", () => {
         },
       })
 
-      expect(telegram.sendPhoto).toHaveBeenCalledOnce()
+      expect(platform.files!.sendPhoto).toHaveBeenCalledOnce()
     })
 
     it("sends pending screenshots on session complete", async () => {
-      const telegram = makeMockTelegram()
-      const observer = new Observer(telegram, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
+      const platform = makeMockPlatform()
+      const observer = new Observer(platform, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
       const meta = makeMeta({ cwd: tmpDir })
 
       await observer.onSessionStart(meta, "task")
-      telegram.sendMessage.mockClear()
+      ;(platform.chat.sendMessage as ReturnType<typeof vi.fn>).mockClear()
 
       await observer.onEvent(meta, {
         type: "message",
@@ -696,10 +696,10 @@ describe("Observer", () => {
 
       await observer.onSessionComplete(meta, "completed", 60000)
 
-      expect(telegram.sendPhoto).toHaveBeenCalledOnce()
-      expect(telegram.sendPhoto).toHaveBeenCalledWith(
+      expect(platform.files!.sendPhoto).toHaveBeenCalledOnce()
+      expect(platform.files!.sendPhoto).toHaveBeenCalledWith(
         path.join(screenshotDir, "page-capture.png"),
-        42,
+        "42",
         "📸 page-capture.png",
       )
     })
@@ -707,8 +707,8 @@ describe("Observer", () => {
 
   describe("clearSession", () => {
     it("removes session state and cancels flush timer", async () => {
-      const telegram = makeMockTelegram()
-      const observer = new Observer(telegram, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
+      const platform = makeMockPlatform()
+      const observer = new Observer(platform, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
       const meta = makeMeta()
 
       await observer.onSessionStart(meta, "task")
@@ -726,8 +726,8 @@ describe("Observer", () => {
 
       await vi.advanceTimersByTimeAsync(2000)
 
-      telegram.sendMessage.mockClear()
-      expect(telegram.sendMessage).not.toHaveBeenCalled()
+      ;(platform.chat.sendMessage as ReturnType<typeof vi.fn>).mockClear()
+      expect(platform.chat.sendMessage).not.toHaveBeenCalled()
     })
   })
 })

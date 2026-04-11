@@ -54,7 +54,7 @@ function findUiDistPath(): string {
 export function createMinion(config: MinionConfig, options?: MinionOptions): MinionInstance {
   const telegram = new TelegramClient(config.telegram.botToken, config.telegram.chatId, config.telegramQueue.minSendIntervalMs)
   const platform = new TelegramPlatform(telegram, config.telegram.chatId)
-  const observer = new Observer(telegram, config.observer.activityThrottleMs, {
+  const observer = new Observer(platform, config.observer.activityThrottleMs, {
     textFlushDebounceMs: config.observer.textFlushDebounceMs,
     activityEditDebounceMs: config.observer.activityEditDebounceMs,
   })

@@ -157,8 +157,9 @@ describe("quota sleep in dispatcher", () => {
     vi.useFakeTimers()
     telegram = makeMockTelegram()
     const config = makeConfig()
-    const observer = new Observer(telegram, "1")
-    dispatcher = new Dispatcher(new TelegramPlatform(telegram, String(config.telegram.chatId)), observer, config, new EventBus())
+    const platform = new TelegramPlatform(telegram, String(config.telegram.chatId))
+    const observer = new Observer(platform, "1")
+    dispatcher = new Dispatcher(platform, observer, config, new EventBus())
     priv = getPrivate(dispatcher)
   })
 
@@ -238,8 +239,9 @@ describe("quota sleep in dispatcher", () => {
 
   it("reports exhaustion when retryMax is exceeded", async () => {
     const config = makeConfig({ quota: { retryMax: 1, defaultSleepMs: 60_000, sleepBufferMs: 60_000 } })
-    const observer = new Observer(telegram, "1")
-    dispatcher = new Dispatcher(new TelegramPlatform(telegram, String(config.telegram.chatId)), observer, config, new EventBus())
+    const platform = new TelegramPlatform(telegram, String(config.telegram.chatId))
+    const observer = new Observer(platform, "1")
+    dispatcher = new Dispatcher(platform, observer, config, new EventBus())
     priv = getPrivate(dispatcher)
 
     const ts = makeTopicSession({ activeSessionId: "sess-1", quotaRetryCount: 1 })
@@ -509,8 +511,9 @@ describe("quota sleep persistence", () => {
     vi.useFakeTimers()
     const telegram = makeMockTelegram()
     const config = makeConfig()
-    const observer = new Observer(telegram, "1")
-    const dispatcher = new Dispatcher(new TelegramPlatform(telegram, String(config.telegram.chatId)), observer, config, new EventBus())
+    const platform = new TelegramPlatform(telegram, String(config.telegram.chatId))
+    const observer = new Observer(platform, "1")
+    const dispatcher = new Dispatcher(platform, observer, config, new EventBus())
     const priv = getPrivate(dispatcher)
 
     // Mock the store to return a session with quotaSleepUntil
@@ -543,8 +546,9 @@ describe("quota sleep persistence", () => {
     vi.useFakeTimers()
     const telegram = makeMockTelegram()
     const config = makeConfig()
-    const observer = new Observer(telegram, "1")
-    const dispatcher = new Dispatcher(new TelegramPlatform(telegram, String(config.telegram.chatId)), observer, config, new EventBus())
+    const platform = new TelegramPlatform(telegram, String(config.telegram.chatId))
+    const observer = new Observer(platform, "1")
+    const dispatcher = new Dispatcher(platform, observer, config, new EventBus())
     const priv = getPrivate(dispatcher)
 
     // Mock spawnTopicAgent
@@ -592,8 +596,9 @@ describe("quota sleep persistence", () => {
     vi.useFakeTimers()
     const telegram = makeMockTelegram()
     const config = makeConfig({ quota: { retryMax: 2, defaultSleepMs: 60_000, sleepBufferMs: 60_000 } })
-    const observer = new Observer(telegram, "1")
-    const dispatcher = new Dispatcher(new TelegramPlatform(telegram, String(config.telegram.chatId)), observer, config, new EventBus())
+    const platform = new TelegramPlatform(telegram, String(config.telegram.chatId))
+    const observer = new Observer(platform, "1")
+    const dispatcher = new Dispatcher(platform, observer, config, new EventBus())
 
     const spawnSpy = vi.fn().mockResolvedValue(true)
     ;(dispatcher as unknown as { spawnTopicAgent: typeof spawnSpy }).spawnTopicAgent = spawnSpy

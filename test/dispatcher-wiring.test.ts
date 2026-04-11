@@ -82,8 +82,9 @@ describe("Dispatcher module wiring", () => {
   it("constructs without errors and exposes the same public API", () => {
     const telegram = makeMockTelegram()
     const config = makeConfig()
-    const observer = new Observer(telegram, 123)
-    const dispatcher = new Dispatcher(new TelegramPlatform(telegram, config.telegram.chatId), observer, config, new EventBus())
+    const platform = new TelegramPlatform(telegram, config.telegram.chatId)
+    const observer = new Observer(platform, 123)
+    const dispatcher = new Dispatcher(platform, observer, config, new EventBus())
 
     expect(dispatcher).toBeDefined()
     expect(typeof dispatcher.start).toBe("function")
@@ -106,8 +107,9 @@ describe("Dispatcher module wiring", () => {
   it("has extracted module instances as private properties", () => {
     const telegram = makeMockTelegram()
     const config = makeConfig()
-    const observer = new Observer(telegram, 123)
-    const dispatcher = new Dispatcher(new TelegramPlatform(telegram, config.telegram.chatId), observer, config, new EventBus())
+    const platform = new TelegramPlatform(telegram, config.telegram.chatId)
+    const observer = new Observer(platform, 123)
+    const dispatcher = new Dispatcher(platform, observer, config, new EventBus())
 
     const d = dispatcher as unknown as Record<string, unknown>
     expect(d.ciBabysitter).toBeDefined()
@@ -122,8 +124,9 @@ describe("Dispatcher module wiring", () => {
   it("shares mutable state between dispatcher and modules via context", () => {
     const telegram = makeMockTelegram()
     const config = makeConfig()
-    const observer = new Observer(telegram, 123)
-    const dispatcher = new Dispatcher(new TelegramPlatform(telegram, config.telegram.chatId), observer, config, new EventBus())
+    const platform = new TelegramPlatform(telegram, config.telegram.chatId)
+    const observer = new Observer(platform, 123)
+    const dispatcher = new Dispatcher(platform, observer, config, new EventBus())
 
     const d = dispatcher as unknown as {
       topicSessions: Map<number, TopicSession>
@@ -148,8 +151,9 @@ describe("Dispatcher module wiring", () => {
   it("delegates handleCloseCommand through internal method", async () => {
     const telegram = makeMockTelegram()
     const config = makeConfig()
-    const observer = new Observer(telegram, 123)
-    const dispatcher = new Dispatcher(new TelegramPlatform(telegram, config.telegram.chatId), observer, config, new EventBus())
+    const platform = new TelegramPlatform(telegram, config.telegram.chatId)
+    const observer = new Observer(platform, 123)
+    const dispatcher = new Dispatcher(platform, observer, config, new EventBus())
 
     const topicSessions = (dispatcher as unknown as { topicSessions: Map<number, TopicSession> }).topicSessions
 
@@ -173,8 +177,9 @@ describe("Dispatcher module wiring", () => {
   it("delegates handleStopCommand through internal method", async () => {
     const telegram = makeMockTelegram()
     const config = makeConfig()
-    const observer = new Observer(telegram, 123)
-    const dispatcher = new Dispatcher(new TelegramPlatform(telegram, config.telegram.chatId), observer, config, new EventBus())
+    const platform = new TelegramPlatform(telegram, config.telegram.chatId)
+    const observer = new Observer(platform, 123)
+    const dispatcher = new Dispatcher(platform, observer, config, new EventBus())
 
     const topicSessions = (dispatcher as unknown as { topicSessions: Map<number, TopicSession> }).topicSessions
     const mockKill = vi.fn().mockResolvedValue(undefined)
@@ -204,8 +209,9 @@ describe("Dispatcher module wiring", () => {
   it("returns error for unknown thread on handleReplyCommand", async () => {
     const telegram = makeMockTelegram()
     const config = makeConfig()
-    const observer = new Observer(telegram, 123)
-    const dispatcher = new Dispatcher(new TelegramPlatform(telegram, config.telegram.chatId), observer, config, new EventBus())
+    const platform = new TelegramPlatform(telegram, config.telegram.chatId)
+    const observer = new Observer(platform, 123)
+    const dispatcher = new Dispatcher(platform, observer, config, new EventBus())
 
     await dispatcher.handleReplyCommand(999, "hello")
     expect(telegram.sendMessage).toHaveBeenCalledWith(
@@ -217,8 +223,9 @@ describe("Dispatcher module wiring", () => {
   it("activeSessions returns 0 initially", () => {
     const telegram = makeMockTelegram()
     const config = makeConfig()
-    const observer = new Observer(telegram, 123)
-    const dispatcher = new Dispatcher(new TelegramPlatform(telegram, config.telegram.chatId), observer, config, new EventBus())
+    const platform = new TelegramPlatform(telegram, config.telegram.chatId)
+    const observer = new Observer(platform, 123)
+    const dispatcher = new Dispatcher(platform, observer, config, new EventBus())
 
     expect(dispatcher.activeSessions()).toBe(0)
   })
@@ -226,8 +233,9 @@ describe("Dispatcher module wiring", () => {
   it("getDags returns the shared dags map", () => {
     const telegram = makeMockTelegram()
     const config = makeConfig()
-    const observer = new Observer(telegram, 123)
-    const dispatcher = new Dispatcher(new TelegramPlatform(telegram, config.telegram.chatId), observer, config, new EventBus())
+    const platform = new TelegramPlatform(telegram, config.telegram.chatId)
+    const observer = new Observer(platform, 123)
+    const dispatcher = new Dispatcher(platform, observer, config, new EventBus())
 
     expect(dispatcher.getDags()).toBeInstanceOf(Map)
     expect(dispatcher.getDags().size).toBe(0)
@@ -236,8 +244,9 @@ describe("Dispatcher module wiring", () => {
   it("handleExecuteCommand clears autoAdvance when breaking out of ship pipeline", async () => {
     const telegram = makeMockTelegram()
     const config = makeConfig()
-    const observer = new Observer(telegram, 123)
-    const dispatcher = new Dispatcher(new TelegramPlatform(telegram, config.telegram.chatId), observer, config, new EventBus())
+    const platform = new TelegramPlatform(telegram, config.telegram.chatId)
+    const observer = new Observer(platform, 123)
+    const dispatcher = new Dispatcher(platform, observer, config, new EventBus())
 
     const topicSessions = (dispatcher as unknown as { topicSessions: Map<number, TopicSession> }).topicSessions
 
@@ -277,9 +286,10 @@ describe("Dispatcher module wiring", () => {
     it("preserves phase and shows recovery options when ship session errors", async () => {
       const telegram = makeMockTelegram()
       const config = makeConfig()
-      const observer = new Observer(telegram, 123)
+      const platform = new TelegramPlatform(telegram, config.telegram.chatId)
+      const observer = new Observer(platform, 123)
       const eventBus = new EventBus()
-      const dispatcher = new Dispatcher(new TelegramPlatform(telegram, config.telegram.chatId), observer, config, eventBus)
+      const dispatcher = new Dispatcher(platform, observer, config, eventBus)
 
       const d = dispatcher as unknown as {
         topicSessions: Map<number, TopicSession>
@@ -344,9 +354,10 @@ describe("Dispatcher module wiring", () => {
     it("preserves phase for ship-think mode errors too", async () => {
       const telegram = makeMockTelegram()
       const config = makeConfig()
-      const observer = new Observer(telegram, 123)
+      const platform = new TelegramPlatform(telegram, config.telegram.chatId)
+      const observer = new Observer(platform, 123)
       const eventBus = new EventBus()
-      const dispatcher = new Dispatcher(new TelegramPlatform(telegram, config.telegram.chatId), observer, config, eventBus)
+      const dispatcher = new Dispatcher(platform, observer, config, eventBus)
 
       const d = dispatcher as unknown as {
         topicSessions: Map<number, TopicSession>
