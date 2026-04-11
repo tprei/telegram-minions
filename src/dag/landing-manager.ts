@@ -160,18 +160,38 @@ export class LandingManager {
         }
 
         if (prState === "CLOSED") {
-          skipped++
-          await this.ctx.telegram.sendMessage(
-            formatLandSkipped(node.title, prState),
-            topicSession.threadId,
-          )
-          continue
+          try {
+            await gh(["pr", "edit", prNumber, ...repoFlag, "--base", baseBranch])
+            await gh(["pr", "reopen", prNumber, ...repoFlag])
+            log.info({ nodeId: node.id, prNumber }, "reopened auto-closed PR")
+          } catch {
+            skipped++
+            await this.ctx.telegram.sendMessage(
+              formatLandSkipped(node.title, prState),
+              topicSession.threadId,
+            )
+            continue
+          }
         }
       } catch (err) {
         log.warn({ err, nodeId: node.id }, "PR state check failed, attempting merge anyway")
       }
 
       await this.ensureMergeable(node, baseBranch, topicSession, graph, signal)
+
+      const preRetarget = needsRestack(graph, node.id, { includeDone: true })
+      for (const ds of preRetarget) {
+        if (!ds.prUrl) continue
+        const dsNum = prNumberFromUrl(ds.prUrl)
+        if (!dsNum) continue
+        const dsRepo = repoFromPrUrl(ds.prUrl)
+        const dsFlag = dsRepo ? ["--repo", dsRepo] : repoFlag
+        try {
+          await gh(["pr", "edit", dsNum, ...dsFlag, "--base", baseBranch])
+        } catch (err) {
+          log.warn({ err, nodeId: ds.id }, "pre-merge retarget failed")
+        }
+      }
 
       try {
         await gh(["pr", "merge", prNumber, ...repoFlag, "--squash", "--delete-branch"])
@@ -211,7 +231,7 @@ export class LandingManager {
           try {
             const newBase = `origin/${baseBranch}`
 
-            await git(["fetch", "origin", baseBranch], { cwd: restackCwd })
+            await git(["fetch", "origin", baseBranch, downstream.branch], { cwd: restackCwd })
             if (!useOwnWorktree) {
               await git(["checkout", downstream.branch], { cwd: restackCwd })
             }
@@ -225,6 +245,10 @@ export class LandingManager {
             const dsNumber = prNumberFromUrl(downstream.prUrl!)
             if (dsNumber) {
               await gh(["pr", "edit", dsNumber, ...dsRepoFlag, "--base", baseBranch])
+              const dsState = await gh(["pr", "view", dsNumber, ...dsRepoFlag, "--json", "state", "--jq", ".state"])
+              if (dsState === "CLOSED") {
+                await gh(["pr", "reopen", dsNumber, ...dsRepoFlag])
+              }
             }
           } catch (err) {
             const errMsg = err instanceof Error ? err.message : String(err)
