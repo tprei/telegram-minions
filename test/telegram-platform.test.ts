@@ -64,7 +64,7 @@ describe("TelegramPlatform", () => {
 
     it("sendMessage works without optional params", async () => {
       await platform.chat.sendMessage("hello")
-      expect((client.sendMessage as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith("hello", undefined, undefined)
+      expect((client.sendMessage as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith("hello", undefined)
     })
 
     it("sendMessage returns null messageId on failure", async () => {
@@ -183,15 +183,25 @@ describe("TelegramPlatform", () => {
       expect(platform.input.getCursor()).toBe("0")
     })
 
-    it("advanceCursor updates cursor from message updates", () => {
+    it("poll auto-advances cursor based on update_ids", async () => {
+      ;(client.getUpdates as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
+        { update_id: 100, message: { message_id: 50, chat: { id: 1 }, date: 1700000000 } },
+        { update_id: 102, message: { message_id: 55, chat: { id: 1 }, date: 1700000001 } },
+      ])
+      await platform.input.poll("0", 30)
+      expect(platform.input.getCursor()).toBe("103")
+    })
+
+    it("advanceCursor is a no-op (cursor auto-advanced during poll)", () => {
       platform.input.advanceCursor([
         { type: "message", message: { messageId: "50", timestamp: 1700000000 } },
         { type: "message", message: { messageId: "55", timestamp: 1700000001 } },
       ])
-      expect(Number(platform.input.getCursor())).toBeGreaterThanOrEqual(56)
+      // advanceCursor is a no-op — cursor is auto-advanced in poll() based on raw update_ids
+      expect(platform.input.getCursor()).toBe("0")
     })
 
-    it("advanceCursor is a no-op for empty updates", () => {
+    it("advanceCursor with empty updates is still a no-op", () => {
       platform.input.advanceCursor([])
       expect(platform.input.getCursor()).toBe("0")
     })

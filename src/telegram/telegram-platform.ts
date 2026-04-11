@@ -96,11 +96,11 @@ class TelegramChatProvider implements ChatProvider {
   constructor(private readonly client: TelegramClient) {}
 
   async sendMessage(content: string, threadId?: ThreadId, replyToMessageId?: MessageId): Promise<SendResult> {
-    const result = await this.client.sendMessage(
-      content,
-      toThreadNum(threadId),
-      replyToMessageId !== undefined ? toMsgNum(replyToMessageId) : undefined,
-    )
+    const threadNum = toThreadNum(threadId)
+    const replyNum = replyToMessageId !== undefined ? toMsgNum(replyToMessageId) : undefined
+    const result = replyNum !== undefined
+      ? await this.client.sendMessage(content, threadNum, replyNum)
+      : await this.client.sendMessage(content, threadNum)
     return { ok: result.ok, messageId: toMsgStr(result.messageId) }
   }
 
@@ -150,6 +150,10 @@ class TelegramInputSource implements ChatInputSource {
   async poll(cursor: string, timeoutSeconds: number): Promise<ChatUpdate[]> {
     this.cursor = Number(cursor) || 0
     const updates = await this.client.getUpdates(this.cursor, timeoutSeconds)
+    // Auto-advance cursor based on raw Telegram update_ids
+    if (updates.length > 0) {
+      this.cursor = Math.max(...updates.map(u => u.update_id)) + 1
+    }
     const converted: ChatUpdate[] = []
     for (const u of updates) {
       const c = convertUpdate(u)
@@ -162,16 +166,9 @@ class TelegramInputSource implements ChatInputSource {
     return String(this.cursor)
   }
 
-  advanceCursor(updates: ChatUpdate[]): void {
-    if (updates.length === 0) return
-    const lastMsg = updates[updates.length - 1]
-    const lastId = lastMsg.type === "message"
-      ? Number(lastMsg.message.messageId)
-      : Number(lastMsg.query.queryId)
-    // Telegram offset = last_update_id + 1, but ChatUpdate uses message IDs,
-    // not update IDs. The poll() caller should track the raw offset externally
-    // if needed. For now, advance past the highest known cursor.
-    this.cursor = Math.max(this.cursor, lastId + 1)
+  advanceCursor(): void {
+    // Cursor is auto-advanced during poll() based on raw Telegram update_ids.
+    // This is a no-op since poll() already tracks the offset internally.
   }
 }
 

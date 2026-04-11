@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest"
 import { Dispatcher } from "../src/orchestration/dispatcher.js"
 import type { TelegramClient } from "../src/telegram/telegram.js"
+import { TelegramPlatform } from "../src/telegram/telegram-platform.js"
 import { Observer } from "../src/telegram/observer.js"
 import type { MinionConfig } from "../src/config/config-types.js"
 import type { TopicSession } from "../src/domain/session-types.js"
@@ -60,7 +61,7 @@ describe("handleStopCommand", () => {
     const telegram = makeMockTelegram()
     const config = makeConfig()
     const observer = new Observer(telegram, 1)
-    const dispatcher = new Dispatcher(telegram, observer, config, new EventBus())
+    const dispatcher = new Dispatcher(new TelegramPlatform(telegram, String(config.telegram.chatId)), observer, config, new EventBus())
 
     const mockKill = vi.fn().mockResolvedValue(undefined)
 
@@ -108,7 +109,7 @@ describe("handleStopCommand", () => {
     const telegram = makeMockTelegram()
     const config = makeConfig()
     const observer = new Observer(telegram, 1)
-    const dispatcher = new Dispatcher(telegram, observer, config, new EventBus())
+    const dispatcher = new Dispatcher(new TelegramPlatform(telegram, String(config.telegram.chatId)), observer, config, new EventBus())
 
     const topicSession: TopicSession = {
       threadId: 200,
@@ -141,7 +142,7 @@ describe("handleStopCommand", () => {
     const telegram = makeMockTelegram()
     const config = makeConfig()
     const observer = new Observer(telegram, 1)
-    const dispatcher = new Dispatcher(telegram, observer, config, new EventBus())
+    const dispatcher = new Dispatcher(new TelegramPlatform(telegram, String(config.telegram.chatId)), observer, config, new EventBus())
 
     const mockKill = vi.fn().mockResolvedValue(undefined)
 
@@ -181,7 +182,7 @@ describe("handleStopCommand", () => {
     const telegram = makeMockTelegram()
     const config = makeConfig()
     const observer = new Observer(telegram, 1)
-    const dispatcher = new Dispatcher(telegram, observer, config, new EventBus())
+    const dispatcher = new Dispatcher(new TelegramPlatform(telegram, String(config.telegram.chatId)), observer, config, new EventBus())
 
     const mockKill = vi.fn().mockResolvedValue(undefined)
 
@@ -221,7 +222,7 @@ describe("handleStopCommand", () => {
     const telegram = makeMockTelegram()
     const config = makeConfig()
     const observer = new Observer(telegram, 1)
-    const dispatcher = new Dispatcher(telegram, observer, config, new EventBus())
+    const dispatcher = new Dispatcher(new TelegramPlatform(telegram, String(config.telegram.chatId)), observer, config, new EventBus())
 
     const topicSession: TopicSession = {
       threadId: 500,

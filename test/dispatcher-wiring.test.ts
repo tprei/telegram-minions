@@ -3,6 +3,7 @@ import fs from "node:fs/promises"
 import path from "node:path"
 import { Dispatcher } from "../src/orchestration/dispatcher.js"
 import type { TelegramClient } from "../src/telegram/telegram.js"
+import { TelegramPlatform } from "../src/telegram/telegram-platform.js"
 import { Observer } from "../src/telegram/observer.js"
 import type { MinionConfig } from "../src/config/config-types.js"
 import type { TopicSession } from "../src/domain/session-types.js"
@@ -82,7 +83,7 @@ describe("Dispatcher module wiring", () => {
     const telegram = makeMockTelegram()
     const config = makeConfig()
     const observer = new Observer(telegram, 123)
-    const dispatcher = new Dispatcher(telegram, observer, config, new EventBus())
+    const dispatcher = new Dispatcher(new TelegramPlatform(telegram, config.telegram.chatId), observer, config, new EventBus())
 
     expect(dispatcher).toBeDefined()
     expect(typeof dispatcher.start).toBe("function")
@@ -106,7 +107,7 @@ describe("Dispatcher module wiring", () => {
     const telegram = makeMockTelegram()
     const config = makeConfig()
     const observer = new Observer(telegram, 123)
-    const dispatcher = new Dispatcher(telegram, observer, config, new EventBus())
+    const dispatcher = new Dispatcher(new TelegramPlatform(telegram, config.telegram.chatId), observer, config, new EventBus())
 
     const d = dispatcher as unknown as Record<string, unknown>
     expect(d.ciBabysitter).toBeDefined()
@@ -122,7 +123,7 @@ describe("Dispatcher module wiring", () => {
     const telegram = makeMockTelegram()
     const config = makeConfig()
     const observer = new Observer(telegram, 123)
-    const dispatcher = new Dispatcher(telegram, observer, config, new EventBus())
+    const dispatcher = new Dispatcher(new TelegramPlatform(telegram, config.telegram.chatId), observer, config, new EventBus())
 
     const d = dispatcher as unknown as {
       topicSessions: Map<number, TopicSession>
@@ -148,7 +149,7 @@ describe("Dispatcher module wiring", () => {
     const telegram = makeMockTelegram()
     const config = makeConfig()
     const observer = new Observer(telegram, 123)
-    const dispatcher = new Dispatcher(telegram, observer, config, new EventBus())
+    const dispatcher = new Dispatcher(new TelegramPlatform(telegram, config.telegram.chatId), observer, config, new EventBus())
 
     const topicSessions = (dispatcher as unknown as { topicSessions: Map<number, TopicSession> }).topicSessions
 
@@ -173,7 +174,7 @@ describe("Dispatcher module wiring", () => {
     const telegram = makeMockTelegram()
     const config = makeConfig()
     const observer = new Observer(telegram, 123)
-    const dispatcher = new Dispatcher(telegram, observer, config, new EventBus())
+    const dispatcher = new Dispatcher(new TelegramPlatform(telegram, config.telegram.chatId), observer, config, new EventBus())
 
     const topicSessions = (dispatcher as unknown as { topicSessions: Map<number, TopicSession> }).topicSessions
     const mockKill = vi.fn().mockResolvedValue(undefined)
@@ -204,7 +205,7 @@ describe("Dispatcher module wiring", () => {
     const telegram = makeMockTelegram()
     const config = makeConfig()
     const observer = new Observer(telegram, 123)
-    const dispatcher = new Dispatcher(telegram, observer, config, new EventBus())
+    const dispatcher = new Dispatcher(new TelegramPlatform(telegram, config.telegram.chatId), observer, config, new EventBus())
 
     await dispatcher.handleReplyCommand(999, "hello")
     expect(telegram.sendMessage).toHaveBeenCalledWith(
@@ -217,7 +218,7 @@ describe("Dispatcher module wiring", () => {
     const telegram = makeMockTelegram()
     const config = makeConfig()
     const observer = new Observer(telegram, 123)
-    const dispatcher = new Dispatcher(telegram, observer, config, new EventBus())
+    const dispatcher = new Dispatcher(new TelegramPlatform(telegram, config.telegram.chatId), observer, config, new EventBus())
 
     expect(dispatcher.activeSessions()).toBe(0)
   })
@@ -226,7 +227,7 @@ describe("Dispatcher module wiring", () => {
     const telegram = makeMockTelegram()
     const config = makeConfig()
     const observer = new Observer(telegram, 123)
-    const dispatcher = new Dispatcher(telegram, observer, config, new EventBus())
+    const dispatcher = new Dispatcher(new TelegramPlatform(telegram, config.telegram.chatId), observer, config, new EventBus())
 
     expect(dispatcher.getDags()).toBeInstanceOf(Map)
     expect(dispatcher.getDags().size).toBe(0)
@@ -236,7 +237,7 @@ describe("Dispatcher module wiring", () => {
     const telegram = makeMockTelegram()
     const config = makeConfig()
     const observer = new Observer(telegram, 123)
-    const dispatcher = new Dispatcher(telegram, observer, config, new EventBus())
+    const dispatcher = new Dispatcher(new TelegramPlatform(telegram, config.telegram.chatId), observer, config, new EventBus())
 
     const topicSessions = (dispatcher as unknown as { topicSessions: Map<number, TopicSession> }).topicSessions
 
@@ -278,7 +279,7 @@ describe("Dispatcher module wiring", () => {
       const config = makeConfig()
       const observer = new Observer(telegram, 123)
       const eventBus = new EventBus()
-      const dispatcher = new Dispatcher(telegram, observer, config, eventBus)
+      const dispatcher = new Dispatcher(new TelegramPlatform(telegram, config.telegram.chatId), observer, config, eventBus)
 
       const d = dispatcher as unknown as {
         topicSessions: Map<number, TopicSession>
@@ -345,7 +346,7 @@ describe("Dispatcher module wiring", () => {
       const config = makeConfig()
       const observer = new Observer(telegram, 123)
       const eventBus = new EventBus()
-      const dispatcher = new Dispatcher(telegram, observer, config, eventBus)
+      const dispatcher = new Dispatcher(new TelegramPlatform(telegram, config.telegram.chatId), observer, config, eventBus)
 
       const d = dispatcher as unknown as {
         topicSessions: Map<number, TopicSession>

@@ -3,6 +3,7 @@ import fs from "node:fs/promises"
 import path from "node:path"
 import { Dispatcher } from "../src/orchestration/dispatcher.js"
 import type { TelegramClient } from "../src/telegram/telegram.js"
+import { TelegramPlatform } from "../src/telegram/telegram-platform.js"
 import { Observer } from "../src/telegram/observer.js"
 import type { MinionConfig } from "../src/config/config-types.js"
 import type { TopicSession, SessionMeta } from "../src/domain/session-types.js"
@@ -115,7 +116,7 @@ describe("Dispatcher EventBus integration", () => {
     const config = makeConfig()
     const observer = new Observer(telegram, 123)
     const eventBus = new EventBus()
-    const dispatcher = new Dispatcher(telegram, observer, config, eventBus)
+    const dispatcher = new Dispatcher(new TelegramPlatform(telegram, String(config.telegram.chatId)), observer, config, eventBus)
 
     expect(dispatcher).toBeDefined()
   })
@@ -125,7 +126,7 @@ describe("Dispatcher EventBus integration", () => {
     const config = makeConfig()
     const observer = new Observer(telegram, 123)
     const eventBus = new EventBus()
-    const dispatcher = new Dispatcher(telegram, observer, config, eventBus)
+    const dispatcher = new Dispatcher(new TelegramPlatform(telegram, String(config.telegram.chatId)), observer, config, eventBus)
 
     const d = dispatcher as unknown as { completionChain: unknown }
     expect(d.completionChain).toBeDefined()
@@ -136,7 +137,7 @@ describe("Dispatcher EventBus integration", () => {
     const config = makeConfig()
     const observer = new Observer(telegram, 123)
     const eventBus = new EventBus()
-    new Dispatcher(telegram, observer, config, eventBus)
+    new Dispatcher(new TelegramPlatform(telegram, String(config.telegram.chatId)), observer, config, eventBus)
 
     // The chain subscribes to session.completed
     expect(eventBus.listenerCountFor("session.completed")).toBeGreaterThanOrEqual(1)
@@ -147,7 +148,7 @@ describe("Dispatcher EventBus integration", () => {
     const config = makeConfig()
     const observer = new Observer(telegram, 123)
     const eventBus = new EventBus()
-    const dispatcher = new Dispatcher(telegram, observer, config, eventBus)
+    const dispatcher = new Dispatcher(new TelegramPlatform(telegram, String(config.telegram.chatId)), observer, config, eventBus)
 
     const d = dispatcher as unknown as {
       topicSessions: Map<number, TopicSession>
@@ -184,7 +185,7 @@ describe("Dispatcher EventBus integration", () => {
     const config = makeConfig()
     const observer = new Observer(telegram, 123)
     const eventBus = new EventBus()
-    const dispatcher = new Dispatcher(telegram, observer, config, eventBus)
+    const dispatcher = new Dispatcher(new TelegramPlatform(telegram, String(config.telegram.chatId)), observer, config, eventBus)
 
     const d = dispatcher as unknown as {
       topicSessions: Map<number, TopicSession>
@@ -242,7 +243,7 @@ describe("Dispatcher EventBus integration", () => {
     const config = makeConfig()
     const observer = new Observer(telegram, 123)
     const eventBus = new EventBus()
-    new Dispatcher(telegram, observer, config, eventBus)
+    new Dispatcher(new TelegramPlatform(telegram, String(config.telegram.chatId)), observer, config, eventBus)
 
     // Emit event for unknown threadId — should not throw
     await eventBus.emit({
@@ -258,7 +259,7 @@ describe("Dispatcher EventBus integration", () => {
     const config = makeConfig()
     const observer = new Observer(telegram, 123)
     const eventBus = new EventBus()
-    const dispatcher = new Dispatcher(telegram, observer, config, eventBus)
+    const dispatcher = new Dispatcher(new TelegramPlatform(telegram, String(config.telegram.chatId)), observer, config, eventBus)
 
     const d = dispatcher as unknown as {
       topicSessions: Map<number, TopicSession>
@@ -285,7 +286,7 @@ describe("Dispatcher EventBus integration", () => {
     const config = makeConfig()
     const observer = new Observer(telegram, 123)
     const eventBus = new EventBus()
-    const dispatcher = new Dispatcher(telegram, observer, config, eventBus)
+    const dispatcher = new Dispatcher(new TelegramPlatform(telegram, String(config.telegram.chatId)), observer, config, eventBus)
 
     const d = dispatcher as unknown as {
       topicSessions: Map<number, TopicSession>

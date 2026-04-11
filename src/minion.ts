@@ -4,6 +4,7 @@ import http from "node:http"
 import fs from "node:fs"
 import type { MinionConfig } from "./config/config-types.js"
 import { TelegramClient } from "./telegram/telegram.js"
+import { TelegramPlatform } from "./telegram/telegram-platform.js"
 import { Observer } from "./telegram/observer.js"
 import { Dispatcher } from "./orchestration/dispatcher.js"
 import { createApiServer, StateBroadcaster, type DispatcherApi } from "./api-server.js"
@@ -52,6 +53,7 @@ function findUiDistPath(): string {
 
 export function createMinion(config: MinionConfig, options?: MinionOptions): MinionInstance {
   const telegram = new TelegramClient(config.telegram.botToken, config.telegram.chatId, config.telegramQueue.minSendIntervalMs)
+  const platform = new TelegramPlatform(telegram, config.telegram.chatId)
   const observer = new Observer(telegram, config.observer.activityThrottleMs, {
     textFlushDebounceMs: config.observer.textFlushDebounceMs,
     activityEditDebounceMs: config.observer.activityEditDebounceMs,
@@ -60,7 +62,7 @@ export function createMinion(config: MinionConfig, options?: MinionOptions): Min
   const eventBus = new EventBus()
   const tokenProvider = new GitHubTokenProvider(config.githubApp)
   tokenProvider.setTokenFilePath(path.join(config.workspace.root, ".github-token"))
-  const dispatcher = new Dispatcher(telegram, observer, config, eventBus, broadcaster, tokenProvider)
+  const dispatcher = new Dispatcher(platform, observer, config, eventBus, broadcaster, tokenProvider)
 
   let apiServer: http.Server | undefined
 

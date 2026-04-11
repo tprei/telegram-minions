@@ -9,6 +9,7 @@
  */
 
 import type { TelegramClient } from "../telegram/telegram.js"
+import type { ChatPlatform } from "../provider/chat-platform.js"
 import type { Observer } from "../telegram/observer.js"
 import type { TopicSession, TopicMessage, SessionDoneState } from "../domain/session-types.js"
 import type { TelegramPhotoSize } from "../domain/telegram-types.js"
@@ -23,6 +24,9 @@ import type { StateBroadcaster } from "../api-server.js"
 export interface DispatcherContext {
   // ── Configuration ──────────────────────────────────────────────────
   readonly config: MinionConfig
+  /** Platform-agnostic chat interface. Prefer this over telegram for new code. */
+  readonly platform: ChatPlatform
+  /** @deprecated Backward-compat shim — use platform instead. */
   readonly telegram: TelegramClient
   readonly observer: Observer
   readonly stats: StatsTracker

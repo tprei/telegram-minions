@@ -3,6 +3,7 @@ import fs from "node:fs/promises"
 import path from "node:path"
 import { Dispatcher } from "../src/orchestration/dispatcher.js"
 import type { TelegramClient } from "../src/telegram/telegram.js"
+import { TelegramPlatform } from "../src/telegram/telegram-platform.js"
 import { Observer } from "../src/telegram/observer.js"
 import type { MinionConfig } from "../src/config/config-types.js"
 import type { TopicSession } from "../src/domain/session-types.js"
@@ -80,7 +81,7 @@ describe("handleCloseCommand ordering", () => {
     const telegram = makeMockTelegram()
     const config = makeConfig()
     const observer = new Observer(telegram, 1)
-    const dispatcher = new Dispatcher(telegram, observer, config, new EventBus())
+    const dispatcher = new Dispatcher(new TelegramPlatform(telegram, String(config.telegram.chatId)), observer, config, new EventBus())
 
     const callOrder: string[] = []
     // Track call order
@@ -113,7 +114,7 @@ describe("handleCloseCommand ordering", () => {
     const telegram = makeMockTelegram()
     const config = makeConfig()
     const observer = new Observer(telegram, 1)
-    const dispatcher = new Dispatcher(telegram, observer, config, new EventBus())
+    const dispatcher = new Dispatcher(new TelegramPlatform(telegram, String(config.telegram.chatId)), observer, config, new EventBus())
     const callOrder: string[] = []
     ;(telegram.deleteForumTopic as ReturnType<typeof vi.fn>).mockImplementation(async () => {
       callOrder.push("deleteForumTopic")
@@ -162,7 +163,7 @@ describe("closeChildSessions warning for high child count", () => {
     const telegram = makeMockTelegram()
     const config = makeConfig()
     const observer = new Observer(telegram, 1)
-    const dispatcher = new Dispatcher(telegram, observer, config, new EventBus())
+    const dispatcher = new Dispatcher(new TelegramPlatform(telegram, String(config.telegram.chatId)), observer, config, new EventBus())
     const topicSessions = (dispatcher as unknown as { topicSessions: Map<number, TopicSession> }).topicSessions
     // Create parent session
     const parentSession: TopicSession = {
@@ -208,7 +209,7 @@ describe("closeChildSessions warning for high child count", () => {
     const telegram = makeMockTelegram()
     const config = makeConfig()
     const observer = new Observer(telegram, 1)
-    const dispatcher = new Dispatcher(telegram, observer, config, new EventBus())
+    const dispatcher = new Dispatcher(new TelegramPlatform(telegram, String(config.telegram.chatId)), observer, config, new EventBus())
     const topicSessions = (dispatcher as unknown as { topicSessions: Map<number, TopicSession> }).topicSessions
     // Create parent session
     const parentSession: TopicSession = {
@@ -249,7 +250,7 @@ describe("closeChildSessions orphan detection", () => {
     const telegram = makeMockTelegram()
     const config = makeConfig()
     const observer = new Observer(telegram, 1)
-    const dispatcher = new Dispatcher(telegram, observer, config, new EventBus())
+    const dispatcher = new Dispatcher(new TelegramPlatform(telegram, String(config.telegram.chatId)), observer, config, new EventBus())
     const topicSessions = (dispatcher as unknown as { topicSessions: Map<number, TopicSession> }).topicSessions
     // Create parent session
     const parentSession: TopicSession = {
@@ -340,7 +341,7 @@ describe("closeChildSessions orphan detection", () => {
     const telegram = makeMockTelegram()
     const config = makeConfig()
     const observer = new Observer(telegram, 1)
-    const dispatcher = new Dispatcher(telegram, observer, config, new EventBus())
+    const dispatcher = new Dispatcher(new TelegramPlatform(telegram, String(config.telegram.chatId)), observer, config, new EventBus())
     const topicSessions = (dispatcher as unknown as { topicSessions: Map<number, TopicSession> }).topicSessions
     // Create parent session
     const parentSession: TopicSession = {
