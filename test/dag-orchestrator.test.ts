@@ -928,6 +928,291 @@ describe("DagOrchestrator", () => {
   })
 })
 
+describe("DagOrchestrator — DAG review", () => {
+  let ctx: DispatcherContext
+  let orchestrator: DagOrchestrator
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    ctx = makeContext()
+    orchestrator = new DagOrchestrator(ctx)
+  })
+
+  describe("handleReviewCommand", () => {
+    it("rejects when no DAG is active", async () => {
+      const session = makeSession({ dagId: undefined })
+      await orchestrator.handleReviewCommand(session)
+
+      expect(ctx.telegram.sendMessage).toHaveBeenCalledWith(
+        expect.stringContaining("requires an active DAG"),
+        session.threadId,
+      )
+    })
+
+    it("rejects when DAG is not found", async () => {
+      const session = makeSession({ dagId: "dag-missing" })
+      await orchestrator.handleReviewCommand(session)
+
+      expect(ctx.telegram.sendMessage).toHaveBeenCalledWith(
+        expect.stringContaining("DAG not found"),
+        session.threadId,
+      )
+    })
+
+    it("reports when no PRs are available to review", async () => {
+      const session = makeSession({ dagId: "dag-test" })
+      const graph: DagGraph = {
+        id: "dag-test",
+        parentThreadId: session.threadId,
+        repo: "org/repo",
+        nodes: [
+          { id: "a", title: "Task A", description: "", dependsOn: [], status: "running" },
+          { id: "b", title: "Task B", description: "", dependsOn: ["a"], status: "pending" },
+        ],
+      } as DagGraph
+      ctx.dags.set("dag-test", graph)
+
+      await orchestrator.handleReviewCommand(session)
+
+      expect(ctx.telegram.sendMessage).toHaveBeenCalledWith(
+        expect.stringContaining("No PRs available to review"),
+        session.threadId,
+      )
+    })
+
+    it("includes running/pending counts in the no-PRs message", async () => {
+      const session = makeSession({ dagId: "dag-test" })
+      const graph: DagGraph = {
+        id: "dag-test",
+        parentThreadId: session.threadId,
+        repo: "org/repo",
+        nodes: [
+          { id: "a", title: "Task A", description: "", dependsOn: [], status: "running" },
+          { id: "b", title: "Task B", description: "", dependsOn: ["a"], status: "pending" },
+        ],
+      } as DagGraph
+      ctx.dags.set("dag-test", graph)
+
+      await orchestrator.handleReviewCommand(session)
+
+      const msg = vi.mocked(ctx.telegram.sendMessage).mock.calls[0][0]
+      expect(msg).toContain("1 node(s) still running")
+      expect(msg).toContain("1 node(s) pending")
+    })
+
+    it("spawns review children for done nodes with PRs", async () => {
+      const session = makeSession({ dagId: "dag-test", childThreadIds: [] })
+      const graph: DagGraph = {
+        id: "dag-test",
+        parentThreadId: session.threadId,
+        repo: "org/repo",
+        nodes: [
+          { id: "a", title: "Task A", description: "Build A", dependsOn: [], status: "done", prUrl: "https://github.com/org/repo/pull/1", branch: "minion/a-slug" },
+          { id: "b", title: "Task B", description: "Build B", dependsOn: ["a"], status: "done", prUrl: "https://github.com/org/repo/pull/2", branch: "minion/b-slug" },
+          { id: "c", title: "Task C", description: "Build C", dependsOn: [], status: "running" },
+        ],
+      } as DagGraph
+      ctx.dags.set("dag-test", graph)
+      ctx.topicSessions.set(session.threadId, session)
+
+      await orchestrator.handleReviewCommand(session)
+
+      // Should send the start message + 2 child starting messages
+      expect(ctx.telegram.sendMessage).toHaveBeenCalledWith(
+        expect.stringContaining("DAG review started"),
+        session.threadId,
+      )
+      expect(ctx.spawnTopicAgent).toHaveBeenCalledTimes(2)
+      expect(session.childThreadIds).toHaveLength(2)
+    })
+
+    it("skips nodes without PRs even if done", async () => {
+      const session = makeSession({ dagId: "dag-test", childThreadIds: [] })
+      const graph: DagGraph = {
+        id: "dag-test",
+        parentThreadId: session.threadId,
+        repo: "org/repo",
+        nodes: [
+          { id: "a", title: "Task A", description: "", dependsOn: [], status: "done" }, // no prUrl
+          { id: "b", title: "Task B", description: "", dependsOn: [], status: "done", prUrl: "https://github.com/org/repo/pull/1" },
+        ],
+      } as DagGraph
+      ctx.dags.set("dag-test", graph)
+      ctx.topicSessions.set(session.threadId, session)
+
+      await orchestrator.handleReviewCommand(session)
+
+      // Only one review child should be spawned (for node b)
+      expect(ctx.spawnTopicAgent).toHaveBeenCalledTimes(1)
+    })
+
+    it("rejects when review is already in progress", async () => {
+      const session = makeSession({ dagId: "dag-test", childThreadIds: [300] })
+      const graph: DagGraph = {
+        id: "dag-test",
+        parentThreadId: session.threadId,
+        repo: "org/repo",
+        nodes: [
+          { id: "a", title: "Task A", description: "", dependsOn: [], status: "done", prUrl: "https://github.com/org/repo/pull/1" },
+        ],
+      } as DagGraph
+      ctx.dags.set("dag-test", graph)
+
+      // Existing active review child
+      ctx.topicSessions.set(300, makeSession({
+        threadId: 300,
+        mode: "dag-review",
+        activeSessionId: "session-active",
+        dagId: "dag-test",
+        dagNodeId: "a",
+      }))
+
+      await orchestrator.handleReviewCommand(session)
+
+      expect(ctx.telegram.sendMessage).toHaveBeenCalledWith(
+        expect.stringContaining("already in progress"),
+        session.threadId,
+      )
+      expect(ctx.spawnTopicAgent).not.toHaveBeenCalled()
+    })
+  })
+
+  describe("onDagChildComplete — dag-review early return", () => {
+    it("routes dag-review children to onDagReviewChildComplete", async () => {
+      const session = makeSession({ dagId: "dag-test", childThreadIds: [300] })
+      const graph: DagGraph = {
+        id: "dag-test",
+        parentThreadId: session.threadId,
+        repo: "org/repo",
+        nodes: [
+          { id: "a", title: "Task A", description: "", dependsOn: [], status: "done", prUrl: "https://github.com/org/repo/pull/1" },
+        ],
+      } as DagGraph
+      ctx.dags.set("dag-test", graph)
+      ctx.topicSessions.set(session.threadId, session)
+
+      const reviewChild = makeSession({
+        threadId: 300,
+        mode: "dag-review",
+        slug: "review-child",
+        dagId: "dag-test",
+        dagNodeId: "a",
+        parentThreadId: session.threadId,
+        childThreadIds: [],
+      })
+      ctx.topicSessions.set(300, reviewChild)
+
+      await orchestrator.onDagChildComplete(reviewChild, "completed")
+
+      // Should NOT try to extract PR (that's what the task handler does)
+      expect(ctx.extractPRFromConversation).not.toHaveBeenCalled()
+      // Should report completion in parent
+      expect(ctx.telegram.sendMessage).toHaveBeenCalledWith(
+        expect.stringContaining("Review of"),
+        session.threadId,
+      )
+    })
+  })
+
+  describe("onDagReviewChildComplete", () => {
+    it("clears conversation and reports per-node status", async () => {
+      const session = makeSession({ dagId: "dag-test", childThreadIds: [300] })
+      const graph: DagGraph = {
+        id: "dag-test",
+        parentThreadId: session.threadId,
+        repo: "org/repo",
+        nodes: [
+          { id: "a", title: "Task A", description: "", dependsOn: [], status: "done", prUrl: "https://github.com/org/repo/pull/42" },
+        ],
+      } as DagGraph
+      ctx.dags.set("dag-test", graph)
+      ctx.topicSessions.set(session.threadId, session)
+
+      const reviewChild = makeSession({
+        threadId: 300,
+        mode: "dag-review",
+        slug: "review-slug",
+        dagId: "dag-test",
+        dagNodeId: "a",
+        parentThreadId: session.threadId,
+        conversation: [{ role: "user", text: "review this" }, { role: "assistant", text: "LGTM" }],
+      })
+      ctx.topicSessions.set(300, reviewChild)
+
+      await orchestrator.onDagReviewChildComplete(reviewChild)
+
+      expect(reviewChild.conversation).toEqual([])
+      expect(ctx.telegram.sendMessage).toHaveBeenCalledWith(
+        expect.stringContaining("Task A"),
+        session.threadId,
+      )
+    })
+
+    it("sends DAG review complete when all review children are done", async () => {
+      const session = makeSession({ dagId: "dag-test", childThreadIds: [300, 400] })
+      const graph: DagGraph = {
+        id: "dag-test",
+        parentThreadId: session.threadId,
+        repo: "org/repo",
+        nodes: [
+          { id: "a", title: "Task A", description: "", dependsOn: [], status: "done", prUrl: "https://github.com/org/repo/pull/1" },
+          { id: "b", title: "Task B", description: "", dependsOn: [], status: "done", prUrl: "https://github.com/org/repo/pull/2" },
+        ],
+      } as DagGraph
+      ctx.dags.set("dag-test", graph)
+      ctx.topicSessions.set(session.threadId, session)
+
+      // Both children are dag-review, both inactive (no activeSessionId)
+      ctx.topicSessions.set(300, makeSession({
+        threadId: 300, mode: "dag-review", dagId: "dag-test", dagNodeId: "a", parentThreadId: session.threadId,
+      }))
+      ctx.topicSessions.set(400, makeSession({
+        threadId: 400, mode: "dag-review", dagId: "dag-test", dagNodeId: "b", parentThreadId: session.threadId,
+      }))
+
+      // Complete the last review child (300)
+      const child = ctx.topicSessions.get(300)!
+      await orchestrator.onDagReviewChildComplete(child)
+
+      expect(ctx.telegram.sendMessage).toHaveBeenCalledWith(
+        expect.stringContaining("DAG review complete"),
+        session.threadId,
+      )
+    })
+
+    it("does not send complete when some review children are still active", async () => {
+      const session = makeSession({ dagId: "dag-test", childThreadIds: [300, 400] })
+      const graph: DagGraph = {
+        id: "dag-test",
+        parentThreadId: session.threadId,
+        repo: "org/repo",
+        nodes: [
+          { id: "a", title: "Task A", description: "", dependsOn: [], status: "done", prUrl: "https://github.com/org/repo/pull/1" },
+          { id: "b", title: "Task B", description: "", dependsOn: [], status: "done", prUrl: "https://github.com/org/repo/pull/2" },
+        ],
+      } as DagGraph
+      ctx.dags.set("dag-test", graph)
+      ctx.topicSessions.set(session.threadId, session)
+
+      // 300 is completing, 400 is still active
+      ctx.topicSessions.set(300, makeSession({
+        threadId: 300, mode: "dag-review", dagId: "dag-test", dagNodeId: "a", parentThreadId: session.threadId,
+      }))
+      ctx.topicSessions.set(400, makeSession({
+        threadId: 400, mode: "dag-review", dagId: "dag-test", dagNodeId: "b", parentThreadId: session.threadId,
+        activeSessionId: "still-running",
+      }))
+
+      const child = ctx.topicSessions.get(300)!
+      await orchestrator.onDagReviewChildComplete(child)
+
+      const calls = vi.mocked(ctx.telegram.sendMessage).mock.calls
+      const hasComplete = calls.some(([msg]) => typeof msg === "string" && msg.includes("DAG review complete"))
+      expect(hasComplete).toBe(false)
+    })
+  })
+})
+
 function setupCompleteDag(ctx: DispatcherContext) {
   const parent = makeSession({ threadId: 100 })
   const graph: DagGraph = {

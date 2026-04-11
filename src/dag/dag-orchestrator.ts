@@ -4,7 +4,7 @@ import crypto from "node:crypto"
 import type { DispatcherContext } from "../orchestration/dispatcher-context.js"
 import type { TopicSession } from "../domain/session-types.js"
 import { generateSlug } from "../slugs.js"
-import { DEFAULT_RECOVERY_PROMPT } from "../config/prompts.js"
+import { DEFAULT_RECOVERY_PROMPT, DEFAULT_DAG_REVIEW_PROMPT } from "../config/prompts.js"
 import { findPRByBranch } from "../ci/ci-babysit.js"
 import { captureException } from "../sentry.js"
 import {
@@ -17,6 +17,9 @@ import {
   formatDagCIWaiting,
   formatDagCIFailed,
   formatDagForceAdvance,
+  formatDagReviewStart,
+  formatDagReviewChildStarting,
+  formatDagReviewComplete,
 } from "../telegram/format.js"
 import { buildDagChildPrompt } from "./dag-extract.js"
 import {
@@ -39,6 +42,64 @@ import { loggers } from "../logger.js"
 
 const log = loggers.dispatcher
 const execFile = promisify(execFileCb)
+
+/**
+ * Build a task prompt for a DAG review child session.
+ * Includes the node title, PR number, and upstream context so the
+ * reviewer understands integration boundaries.
+ */
+export function buildDagReviewChildPrompt(
+  node: DagNode,
+  upstreamNodes: DagNode[],
+  prNumber?: number,
+): string {
+  const lines: string[] = [
+    `## Review: ${node.title}`,
+    "",
+  ]
+
+  if (prNumber) {
+    lines.push(`Pull request: #${prNumber}`)
+  }
+  if (node.prUrl) {
+    lines.push(`URL: ${node.prUrl}`)
+  }
+  lines.push("")
+
+  if (node.description) {
+    lines.push("### Task description")
+    lines.push("")
+    lines.push(node.description)
+    lines.push("")
+  }
+
+  if (upstreamNodes.length > 0) {
+    lines.push("### Upstream dependencies")
+    lines.push("")
+    lines.push("This node depends on the following completed PRs. Check for integration issues:")
+    lines.push("")
+    for (const upstream of upstreamNodes) {
+      const upstreamPrNum = upstream.prUrl?.match(/\/pull\/(\d+)/)?.[1]
+      lines.push(`- **${upstream.title}**${upstreamPrNum ? ` (#${upstreamPrNum})` : ""}${upstream.branch ? ` — branch: \`${upstream.branch}\`` : ""}`)
+    }
+    lines.push("")
+  }
+
+  lines.push("### Instructions")
+  lines.push("")
+  if (prNumber) {
+    lines.push(`1. Run \`gh pr diff ${prNumber}\` to get the full diff`)
+    lines.push("2. Read changed files for context beyond just the diff")
+    lines.push("3. Check for integration issues with upstream dependencies")
+    lines.push("4. Post your review to GitHub using `gh pr review`")
+  } else {
+    lines.push("1. Examine the workspace for changes")
+    lines.push("2. Check for integration issues with upstream dependencies")
+    lines.push("3. Report findings in your response")
+  }
+
+  return lines.join("\n")
+}
 
 /**
  * DagOrchestrator — extracted from Dispatcher.
@@ -269,6 +330,12 @@ export class DagOrchestrator {
     state: string,
   ): Promise<void> {
     if (!childSession.dagId || !childSession.dagNodeId) return
+
+    // Route dag-review children to their own completion handler
+    if (childSession.mode === "dag-review") {
+      await this.onDagReviewChildComplete(childSession)
+      return
+    }
 
     const graph = this.ctx.dags.get(childSession.dagId)
     if (!graph) return
@@ -702,5 +769,214 @@ export class DagOrchestrator {
     await this.updateDagPRDescriptions(graph, topicSession.cwd)
     await this.ctx.persistTopicSessions()
     await this.ctx.persistDags()
+  }
+
+  // ── DAG review ────────────────────────────────────────────────────
+
+  async handleReviewCommand(topicSession: TopicSession, directive?: string): Promise<void> {
+    if (!topicSession.dagId) {
+      await this.ctx.telegram.sendMessage(
+        "⚠️ /review in a DAG thread requires an active DAG.",
+        topicSession.threadId,
+      )
+      return
+    }
+
+    const graph = this.ctx.dags.get(topicSession.dagId)
+    if (!graph) {
+      await this.ctx.telegram.sendMessage(
+        "❌ DAG not found — it may have been lost.",
+        topicSession.threadId,
+      )
+      return
+    }
+
+    // Only review nodes that completed with a PR
+    const reviewableNodes = graph.nodes.filter(
+      (n) => n.status === "done" && n.prUrl,
+    )
+
+    if (reviewableNodes.length === 0) {
+      const running = graph.nodes.filter((n) => n.status === "running").length
+      const pending = graph.nodes.filter((n) => n.status === "pending" || n.status === "ready").length
+      const parts: string[] = ["No PRs available to review."]
+      if (running > 0) parts.push(`${running} node(s) still running.`)
+      if (pending > 0) parts.push(`${pending} node(s) pending.`)
+      await this.ctx.telegram.sendMessage(parts.join(" "), topicSession.threadId)
+      return
+    }
+
+    // Check if a review is already in progress
+    const existingReviewChildren = (topicSession.childThreadIds ?? []).filter((tid) => {
+      const child = this.ctx.topicSessions.get(tid)
+      return child?.mode === "dag-review" && child.activeSessionId
+    })
+    if (existingReviewChildren.length > 0) {
+      await this.ctx.telegram.sendMessage(
+        `⚠️ A DAG review is already in progress (${existingReviewChildren.length} active reviewer(s)). Wait for it to finish or <code>/close</code> first.`,
+        topicSession.threadId,
+      )
+      return
+    }
+
+    const task = directive ?? `Review all ${reviewableNodes.length} DAG PRs`
+    await this.ctx.telegram.sendMessage(
+      formatDagReviewStart(topicSession.repo, topicSession.slug, task),
+      topicSession.threadId,
+    )
+
+    if (!topicSession.childThreadIds) topicSession.childThreadIds = []
+
+    let spawned = 0
+    for (const node of reviewableNodes) {
+      const runningDagNodes = graph.nodes.filter(n => n.status === "running").length
+      const activeReviews = (topicSession.childThreadIds ?? []).filter((tid) => {
+        const child = this.ctx.topicSessions.get(tid)
+        return child?.mode === "dag-review" && child.activeSessionId
+      }).length
+      const dagSlots = this.ctx.config.workspace.maxDagConcurrency - runningDagNodes - activeReviews
+      const globalSlots = this.ctx.config.workspace.maxConcurrentSessions - this.ctx.sessions.size
+      const available = Math.min(dagSlots, globalSlots)
+      if (available <= 0) {
+        log.warn({ dagId: graph.id, nodeId: node.id }, "no session slots for DAG review child, skipping remaining")
+        await this.ctx.telegram.sendMessage(
+          `⏳ Session limit reached — reviewed ${spawned}/${reviewableNodes.length} PRs. Send <code>/review</code> again when slots free up.`,
+          topicSession.threadId,
+        )
+        break
+      }
+
+      const threadId = await this.spawnDagReviewChild(topicSession, graph, node)
+      if (threadId) {
+        topicSession.childThreadIds.push(threadId)
+        spawned++
+      }
+    }
+
+    if (spawned === 0) {
+      await this.ctx.telegram.sendMessage(
+        "❌ Failed to spawn any review sessions.",
+        topicSession.threadId,
+      )
+    }
+
+    await this.ctx.persistTopicSessions()
+  }
+
+  async spawnDagReviewChild(
+    parent: TopicSession,
+    graph: DagGraph,
+    node: DagNode,
+  ): Promise<number | null> {
+    const sessionId = crypto.randomUUID()
+    const slug = generateSlug(sessionId)
+    const repo = parent.repo
+    const prNumber = node.prUrl!.match(/\/pull\/(\d+)/)?.[1]
+    const topicName = `📋 ${repo} · ${slug}`
+
+    let topic: { message_thread_id: number }
+    try {
+      topic = await this.ctx.telegram.createForumTopic(topicName)
+    } catch (err) {
+      log.error({ err }, "failed to create DAG review child topic")
+      captureException(err, { operation: "createForumTopic", parentSlug: parent.slug, dagNode: node.id })
+      return null
+    }
+
+    const threadId = topic.message_thread_id
+
+    // Reuse the existing child's workspace if it still exists, otherwise prepare a fresh one
+    const existingChild = [...this.ctx.topicSessions.values()].find(
+      (s) => s.dagId === graph.id && s.dagNodeId === node.id && s.cwd,
+    )
+    let cwd: string | null = null
+    if (existingChild?.cwd) {
+      try {
+        await execFile("git", ["status"], { cwd: existingChild.cwd, encoding: "utf-8", timeout: 5_000 })
+        cwd = existingChild.cwd
+      } catch {
+        cwd = null
+      }
+    }
+    if (!cwd) {
+      cwd = await this.ctx.prepareWorkspace(slug, parent.repoUrl, node.branch)
+      if (!cwd) {
+        await this.ctx.telegram.sendMessage(`❌ Failed to prepare workspace.`, threadId)
+        await this.ctx.telegram.deleteForumTopic(threadId)
+        return null
+      }
+    }
+
+    const upstreamNodes = graph.nodes.filter(
+      (n) => node.dependsOn.includes(n.id) && n.status === "done" && n.prUrl,
+    )
+    const task = buildDagReviewChildPrompt(node, upstreamNodes, prNumber ? parseInt(prNumber, 10) : undefined)
+
+    const childSession: TopicSession = {
+      threadId,
+      repo,
+      repoUrl: parent.repoUrl,
+      cwd,
+      slug,
+      conversation: [{ role: "user", text: task }],
+      pendingFeedback: [],
+      mode: "dag-review",
+      lastActivityAt: Date.now(),
+      profileId: parent.profileId,
+      parentThreadId: parent.threadId,
+      splitLabel: `Review: ${node.title}`,
+      dagId: graph.id,
+      dagNodeId: node.id,
+    }
+
+    this.ctx.topicSessions.set(threadId, childSession)
+    this.ctx.broadcastSession(childSession, "session_created")
+
+    await this.ctx.telegram.sendMessage(
+      formatDagReviewChildStarting(slug, node.title, prNumber ? parseInt(prNumber, 10) : 0),
+      parent.threadId,
+    )
+
+    await this.ctx.spawnTopicAgent(childSession, task, { browserEnabled: false }, DEFAULT_DAG_REVIEW_PROMPT)
+    return threadId
+  }
+
+  async onDagReviewChildComplete(
+    childSession: TopicSession,
+  ): Promise<void> {
+    if (!childSession.dagId || !childSession.dagNodeId) return
+
+    const graph = this.ctx.dags.get(childSession.dagId)
+    if (!graph) return
+
+    const node = graph.nodes.find((n) => n.id === childSession.dagNodeId)
+    if (!node) return
+
+    const parent = this.ctx.topicSessions.get(graph.parentThreadId)
+    if (!parent) return
+
+    // Free conversation memory — review output is posted to GitHub, not needed here
+    childSession.conversation = []
+
+    await this.ctx.telegram.sendMessage(
+      `📋 Review of <b>${esc(node.title)}</b> (${node.prUrl ? `<a href="${node.prUrl}">#${node.prUrl.match(/\/pull\/(\d+)/)?.[1] ?? ""}</a>` : "no PR"}) complete  ·  🏷 <code>${esc(childSession.slug)}</code>`,
+      parent.threadId,
+    )
+
+    // Check if all review children are done
+    const reviewChildren = (parent.childThreadIds ?? [])
+      .map((tid) => this.ctx.topicSessions.get(tid))
+      .filter((s): s is TopicSession => s?.mode === "dag-review")
+
+    const allDone = reviewChildren.every((s) => !s.activeSessionId)
+
+    if (allDone) {
+      await this.ctx.telegram.sendMessage(
+        formatDagReviewComplete(parent.slug),
+        parent.threadId,
+      )
+    }
+
+    await this.ctx.persistTopicSessions()
   }
 }
