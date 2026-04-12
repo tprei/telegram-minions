@@ -146,6 +146,95 @@ describe("landing retarget fixes", () => {
     expect(fetchCmd).toContain("minion/b")
   })
 
+  it("treats pr merge failure as success when PR state is already MERGED", async () => {
+    execFilePromise.mockImplementation((cmd: string, args: string[]) => {
+      const key = `${cmd} ${args.join(" ")}`.trim()
+      callLog.push(key)
+
+      if (key.includes("repo view") && key.includes("defaultBranchRef")) return ok("master")
+      if (key.includes("pr merge")) {
+        const err = new Error("gh pr merge timed out") as Error & { code?: string }
+        err.code = "ETIMEDOUT"
+        return Promise.reject(err)
+      }
+      if (key.includes("pr view") && key.includes(".state")) return ok("MERGED")
+      if (key.includes("pr view") && key.includes("mergeable")) return ok("MERGEABLE")
+      if (key.includes("rev-parse HEAD")) return ok("abc123")
+      return ok()
+    })
+
+    const ctx = createMockContext()
+    ctx.dags.set("dag-1", makeTwoNodeDag())
+
+    const manager = new LandingManager(ctx)
+    const session = makeSession({ dagId: "dag-1", cwd: tmpDir })
+
+    await runLanding(manager, session)
+
+    const calls = (ctx.telegram.sendMessage as ReturnType<typeof vi.fn>).mock.calls.map((c) => String(c[0]))
+    expect(calls.some((m) => m.includes("Landing failed"))).toBe(false)
+    expect(calls.some((m) => m.includes("Landing complete"))).toBe(true)
+
+    const graph = ctx.dags.get("dag-1")!
+    expect(graph.nodes.every((n) => n.status === "landed")).toBe(true)
+  })
+
+  it("surfaces pr merge failure when PR state is not MERGED", async () => {
+    execFilePromise.mockImplementation((cmd: string, args: string[]) => {
+      const key = `${cmd} ${args.join(" ")}`.trim()
+      callLog.push(key)
+
+      if (key.includes("repo view") && key.includes("defaultBranchRef")) return ok("master")
+      if (key.includes("pr merge")) {
+        return Promise.reject(new Error("network unreachable"))
+      }
+      if (key.includes("pr view") && key.includes(".state")) return ok("OPEN")
+      if (key.includes("pr view") && key.includes("mergeable")) return ok("MERGEABLE")
+      if (key.includes("rev-parse HEAD")) return ok("abc123")
+      return ok()
+    })
+
+    const ctx = createMockContext()
+    ctx.dags.set("dag-1", makeTwoNodeDag())
+
+    const manager = new LandingManager(ctx)
+    const session = makeSession({ dagId: "dag-1", cwd: tmpDir })
+
+    await runLanding(manager, session)
+
+    const calls = (ctx.telegram.sendMessage as ReturnType<typeof vi.fn>).mock.calls.map((c) => String(c[0]))
+    expect(calls.some((m) => m.includes("Landing failed") && m.includes("network unreachable"))).toBe(true)
+  })
+
+  it("treats pr merge failure as success even when state re-check also fails", async () => {
+    let prViewCalls = 0
+    execFilePromise.mockImplementation((cmd: string, args: string[]) => {
+      const key = `${cmd} ${args.join(" ")}`.trim()
+      callLog.push(key)
+
+      if (key.includes("repo view") && key.includes("defaultBranchRef")) return ok("master")
+      if (key.includes("pr merge")) return Promise.reject(new Error("ETIMEDOUT"))
+      if (key.includes("pr view") && key.includes(".state")) {
+        prViewCalls++
+        if (prViewCalls === 1) return Promise.reject(new Error("OPEN check fail"))
+        return Promise.reject(new Error("state check fail"))
+      }
+      if (key.includes("pr view") && key.includes("mergeable")) return ok("MERGEABLE")
+      return ok()
+    })
+
+    const ctx = createMockContext()
+    ctx.dags.set("dag-1", makeTwoNodeDag())
+
+    const manager = new LandingManager(ctx)
+    const session = makeSession({ dagId: "dag-1", cwd: tmpDir })
+
+    await runLanding(manager, session)
+
+    const calls = (ctx.telegram.sendMessage as ReturnType<typeof vi.fn>).mock.calls.map((c) => String(c[0]))
+    expect(calls.some((m) => m.includes("Landing failed"))).toBe(true)
+  })
+
   it("reopens auto-closed PRs during restack", async () => {
     let prView2StateCount = 0
     execFilePromise.mockImplementation((cmd: string, args: string[]) => {
