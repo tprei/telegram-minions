@@ -136,6 +136,7 @@ export function configFromEnv(overrides?: Partial<MinionConfig>): MinionConfig {
     loops: {
       maxConcurrentLoops: optionalNumber("MAX_CONCURRENT_LOOPS", 3),
       reservedInteractiveSlots: optionalNumber("RESERVED_INTERACTIVE_SLOTS", 2),
+      defaultRepo: process.env["DEFAULT_LOOP_REPO"] || undefined,
     },
     sentry: {
       dsn: process.env["SENTRY_DSN"] ?? undefined,

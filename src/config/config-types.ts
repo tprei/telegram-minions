@@ -94,6 +94,7 @@ export interface QuotaConfig {
 export interface LoopConfig {
   maxConcurrentLoops: number
   reservedInteractiveSlots: number
+  defaultRepo?: string
 }
 
 export interface MinionConfig {
