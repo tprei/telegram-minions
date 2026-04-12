@@ -7,6 +7,7 @@ import { TelegramPlatform } from "../src/telegram/telegram-platform.js"
 import { Observer } from "../src/telegram/observer.js"
 import type { MinionConfig } from "../src/config/config-types.js"
 import type { TopicSession } from "../src/domain/session-types.js"
+import type { ChatUpdate } from "../src/provider/types.js"
 import { EventBus } from "../src/events/event-bus.js"
 
 const WORKSPACE_ROOT = "/tmp/test-workspace-wiring"
@@ -280,6 +281,99 @@ describe("Dispatcher module wiring", () => {
     expect(session.mode).toBe("task")
     expect(session.autoAdvance).toBeUndefined()
     expect(session.pendingFeedback).toEqual([])
+  })
+
+  it("routes /review to dagOrchestrator when topicSession has dagId", async () => {
+    const telegram = makeMockTelegram()
+    const config = makeConfig()
+    const platform = new TelegramPlatform(telegram, config.telegram.chatId)
+    const observer = new Observer(platform, 123)
+    const dispatcher = new Dispatcher(platform, observer, config, new EventBus())
+
+    const d = dispatcher as unknown as {
+      topicSessions: Map<number, TopicSession>
+      dagOrchestrator: { handleReviewCommand: ReturnType<typeof vi.fn> }
+      commandHandler: { handleReviewCommand: ReturnType<typeof vi.fn> }
+      handleChatUpdate(u: ChatUpdate): Promise<void>
+    }
+
+    const dagSession: TopicSession = {
+      threadId: 500,
+      repo: "test-repo",
+      cwd: "/tmp/test",
+      slug: "dag-slug",
+      conversation: [],
+      pendingFeedback: [],
+      mode: "task",
+      lastActivityAt: Date.now(),
+      dagId: "dag-123",
+    }
+    d.topicSessions.set(500, dagSession)
+
+    const mockDagReview = vi.fn().mockResolvedValue(undefined)
+    const mockCmdReview = vi.fn().mockResolvedValue(undefined)
+    d.dagOrchestrator.handleReviewCommand = mockDagReview
+    d.commandHandler.handleReviewCommand = mockCmdReview
+
+    await d.handleChatUpdate.call(dispatcher, {
+      type: "message",
+      message: {
+        messageId: 1,
+        threadId: 500,
+        from: { id: config.telegram.allowedUserIds[0] },
+        text: "/review",
+        timestamp: Date.now(),
+      },
+    })
+
+    expect(mockDagReview).toHaveBeenCalledWith(dagSession, undefined)
+    expect(mockCmdReview).not.toHaveBeenCalled()
+  })
+
+  it("routes /review to commandHandler when topicSession has no dagId", async () => {
+    const telegram = makeMockTelegram()
+    const config = makeConfig()
+    const platform = new TelegramPlatform(telegram, config.telegram.chatId)
+    const observer = new Observer(platform, 123)
+    const dispatcher = new Dispatcher(platform, observer, config, new EventBus())
+
+    const d = dispatcher as unknown as {
+      topicSessions: Map<number, TopicSession>
+      dagOrchestrator: { handleReviewCommand: ReturnType<typeof vi.fn> }
+      commandHandler: { handleReviewCommand: ReturnType<typeof vi.fn> }
+      handleChatUpdate(u: ChatUpdate): Promise<void>
+    }
+
+    const normalSession: TopicSession = {
+      threadId: 501,
+      repo: "test-repo",
+      cwd: "/tmp/test",
+      slug: "normal-slug",
+      conversation: [],
+      pendingFeedback: [],
+      mode: "task",
+      lastActivityAt: Date.now(),
+    }
+    d.topicSessions.set(501, normalSession)
+
+    const mockDagReview = vi.fn().mockResolvedValue(undefined)
+    const mockCmdReview = vi.fn().mockResolvedValue(undefined)
+    d.dagOrchestrator.handleReviewCommand = mockDagReview
+    d.commandHandler.handleReviewCommand = mockCmdReview
+
+    await d.handleChatUpdate.call(dispatcher, {
+      type: "message",
+      message: {
+        messageId: 2,
+        threadId: 501,
+        from: { id: config.telegram.allowedUserIds[0] },
+        text: "/review repo-alias",
+        timestamp: Date.now(),
+      },
+    })
+
+    expect(mockCmdReview).toHaveBeenCalledWith("repo-alias", 501)
+    expect(mockDagReview).not.toHaveBeenCalled()
   })
 
   describe("ship phase error resilience via EventBus", () => {
