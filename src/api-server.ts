@@ -4,6 +4,7 @@ import path from "node:path"
 import crypto from "node:crypto"
 import { EventEmitter } from "node:events"
 import type { TopicSession, SessionState, SessionDoneState } from "./domain/session-types.js"
+import type { ActiveSession } from "./session/session-manager.js"
 import type { DagGraph } from "./dag/dag.js"
 import { loggers } from "./logger.js"
 
@@ -132,7 +133,7 @@ function parseMinionCommand(raw: unknown): MinionCommand {
 }
 
 export interface DispatcherApi {
-  getSessions(): Map<number, { handle: unknown; meta: { sessionId: string; threadId: number }; task: string }>
+  getSessions(): Map<number, ActiveSession>
   getTopicSessions(): Map<number, TopicSession>
   getDags(): Map<string, DagGraph>
   getSessionState(threadId: number): SessionState | undefined
@@ -279,7 +280,7 @@ export function topicSessionToApi(
 export function dagToApi(
   graph: DagGraph,
   topicSessions: Map<number, TopicSession>,
-  sessions: Map<number, { meta: { sessionId: string; threadId: number } }>,
+  sessions: Map<number, ActiveSession>,
   chatId: string,
 ): ApiDagGraph {
   const nodes: Record<string, ApiDagNode> = {}
