@@ -6,6 +6,8 @@ import {
   formatDagReviewChildStarting,
   formatDagReviewComplete,
 } from "../src/telegram/format.js"
+import { buildDagReviewChildPrompt } from "../src/dag/dag-orchestrator.js"
+import type { DagNode } from "../src/dag/dag.js"
 
 describe("PendingDagItem type", () => {
   it("should define a valid pending DAG item", () => {
@@ -242,5 +244,72 @@ describe("formatDagReviewComplete", () => {
     expect(msg).toContain("DAG review complete")
     expect(msg).toContain("cool-slug")
     expect(msg).toContain("/reply")
+  })
+})
+
+describe("buildDagReviewChildPrompt", () => {
+  const baseNode: DagNode = {
+    id: "api",
+    title: "Backend API",
+    description: "Implement REST endpoints for user management",
+    dependsOn: [],
+    status: "done",
+    prUrl: "https://github.com/org/repo/pull/42",
+    branch: "minion/api-slug",
+  }
+
+  it("includes node title and PR number", () => {
+    const prompt = buildDagReviewChildPrompt(baseNode, [], 42)
+    expect(prompt).toContain("## Review: Backend API")
+    expect(prompt).toContain("Pull request: #42")
+    expect(prompt).toContain("https://github.com/org/repo/pull/42")
+  })
+
+  it("includes task description", () => {
+    const prompt = buildDagReviewChildPrompt(baseNode, [], 42)
+    expect(prompt).toContain("### Task description")
+    expect(prompt).toContain("Implement REST endpoints for user management")
+  })
+
+  it("includes upstream context when present", () => {
+    const upstream: DagNode = {
+      id: "db",
+      title: "Database Schema",
+      description: "Create migrations",
+      dependsOn: [],
+      status: "done",
+      prUrl: "https://github.com/org/repo/pull/40",
+      branch: "minion/db-slug",
+    }
+    const node = { ...baseNode, dependsOn: ["db"] }
+    const prompt = buildDagReviewChildPrompt(node, [upstream], 42)
+    expect(prompt).toContain("### Upstream dependencies")
+    expect(prompt).toContain("Database Schema")
+    expect(prompt).toContain("#40")
+    expect(prompt).toContain("minion/db-slug")
+  })
+
+  it("omits upstream section when no dependencies", () => {
+    const prompt = buildDagReviewChildPrompt(baseNode, [], 42)
+    expect(prompt).not.toContain("### Upstream dependencies")
+  })
+
+  it("includes gh pr diff instructions with PR number", () => {
+    const prompt = buildDagReviewChildPrompt(baseNode, [], 42)
+    expect(prompt).toContain("gh pr diff 42")
+    expect(prompt).toContain("gh pr review")
+  })
+
+  it("works without a PR number", () => {
+    const nodeNoPr = { ...baseNode, prUrl: undefined }
+    const prompt = buildDagReviewChildPrompt(nodeNoPr, [])
+    expect(prompt).not.toContain("gh pr diff")
+    expect(prompt).toContain("Examine the workspace")
+  })
+
+  it("omits description section when node has no description", () => {
+    const nodeNoDesc = { ...baseNode, description: "" }
+    const prompt = buildDagReviewChildPrompt(nodeNoDesc, [], 42)
+    expect(prompt).not.toContain("### Task description")
   })
 })
