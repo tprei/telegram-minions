@@ -196,7 +196,19 @@ export class LandingManager {
       }
 
       try {
-        await gh(["pr", "merge", prNumber, ...repoFlag, "--squash", "--delete-branch"])
+        try {
+          await gh(["pr", "merge", prNumber, ...repoFlag, "--squash", "--delete-branch"])
+        } catch (mergeErr) {
+          let actualState: string | undefined
+          try {
+            actualState = await gh(["pr", "view", prNumber, ...repoFlag, "--json", "state", "--jq", ".state"])
+          } catch { /* state re-check best-effort */ }
+          if (actualState !== "MERGED") throw mergeErr
+          log.warn(
+            { nodeId: node.id, prNumber, err: mergeErr instanceof Error ? mergeErr.message : String(mergeErr) },
+            "gh pr merge errored but PR state is MERGED — treating as success",
+          )
+        }
         node.status = "landed"
         succeeded++
 
