@@ -679,8 +679,9 @@ export class Dispatcher {
   private async startLoopSession(loopId: string, def: LoopDefinition, state: LoopState): Promise<number | null> {
     const sessionId = crypto.randomUUID()
     const slug = generateSlug(sessionId)
-    const repo = def.repo ? extractRepoName(def.repo) : "local"
-    const repoUrl = def.repo || undefined
+    const effectiveRepo = def.repo || this.config.loops?.defaultRepo || ""
+    const repo = effectiveRepo ? extractRepoName(effectiveRepo) : "local"
+    const repoUrl = effectiveRepo || undefined
     const topicHandle = `🔄 ${slug}/${def.name}`
 
     let threadId: number
