@@ -132,6 +132,7 @@ export interface SystemPrompts {
   plan: string
   think: string
   review: string
+  dag_review: string
   ship_plan: string
   ship_verify: string
 }

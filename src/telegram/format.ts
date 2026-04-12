@@ -415,6 +415,33 @@ export function formatReviewComplete(slug: string): string {
   return `👀 <b>Review complete</b>  ·  🏷 <code>${esc(slug)}</code>\n\nUse <code>/reply</code> (or <code>/r</code>) to ask follow-up questions.`
 }
 
+export function formatDagReviewStart(
+  repo: string,
+  slug: string,
+  task: string,
+): string {
+  const MAX_TASK = 200
+  return [
+    `📋 <b>DAG review started</b>  ·  📦 <b>${esc(repo)}</b>  ·  🏷 <code>${esc(slug)}</code>`,
+    ``,
+    `<blockquote>${esc(truncate(task, MAX_TASK))}</blockquote>`,
+    ``,
+    `Use <code>/reply</code> (or <code>/r</code>) to ask the reviewer to look deeper.`,
+  ].join("\n")
+}
+
+export function formatDagReviewChildStarting(
+  slug: string,
+  nodeTitle: string,
+  prNumber: number,
+): string {
+  return `📋 <b>Reviewing</b> <code>${esc(nodeTitle)}</code> (#${prNumber})  ·  🏷 <code>${esc(slug)}</code>`
+}
+
+export function formatDagReviewComplete(slug: string): string {
+  return `📋 <b>DAG review complete</b>  ·  🏷 <code>${esc(slug)}</code>\n\nUse <code>/reply</code> (or <code>/r</code>) to ask follow-up questions.`
+}
+
 export function formatFollowUpIteration(slug: string, iteration: number): string {
   return `🔄 <b>Follow-up</b>  ·  🏷 <code>${esc(slug)}</code>  ·  iteration ${iteration}`
 }
@@ -455,6 +482,7 @@ function modeLabel(mode: string): string {
     case "think": return "🧠 think"
     case "plan": return "📋 plan"
     case "review": return "👀 review"
+    case "dag-review": return "📋 dag-review"
     case "ci-fix": return "🔧 ci-fix"
     case "ship-think": return "🚢 think"
     case "ship-plan": return "🚢 plan"
@@ -615,6 +643,7 @@ export function formatHelp(): string {
     `<code>/judge [directive]</code> — run a judge arena to debate design options (plan/think mode)`,
     `<code>/done</code> — merge the PR, close the thread, and wipe workspace`,
     `<code>/land</code> — merge completed stack/DAG PRs to main in order`,
+    `<code>/review</code> — review all completed PRs in a DAG thread`,
     `<code>/doctor</code> — diagnose coordination failures and propose a fix`,
     `<code>/retry [node-id]</code> — retry failed DAG nodes`,
     `<code>/stop</code> — stop the running agent but keep the thread and data`,
