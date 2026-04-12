@@ -288,7 +288,7 @@ describe("ModeCompletionHandler", () => {
 
   it("handles dag-review mode completion", async () => {
     const deps = makeModeDeps()
-    const handler = new ModeCompletionHandler(deps.telegram, deps.observer, deps.pinnedMessages)
+    const handler = new ModeCompletionHandler(deps.platform, deps.observer, deps.pinnedMessages)
     const ts = makeTopicSession({ mode: "dag-review" })
     const ctx = makeCtx({ topicSession: ts })
 
@@ -296,7 +296,7 @@ describe("ModeCompletionHandler", () => {
 
     expect(ctx.handled).toBe(true)
     expect(deps.pinnedMessages.updateTopicTitle).toHaveBeenCalledWith(ts, "💬")
-    expect(deps.telegram.sendMessage).toHaveBeenCalledWith("dag-review done: test-slug", ts.threadId)
+    expect(deps.platform.chat.sendMessage).toHaveBeenCalledWith("dag-review done: test-slug", String(ts.threadId))
   })
 
   it("handles plan mode completion", async () => {
