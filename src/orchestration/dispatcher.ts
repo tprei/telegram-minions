@@ -885,7 +885,9 @@ export class Dispatcher {
       case "task": return this.commandHandler.handleTaskCommand(routed.args, routed.threadId, routed.photos)
       case "plan": return this.handlePlanCommand(routed.args, routed.threadId, routed.photos)
       case "think": return this.handleThinkCommand(routed.args, routed.threadId, routed.photos)
-      case "review": return this.commandHandler.handleReviewCommand(routed.args, routed.threadId)
+      case "review": return topicSession?.dagId
+          ? this.dagOrchestrator.handleReviewCommand(topicSession, routed.args || undefined)
+          : this.commandHandler.handleReviewCommand(routed.args, routed.threadId)
       case "ship": return this.handleShipCommand(routed.args, routed.threadId)
       case "close": return this.handleCloseCommandInternal(topicSession!)
       case "stop": return this.handleStopCommandInternal(topicSession!)
