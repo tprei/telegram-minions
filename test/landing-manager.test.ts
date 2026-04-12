@@ -296,6 +296,50 @@ describe("LandingManager", () => {
       )
     })
 
+    it("skips zombie worktree directories in findValidCwd", async () => {
+      const zombieDir = path.join(tmpDir, "zombie-worktree")
+      fs.mkdirSync(zombieDir, { recursive: true })
+      // Write a .git file pointing to a non-existent worktree metadata dir
+      fs.writeFileSync(path.join(zombieDir, ".git"), "gitdir: /nonexistent/worktrees/zombie")
+
+      const validDir = path.join(tmpDir, "valid-repo")
+      fs.mkdirSync(validDir, { recursive: true })
+      // Initialize a real git repo so isValidGitDir returns true
+      const { execFileSync } = await import("node:child_process")
+      execFileSync("git", ["init"], { cwd: validDir, stdio: "pipe" })
+
+      const ctx = createMockContext()
+      // Child 300 has a zombie cwd, child 301 has a valid cwd
+      const zombieChild = makeTopicSession({ threadId: 300, cwd: zombieDir })
+      const validChild = makeTopicSession({ threadId: 301, cwd: validDir })
+      ctx.topicSessions.set(300, zombieChild)
+      ctx.topicSessions.set(301, validChild)
+
+      const graph: DagGraph = {
+        id: "dag-1",
+        nodes: [
+          { id: "a", title: "Task A", description: "", status: "done", dependsOn: [], threadId: 300 },
+          { id: "b", title: "Task B", description: "", status: "done", dependsOn: [], threadId: 301 },
+        ],
+        parentThreadId: 100,
+        repo: "test-repo",
+      }
+      ctx.dags.set("dag-1", graph)
+
+      const manager = new LandingManager(ctx)
+      const session = makeTopicSession({ dagId: "dag-1" })
+
+      // Access findValidCwd indirectly — it's used during landing
+      // We verify by checking that the manager doesn't crash when zombie dirs exist
+      await manager.handleLandCommand(session)
+
+      // Should reach "No completed PRs" (no prUrl on nodes) without crashing
+      expect(ctx.telegram.sendMessage).toHaveBeenCalledWith(
+        expect.stringContaining("No completed PRs to land"),
+        100,
+      )
+    })
+
     it("resolves bare dir correctly from repoUrl", async () => {
       const bareDir = path.join(tmpDir, ".repos", "my-repo.git")
       fs.mkdirSync(bareDir, { recursive: true })

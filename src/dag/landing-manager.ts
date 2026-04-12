@@ -1,4 +1,5 @@
 import { execFile as execFileCb } from "node:child_process"
+import fs from "node:fs"
 import path from "node:path"
 import { promisify } from "node:util"
 import { existsSync } from "node:fs"
@@ -112,6 +113,7 @@ export class LandingManager {
 
     await this.pruneWorktrees(topicSession)
     await this.removeChildWorktrees(topicSession, graph)
+    await this.pruneWorktrees(topicSession)
 
     await this.ctx.telegram.sendMessage(
       formatLandStart(topicSession.slug, prNodes.length),
@@ -475,6 +477,12 @@ export class LandingManager {
           log.info({ nodeId: node.id, worktreePath }, "removed worktree before landing")
         } catch (err) {
           log.warn({ nodeId: node.id, worktreePath, err }, "failed to remove worktree before landing")
+          try {
+            fs.rmSync(worktreePath, { recursive: true, force: true })
+            log.info({ nodeId: node.id, worktreePath }, "force-removed worktree directory after git remove failed")
+          } catch {
+            // directory may be locked or already gone
+          }
         }
       }
     }
@@ -509,10 +517,25 @@ export class LandingManager {
     candidates.push(topicSession.cwd)
 
     for (const c of candidates) {
-      if (c && existsSync(c)) return c
+      if (c && existsSync(c) && this.isValidGitDir(c)) return c
     }
 
     return undefined
+  }
+
+  private isValidGitDir(dir: string): boolean {
+    const gitPath = path.join(dir, ".git")
+    try {
+      const stat = fs.statSync(gitPath)
+      if (stat.isDirectory()) return true
+      // Worktree: .git is a file containing "gitdir: /path/to/metadata"
+      const content = fs.readFileSync(gitPath, "utf8").trim()
+      const match = content.match(/^gitdir:\s*(.+)$/)
+      if (!match) return false
+      return existsSync(match[1])
+    } catch {
+      return false
+    }
   }
 
   private async detectBaseBranch(repo: string | undefined, topicSession: TopicSession, graph?: DagGraph): Promise<string> {

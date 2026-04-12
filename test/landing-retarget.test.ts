@@ -71,6 +71,7 @@ describe("landing retarget fixes", () => {
   beforeEach(() => {
     vi.useFakeTimers()
     tmpDir = fs.mkdtempSync(path.join("/tmp", "landing-retarget-"))
+    fs.mkdirSync(path.join(tmpDir, ".git"))
     execFilePromise.mockReset()
     callLog = []
   })
