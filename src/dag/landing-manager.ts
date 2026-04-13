@@ -30,6 +30,12 @@ const EXEC_TIMEOUT = 120_000
 const MERGEABILITY_POLL_DELAY = 5_000
 const MERGEABILITY_POLL_MAX = 6
 
+const STALE_LEASE_PATTERNS = [
+  /stale info/i,
+  /fetch first/i,
+  /rejected.*non-fast-forward/i,
+]
+
 async function gh(args: string[], opts?: { cwd?: string; timeout?: number }): Promise<string> {
   const { stdout } = await execFile("gh", args, {
     cwd: opts?.cwd,
@@ -48,6 +54,47 @@ async function git(args: string[], opts: { cwd: string; timeout?: number; env?: 
     env: { ...process.env, ...opts.env },
   })
   return stdout.trim()
+}
+
+export function isStaleLeaseError(err: unknown): boolean {
+  const stderr = (err as { stderr?: string } | null)?.stderr ?? ""
+  const message = err instanceof Error ? err.message : String(err ?? "")
+  const haystack = `${stderr}\n${message}`
+  return STALE_LEASE_PATTERNS.some((rx) => rx.test(haystack))
+}
+
+export async function pushWithLeaseRetry(
+  cwd: string,
+  branch: string,
+  runGit: (args: string[], opts: { cwd: string; timeout?: number; env?: Record<string, string> }) => Promise<string> = git,
+): Promise<void> {
+  try {
+    await runGit(["push", "--force-with-lease", "origin", branch], { cwd })
+    return
+  } catch (err) {
+    if (!isStaleLeaseError(err)) throw err
+    log.warn({ branch }, "force-with-lease rejected as stale — refreshing remote and retrying once")
+  }
+
+  await runGit(["fetch", "origin", branch], { cwd })
+
+  const localHead = await runGit(["rev-parse", "HEAD"], { cwd, timeout: 10_000 })
+  const remoteHead = await runGit(["rev-parse", `refs/remotes/origin/${branch}`], { cwd, timeout: 10_000 })
+
+  if (localHead === remoteHead) {
+    log.info({ branch }, "local HEAD already matches refreshed remote — skipping retry push")
+    return
+  }
+
+  try {
+    await runGit(["merge-base", "--is-ancestor", remoteHead, "HEAD"], { cwd, timeout: 10_000 })
+  } catch {
+    throw new Error(
+      `refusing to retry push for ${branch}: local HEAD ${localHead.slice(0, 8)} is not a descendant of remote ${remoteHead.slice(0, 8)}`,
+    )
+  }
+
+  await runGit(["push", "--force-with-lease", "origin", branch], { cwd })
 }
 
 function repoFromPrUrl(prUrl: string): string | undefined {
@@ -248,7 +295,7 @@ export class LandingManager {
               await git(["checkout", downstream.branch], { cwd: restackCwd })
             }
             await git(["rebase", "--onto", baseBranch, downstream.mergeBase!, downstream.branch], { cwd: restackCwd })
-            await git(["push", "--force-with-lease", "origin", downstream.branch], { cwd: restackCwd })
+            await pushWithLeaseRetry(restackCwd, downstream.branch)
 
             downstream.mergeBase = await git(["rev-parse", "HEAD"], { cwd: restackCwd, timeout: 10_000 })
 
@@ -283,7 +330,7 @@ export class LandingManager {
 
                 if (conflictResolved) {
                   await git(["rebase", "--continue"], { cwd: restackCwd, env: { GIT_EDITOR: "true" } })
-                  await git(["push", "--force-with-lease", "origin", downstream.branch], { cwd: restackCwd })
+                  await pushWithLeaseRetry(restackCwd, downstream.branch)
                   downstream.mergeBase = await git(["rev-parse", "HEAD"], { cwd: restackCwd, timeout: 10_000 })
 
                   const dsRepo = repoFromPrUrl(downstream.prUrl!)
@@ -367,15 +414,19 @@ export class LandingManager {
 
     let mergeable: string
     try {
-      mergeable = await gh(["pr", "view", prNumber, ...repoFlag, "--json", "mergeable", "--jq", ".mergeable"])
+      mergeable = await this.resolveMergeability(prNumber, repoFlag, signal)
     } catch {
       return
     }
 
     if (mergeable === "MERGEABLE") return
+    if (mergeable !== "CONFLICTING") {
+      log.info({ nodeId: node.id, mergeable }, "non-conflicting mergeability — letting gh pr merge proceed without local rebase")
+      return
+    }
 
     if (!node.branch) {
-      log.warn({ nodeId: node.id, mergeable }, "PR not mergeable and no branch info for rebase")
+      log.warn({ nodeId: node.id, mergeable }, "PR conflicting and no branch info for rebase")
       return
     }
 
@@ -383,7 +434,7 @@ export class LandingManager {
     const useOwnWorktree = !!(nodeCwd && existsSync(nodeCwd))
     const cwd = useOwnWorktree ? nodeCwd : this.findValidCwd(topicSession, graph)
     if (!cwd) {
-      log.warn({ nodeId: node.id }, "PR not mergeable but no valid cwd for rebase")
+      log.warn({ nodeId: node.id }, "PR conflicting but no valid cwd for rebase")
       return
     }
 
@@ -402,7 +453,7 @@ export class LandingManager {
       } else {
         await git(["rebase", baseBranch], { cwd })
       }
-      await git(["push", "--force-with-lease", "origin", node.branch], { cwd })
+      await pushWithLeaseRetry(cwd, node.branch)
 
       await this.ctx.telegram.sendMessage(
         `✅ Rebased <b>${esc(node.title)}</b>`,
@@ -410,7 +461,7 @@ export class LandingManager {
       )
 
       await this.waitForMergeability(prNumber, repoFlag)
-    } catch {
+    } catch (rebaseErr) {
       try {
         const unmerged = await git(["diff", "--name-only", "--diff-filter=U"], { cwd })
         if (unmerged.length > 0) {
@@ -426,7 +477,7 @@ export class LandingManager {
 
           if (allResolved) {
             await git(["rebase", "--continue"], { cwd, env: { GIT_EDITOR: "true" } })
-            await git(["push", "--force-with-lease", "origin", node.branch], { cwd })
+            await pushWithLeaseRetry(cwd, node.branch)
 
             await this.ctx.telegram.sendMessage(
               formatLandConflictResolution(node.title, node.branch, true),
@@ -440,6 +491,10 @@ export class LandingManager {
       } catch { /* fall through */ }
 
       try { await git(["rebase", "--abort"], { cwd }) } catch { /* ignore */ }
+      log.warn(
+        { nodeId: node.id, branch: node.branch, err: rebaseErr instanceof Error ? rebaseErr.message : String(rebaseErr) },
+        "local rebase failed for CONFLICTING PR — letting gh pr merge decide",
+      )
       await this.ctx.telegram.sendMessage(
         `⚠️ Could not resolve conflicts for <b>${esc(node.title)}</b>`,
         topicSession.threadId,
@@ -447,19 +502,39 @@ export class LandingManager {
     }
   }
 
-  private async waitForMergeability(prNumber: string, repoFlag: string[], signal?: AbortSignal): Promise<void> {
+  private async resolveMergeability(
+    prNumber: string,
+    repoFlag: string[],
+    signal: AbortSignal,
+  ): Promise<string> {
+    const state = await gh(["pr", "view", prNumber, ...repoFlag, "--json", "mergeable", "--jq", ".mergeable"])
+    if (state !== "UNKNOWN") return state
+
+    log.info({ prNumber }, "mergeability UNKNOWN — polling before deciding to rebase")
+    const polled = await this.waitForMergeability(prNumber, repoFlag, signal)
+    return polled ?? "UNKNOWN"
+  }
+
+  private async waitForMergeability(
+    prNumber: string,
+    repoFlag: string[],
+    signal?: AbortSignal,
+  ): Promise<string | undefined> {
+    let last: string | undefined
     for (let i = 0; i < MERGEABILITY_POLL_MAX; i++) {
-      if (signal?.aborted) return
+      if (signal?.aborted) return last
       await new Promise<void>((r) => {
         const timer = setTimeout(r, MERGEABILITY_POLL_DELAY)
         signal?.addEventListener("abort", () => { clearTimeout(timer); r() }, { once: true })
       })
-      if (signal?.aborted) return
+      if (signal?.aborted) return last
       try {
         const state = await gh(["pr", "view", prNumber, ...repoFlag, "--json", "mergeable", "--jq", ".mergeable"])
-        if (state === "MERGEABLE") return
+        last = state
+        if (state === "MERGEABLE" || state === "CONFLICTING") return state
       } catch { /* continue polling */ }
     }
+    return last
   }
 
   private async pruneWorktrees(topicSession: TopicSession): Promise<void> {

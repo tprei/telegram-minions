@@ -8,7 +8,7 @@ const log = loggers.conflictResolver
 const execFile = promisify(execFileCb)
 
 const CONFLICT_TIMEOUT_MS = 120_000
-const MAX_FILE_PREVIEW_BYTES = 8_000
+const MAX_FILE_PREVIEW_BYTES = 200_000
 
 interface UnmergedStages {
   base?: string
@@ -85,7 +85,11 @@ function readFilePreview(cwd: string, file: string): string | null {
   try {
     const content = readFileSync(path.join(cwd, file), "utf-8")
     if (content.length > MAX_FILE_PREVIEW_BYTES) {
-      return content.slice(0, MAX_FILE_PREVIEW_BYTES) + "\n... (truncated)"
+      log.warn(
+        { file, size: content.length, cap: MAX_FILE_PREVIEW_BYTES },
+        "conflicted file exceeds size cap — omitting preview; resolver will Read it directly",
+      )
+      return null
     }
     return content
   } catch {
