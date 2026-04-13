@@ -32,6 +32,10 @@ const FLUSH_CHECK_INTERVAL_MS = 200
 // Maximum number of recent tool lines to keep in the activity log.
 const MAX_ACTIVITY_LINES = 6
 
+// Maximum text buffer size in bytes before forcing an immediate flush.
+// Prevents burst memory spikes when Goose streams text continuously without pausing.
+const MAX_TEXT_BUFFER_SIZE = 64 * 1024 // 64 KB
+
 const SCREENSHOTS_DIR = ".screenshots"
 const MIN_TEXT_LENGTH = 20
 const PRE_TOOL_NARRATION_LIMIT = 60
@@ -233,6 +237,15 @@ export class Observer {
 
     state.textBuffer += chunk
     state.lastTextAt = Date.now()
+
+    // Force immediate flush if buffer exceeds size cap to prevent memory spikes
+    if (state.textBuffer.length >= MAX_TEXT_BUFFER_SIZE) {
+      this.flushTextBuffer(meta).catch((err) => {
+        log.error({ err, sessionId: meta.sessionId }, "flush error")
+        captureException(err, { operation: "observer.flush", sessionId: meta.sessionId })
+      })
+      return
+    }
 
     if (state.flushInterval === null) {
       state.flushInterval = setInterval(() => {

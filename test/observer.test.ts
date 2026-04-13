@@ -226,6 +226,84 @@ describe("Observer", () => {
       clearTimeoutSpy.mockRestore()
     })
 
+    it("forces immediate flush when text buffer exceeds 64KB cap", async () => {
+      const platform = makeMockPlatform()
+      const observer = new Observer(platform, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
+      const meta = makeMeta()
+
+      await observer.onSessionStart(meta, "task")
+      ;(platform.chat.sendMessage as ReturnType<typeof vi.fn>).mockClear()
+
+      // Send a single chunk that exceeds the 64KB cap
+      const largeText = "X".repeat(65 * 1024)
+      await observer.onEvent(meta, {
+        type: "message",
+        message: {
+          role: "assistant",
+          created: 0,
+          content: [{ type: "text", text: largeText }],
+        },
+      })
+
+      // Should flush immediately without waiting for debounce timer
+      // Need to let the microtask (catch handler) resolve
+      await vi.advanceTimersByTimeAsync(0)
+
+      expect(platform.chat.sendMessage).toHaveBeenCalled()
+      const msg = (platform.chat.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0][0]
+      expect(msg).toContain("Reply")
+    })
+
+    it("flushes incrementally as buffer repeatedly exceeds cap", async () => {
+      const platform = makeMockPlatform()
+      const observer = new Observer(platform, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
+      const meta = makeMeta()
+
+      await observer.onSessionStart(meta, "task")
+      ;(platform.chat.sendMessage as ReturnType<typeof vi.fn>).mockClear()
+
+      // Send enough text to exceed cap twice
+      const chunkSize = 33 * 1024 // ~33KB per chunk, 2 chunks = 66KB > 64KB cap
+      for (let i = 0; i < 4; i++) {
+        await observer.onEvent(meta, {
+          type: "message",
+          message: {
+            role: "assistant",
+            created: 0,
+            content: [{ type: "text", text: "Y".repeat(chunkSize) }],
+          },
+        })
+        await vi.advanceTimersByTimeAsync(0)
+      }
+
+      // Should have flushed at least twice (once per 64KB boundary)
+      expect((platform.chat.sendMessage as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThanOrEqual(2)
+    })
+
+    it("does not start flush interval when buffer exceeds cap immediately", async () => {
+      const platform = makeMockPlatform()
+      const observer = new Observer(platform, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
+      const meta = makeMeta()
+
+      await observer.onSessionStart(meta, "task")
+      ;(platform.chat.sendMessage as ReturnType<typeof vi.fn>).mockClear()
+
+      const setIntervalSpy = vi.spyOn(global, "setInterval")
+
+      // Send chunk that exceeds cap — should flush immediately and skip interval setup
+      await observer.onEvent(meta, {
+        type: "message",
+        message: {
+          role: "assistant",
+          created: 0,
+          content: [{ type: "text", text: "Z".repeat(65 * 1024) }],
+        },
+      })
+
+      expect(setIntervalSpy).not.toHaveBeenCalled()
+      setIntervalSpy.mockRestore()
+    })
+
     it("resets debounce when new text arrives during wait period", async () => {
       const platform = makeMockPlatform()
       const observer = new Observer(platform, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
