@@ -302,7 +302,9 @@ describe("buildMergeConflictPrompt", () => {
       "master",
     )
     expect(prompt).toContain("git fetch origin master")
-    expect(prompt).toContain("origin/master")
+    expect(prompt).toContain("git rebase master")
+    expect(prompt).toContain("git merge master")
+    expect(prompt).not.toContain("origin/master")
     expect(prompt).not.toContain("origin/main")
   })
 })

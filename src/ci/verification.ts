@@ -210,7 +210,13 @@ export function rebaseOntoMain(branch: string, cwd: string): VerificationResult 
     return { passed: false, details: `git checkout failed: ${checkout.output}` }
   }
 
-  const rebase = execGit(`git rebase origin/${defaultBranch}`, cwd)
+  const fetchBase = execGit(`git fetch origin ${JSON.stringify(defaultBranch)}`, cwd)
+  if (!fetchBase.ok) {
+    log.error({ branch, defaultBranch, output: fetchBase.output }, "git fetch base branch failed")
+    return { passed: false, details: `Fetch failed: ${fetchBase.output}` }
+  }
+
+  const rebase = execGit(`git rebase ${JSON.stringify(defaultBranch)}`, cwd)
   if (!rebase.ok) {
     execGit("git rebase --abort", cwd)
     log.error({ branch, output: rebase.output }, "git rebase failed")
@@ -224,7 +230,7 @@ export function rebaseOntoMain(branch: string, cwd: string): VerificationResult 
   }
 
   log.info({ branch, defaultBranch }, "rebase and push succeeded")
-  return { passed: true, details: `Rebased ${branch} onto origin/${defaultBranch} and pushed` }
+  return { passed: true, details: `Rebased ${branch} onto ${defaultBranch} and pushed` }
 }
 
 function detectDefaultBranch(cwd: string): string | null {
@@ -232,7 +238,7 @@ function detectDefaultBranch(cwd: string): string | null {
   if (gh.ok && gh.output) return gh.output
 
   for (const name of ["main", "master"]) {
-    const check = execGit(`git rev-parse --verify origin/${name}`, cwd)
+    const check = execGit(`git rev-parse --verify refs/heads/${name}`, cwd)
     if (check.ok) return name
   }
 

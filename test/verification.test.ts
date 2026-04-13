@@ -194,11 +194,55 @@ describe("rebaseOntoMain", () => {
   afterEach(() => vi.restoreAllMocks())
 
   it("returns passed on successful rebase", () => {
-    mockExecSync.mockReturnValue(Buffer.from("ok"))
+    mockExecSync.mockImplementation((cmd) => {
+      const cmdStr = String(cmd)
+      if (cmdStr.includes("gh repo view")) return Buffer.from("main")
+      return Buffer.from("ok")
+    })
 
     const result = rebaseOntoMain("minion/cool-fox", "/tmp/workspace")
     expect(result.passed).toBe(true)
     expect(result.details).toContain("Rebased")
+    expect(result.details).not.toContain("origin/")
+  })
+
+  it("rebases against the local base branch ref (no origin/ prefix)", () => {
+    const invokedCommands: string[] = []
+    mockExecSync.mockImplementation((cmd) => {
+      const cmdStr = String(cmd)
+      invokedCommands.push(cmdStr)
+      if (cmdStr.includes("gh repo view")) return Buffer.from("main")
+      return Buffer.from("ok")
+    })
+
+    const result = rebaseOntoMain("minion/cool-fox", "/tmp/workspace")
+    expect(result.passed).toBe(true)
+
+    const rebaseCmd = invokedCommands.find((c) => c.startsWith("git rebase ") && !c.includes("--abort"))
+    expect(rebaseCmd).toBeDefined()
+    expect(rebaseCmd).toContain("main")
+    expect(rebaseCmd).not.toContain("origin/main")
+
+    const targetedFetch = invokedCommands.find((c) => c.startsWith("git fetch origin ") && c.includes("main"))
+    expect(targetedFetch).toBeDefined()
+  })
+
+  it("detects default branch via local heads fallback when gh fails", () => {
+    const invokedCommands: string[] = []
+    mockExecSync.mockImplementation((cmd) => {
+      const cmdStr = String(cmd)
+      invokedCommands.push(cmdStr)
+      if (cmdStr.includes("gh repo view")) throw new Error("gh failed")
+      if (cmdStr.includes("rev-parse --verify refs/heads/main")) return Buffer.from("deadbeef")
+      return Buffer.from("ok")
+    })
+
+    const result = rebaseOntoMain("minion/cool-fox", "/tmp/workspace")
+    expect(result.passed).toBe(true)
+
+    const localCheck = invokedCommands.find((c) => c.includes("rev-parse --verify refs/heads/"))
+    expect(localCheck).toBeDefined()
+    expect(localCheck).not.toContain("origin/")
   })
 
   it("returns failed when fetch fails", () => {
