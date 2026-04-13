@@ -111,6 +111,9 @@ function toTelegramPhotos(photos?: ChatPhoto[]): TelegramPhotoSize[] | undefined
 /** Modes that use Claude CLI (not Goose) and support mid-execution reply injection via SDK */
 const SDK_MODES: Set<SessionMode> = new Set(["plan", "think", "review", "dag-review", "ship-think", "ship-plan", "ship-verify"])
 
+/** TTL for pending task/profile selections that never receive a callback (10 minutes) */
+const PENDING_TASK_TTL_MS = 10 * 60 * 1000
+
 export class Dispatcher {
   private readonly sessions = new Map<number, ActiveSession>()
   private readonly topicSessions = new Map<number, TopicSession>()
@@ -752,10 +755,12 @@ export class Dispatcher {
     this.cleanupStaleSessions().catch((err) => {
       log.error({ err }, "startup cleanup error")
     })
+    this.cleanupStalePendingTasks()
     this.cleanupTimer = setInterval(() => {
       this.cleanupStaleSessions().catch((err) => {
         log.error({ err }, "cleanup error")
       })
+      this.cleanupStalePendingTasks()
     }, this.config.workspace.cleanupIntervalMs)
     log.info({
       intervalMinutes: Math.round(this.config.workspace.cleanupIntervalMs / 60000),
@@ -792,6 +797,7 @@ export class Dispatcher {
         this.dags.delete(session.dagId)
         this.broadcastDagDeleted(session.dagId)
       }
+      this.replyQueues.delete(threadId)
       await this.closeChildSessions(session)
       await this.platform.threads.deleteThread(String(threadId))
       await this.removeWorkspace(session)
@@ -801,6 +807,22 @@ export class Dispatcher {
 
     await this.persistTopicSessions()
     this.pinnedMessages.updatePinnedSummary()
+  }
+
+  private cleanupStalePendingTasks(): void {
+    const now = Date.now()
+    for (const [msgId, pending] of this.pendingTasks) {
+      if (now - pending.createdAt > PENDING_TASK_TTL_MS) {
+        this.pendingTasks.delete(msgId)
+        log.info({ msgId, mode: pending.mode }, "expired stale pending task selection")
+      }
+    }
+    for (const [msgId, pending] of this.pendingProfiles) {
+      if (now - pending.createdAt > PENDING_TASK_TTL_MS) {
+        this.pendingProfiles.delete(msgId)
+        log.info({ msgId, mode: pending.mode }, "expired stale pending profile selection")
+      }
+    }
   }
 
   private async persistTopicSessions(markInterrupted = false): Promise<void> {
@@ -1035,7 +1057,7 @@ export class Dispatcher {
           str(replyThreadId),
         )
         if (msgId) {
-          this.pendingTasks.set(Number(msgId), { task, threadId: replyThreadId, mode: "plan" })
+          this.pendingTasks.set(Number(msgId), { task, threadId: replyThreadId, mode: "plan", createdAt: Date.now() })
         }
         return
       }
@@ -1064,7 +1086,7 @@ export class Dispatcher {
           str(replyThreadId),
         )
         if (msgId) {
-          this.pendingTasks.set(Number(msgId), { task, threadId: replyThreadId, mode: "think" })
+          this.pendingTasks.set(Number(msgId), { task, threadId: replyThreadId, mode: "think", createdAt: Date.now() })
         }
         return
       }
@@ -1098,7 +1120,7 @@ export class Dispatcher {
           str(replyThreadId),
         )
         if (msgId) {
-          this.pendingTasks.set(Number(msgId), { task, threadId: replyThreadId, mode: "ship-think", autoAdvance })
+          this.pendingTasks.set(Number(msgId), { task, threadId: replyThreadId, mode: "ship-think", autoAdvance, createdAt: Date.now() })
         }
         return
       }
@@ -1131,7 +1153,7 @@ export class Dispatcher {
         str(replyThreadId),
       )
       if (msgId) {
-        this.pendingProfiles.set(Number(msgId), { task, threadId: replyThreadId, repoUrl, mode, autoAdvance })
+        this.pendingProfiles.set(Number(msgId), { task, threadId: replyThreadId, repoUrl, mode, autoAdvance, createdAt: Date.now() })
       }
       return
     }
