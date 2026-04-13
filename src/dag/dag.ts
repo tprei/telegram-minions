@@ -4,6 +4,29 @@ import { DagCycleError, DagSelfDependencyError, UnknownNodeError } from "../erro
 
 const execFile = promisify(execFileCb)
 
+/**
+ * Build a Map from node ID to DagNode for O(1) lookups.
+ */
+export function nodeIndex(graph: DagGraph): Map<string, DagNode> {
+  return new Map(graph.nodes.map((n) => [n.id, n]))
+}
+
+/**
+ * Build a reverse adjacency map: parent ID → list of child nodes that depend on it.
+ */
+function childrenIndex(graph: DagGraph): Map<string, DagNode[]> {
+  const children = new Map<string, DagNode[]>()
+  for (const node of graph.nodes) {
+    children.set(node.id, [])
+  }
+  for (const node of graph.nodes) {
+    for (const dep of node.dependsOn) {
+      children.get(dep)?.push(node)
+    }
+  }
+  return children
+}
+
 export type DagNodeStatus = "pending" | "ready" | "running" | "done" | "failed" | "skipped" | "ci-pending" | "ci-failed" | "landed"
 
 export interface DagNode {
@@ -235,31 +258,29 @@ export function advanceDag(graph: DagGraph): DagNode[] {
  * Returns the list of skipped node IDs.
  */
 export function failNode(graph: DagGraph, nodeId: string): string[] {
-  const node = graph.nodes.find((n) => n.id === nodeId)
+  const idx = nodeIndex(graph)
+  const node = idx.get(nodeId)
   if (!node) return []
 
   node.status = "failed"
 
   const skipped: string[] = []
   const toSkip = new Set<string>()
+  const children = childrenIndex(graph)
 
   // BFS to find all transitive dependents
   const queue = [nodeId]
   while (queue.length > 0) {
     const current = queue.shift()!
-    for (const n of graph.nodes) {
-      if (n.dependsOn.includes(current) && !toSkip.has(n.id) && n.status !== "done") {
-        toSkip.add(n.id)
-        queue.push(n.id)
+    for (const child of children.get(current) ?? []) {
+      if (!toSkip.has(child.id) && child.status !== "done") {
+        toSkip.add(child.id)
+        child.status = "skipped"
+        child.error = `Skipped: upstream node "${nodeId}" failed`
+        skipped.push(child.id)
+        queue.push(child.id)
       }
     }
-  }
-
-  for (const id of toSkip) {
-    const dependent = graph.nodes.find((n) => n.id === id)!
-    dependent.status = "skipped"
-    dependent.error = `Skipped: upstream node "${nodeId}" failed`
-    skipped.push(id)
   }
 
   return skipped
@@ -270,23 +291,25 @@ export function failNode(graph: DagGraph, nodeId: string): string[] {
  * Returns the list of un-skipped node IDs.
  */
 export function resetFailedNode(graph: DagGraph, nodeId: string): string[] {
-  const node = graph.nodes.find((n) => n.id === nodeId)
+  const idx = nodeIndex(graph)
+  const node = idx.get(nodeId)
   if (!node || (node.status !== "failed" && node.status !== "ci-failed")) return []
 
   node.status = "ready"
   node.error = undefined
   node.recoveryAttempted = false
 
+  const children = childrenIndex(graph)
   const reset: string[] = []
   const queue = [nodeId]
   while (queue.length > 0) {
     const current = queue.shift()!
-    for (const n of graph.nodes) {
-      if (n.dependsOn.includes(current) && n.status === "skipped") {
-        n.status = "pending"
-        n.error = undefined
-        reset.push(n.id)
-        queue.push(n.id)
+    for (const child of children.get(current) ?? []) {
+      if (child.status === "skipped") {
+        child.status = "pending"
+        child.error = undefined
+        reset.push(child.id)
+        queue.push(child.id)
       }
     }
   }
@@ -307,11 +330,12 @@ export function isDagComplete(graph: DagGraph): boolean {
  * Used to determine the base branch for workspace creation.
  */
 export function getUpstreamBranches(graph: DagGraph, nodeId: string): string[] {
-  const node = graph.nodes.find((n) => n.id === nodeId)
+  const idx = nodeIndex(graph)
+  const node = idx.get(nodeId)
   if (!node) return []
 
   return node.dependsOn
-    .map((depId) => graph.nodes.find((n) => n.id === depId)?.branch)
+    .map((depId) => idx.get(depId)?.branch)
     .filter((b): b is string => b != null)
 }
 
@@ -319,20 +343,23 @@ export function getUpstreamBranches(graph: DagGraph, nodeId: string): string[] {
  * Get all transitive downstream nodes (direct and indirect dependents).
  */
 export function getDownstreamNodes(graph: DagGraph, nodeId: string): DagNode[] {
-  const downstream = new Set<string>()
+  const children = childrenIndex(graph)
+  const downstream: DagNode[] = []
+  const visited = new Set<string>()
   const queue = [nodeId]
 
   while (queue.length > 0) {
     const current = queue.shift()!
-    for (const node of graph.nodes) {
-      if (node.dependsOn.includes(current) && !downstream.has(node.id)) {
-        downstream.add(node.id)
-        queue.push(node.id)
+    for (const child of children.get(current) ?? []) {
+      if (!visited.has(child.id)) {
+        visited.add(child.id)
+        downstream.push(child)
+        queue.push(child.id)
       }
     }
   }
 
-  return graph.nodes.filter((n) => downstream.has(n.id))
+  return downstream
 }
 
 /**
@@ -351,9 +378,10 @@ export function needsRestack(graph: DagGraph, changedNodeId: string, opts?: { in
   const downstream = getDownstreamNodes(graph, changedNodeId)
   const downstreamIds = new Set(downstream.map((n) => n.id))
 
+  const idx = nodeIndex(graph)
   return sorted
     .filter((id) => downstreamIds.has(id))
-    .map((id) => graph.nodes.find((n) => n.id === id)!)
+    .map((id) => idx.get(id)!)
     .filter((node) =>
       node.branch != null &&
       node.mergeBase != null &&
@@ -371,8 +399,9 @@ export function criticalPathLength(graph: DagGraph): number {
   const sorted = topologicalSort(graph)
   const dist = new Map<string, number>()
 
+  const idx = nodeIndex(graph)
   for (const id of sorted) {
-    const node = graph.nodes.find((n) => n.id === id)!
+    const node = idx.get(id)!
     const maxDepDist = node.dependsOn.length > 0
       ? Math.max(...node.dependsOn.map((d) => dist.get(d) ?? 0))
       : 0
@@ -417,8 +446,9 @@ export function transitiveReduction(graph: DagGraph): void {
   const ancestors = new Map<string, Set<string>>()
 
   const sorted = topologicalSort(graph)
+  const idx = nodeIndex(graph)
   for (const id of sorted) {
-    const node = graph.nodes.find((n) => n.id === id)!
+    const node = idx.get(id)!
     const myAncestors = new Set<string>()
 
     for (const dep of node.dependsOn) {
@@ -476,9 +506,10 @@ export function renderDagStatus(graph: DagGraph, isStack?: boolean): string {
   const lines: string[] = [`📊 <b>${title}</b>\n`]
 
   // Group nodes by their depth level for visual hierarchy
+  const idx = nodeIndex(graph)
   const depth = new Map<string, number>()
   for (const id of sorted) {
-    const node = graph.nodes.find((n) => n.id === id)!
+    const node = idx.get(id)!
     const maxDepDepth = node.dependsOn.length > 0
       ? Math.max(...node.dependsOn.map((d) => depth.get(d) ?? 0))
       : -1
@@ -486,7 +517,7 @@ export function renderDagStatus(graph: DagGraph, isStack?: boolean): string {
   }
 
   for (const id of sorted) {
-    const node = graph.nodes.find((n) => n.id === id)!
+    const node = idx.get(id)!
     const d = depth.get(id) ?? 0
     const indent = "  ".repeat(d)
     const icon = statusIcon[node.status]
@@ -579,6 +610,7 @@ export function renderDagForGitHub(graph: DagGraph, currentNodeId?: string): str
   }
 
   const sorted = topologicalSort(graph)
+  const idx = nodeIndex(graph)
   const lines: string[] = [DAG_STATUS_START, ""]
 
   // --- Mermaid flowchart ---
@@ -599,7 +631,7 @@ export function renderDagForGitHub(graph: DagGraph, currentNodeId?: string): str
 
   // Node declarations
   for (const id of sorted) {
-    const node = graph.nodes.find((n) => n.id === id)!
+    const node = idx.get(id)!
     const mid = mermaidId(id)
     const icon = statusEmoji[node.status]
     const label = mermaidLabel(node.title)
@@ -608,7 +640,7 @@ export function renderDagForGitHub(graph: DagGraph, currentNodeId?: string): str
 
   // Edges
   for (const id of sorted) {
-    const node = graph.nodes.find((n) => n.id === id)!
+    const node = idx.get(id)!
     for (const dep of node.dependsOn) {
       lines.push(`  ${mermaidId(dep)} --> ${mermaidId(id)}`)
     }
@@ -616,7 +648,7 @@ export function renderDagForGitHub(graph: DagGraph, currentNodeId?: string): str
 
   // Apply status classes
   for (const id of sorted) {
-    const node = graph.nodes.find((n) => n.id === id)!
+    const node = idx.get(id)!
     const mid = mermaidId(id)
     lines.push(`  class ${mid} ${node.status}`)
     if (currentNodeId && id === currentNodeId) {
@@ -633,7 +665,7 @@ export function renderDagForGitHub(graph: DagGraph, currentNodeId?: string): str
 
   for (let i = 0; i < sorted.length; i++) {
     const id = sorted[i]
-    const node = graph.nodes.find((n) => n.id === id)!
+    const node = idx.get(id)!
     const isCurrent = currentNodeId === id
     const num = String(i + 1)
     const title = isCurrent ? `**${node.title}** _(this PR)_` : node.title
