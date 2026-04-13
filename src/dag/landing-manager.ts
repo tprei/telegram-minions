@@ -7,18 +7,19 @@ import { extractRepoName } from "../commands/command-parser.js"
 import type { DispatcherContext } from "../orchestration/dispatcher-context.js"
 import type { TopicSession } from "../domain/session-types.js"
 import type { DagGraph, DagNode } from "./dag.js"
-import { topologicalSort, needsRestack, cleanupMergedBranch, getDownstreamNodes } from "./dag.js"
-import { resolveConflictsWithAgent, resolvePhantomConflicts } from "../conflict-resolver.js"
+import { topologicalSort, cleanupMergedBranch } from "./dag.js"
+import { runPreflightStaging } from "./preflight.js"
+import { updateAllStackComments } from "./pr-stack-comment.js"
 import {
-  esc,
   formatLandStart,
   formatLandProgress,
   formatLandComplete,
   formatLandError,
   formatLandSkipped,
   formatLandSummary,
-  formatLandConflictResolution,
-  formatLandRestacking,
+  formatLandPreflightStart,
+  formatLandPreflightPassed,
+  formatLandPreflightFailed,
 } from "../telegram/format.js"
 import { loggers } from "../logger.js"
 
@@ -29,12 +30,7 @@ const execFile = promisify(execFileCb)
 const EXEC_TIMEOUT = 120_000
 const MERGEABILITY_POLL_DELAY = 5_000
 const MERGEABILITY_POLL_MAX = 6
-
-const STALE_LEASE_PATTERNS = [
-  /stale info/i,
-  /fetch first/i,
-  /rejected.*non-fast-forward/i,
-]
+const LAND_STEP_DELAY_MS = 3_000
 
 async function gh(args: string[], opts?: { cwd?: string; timeout?: number }): Promise<string> {
   const { stdout } = await execFile("gh", args, {
@@ -54,47 +50,6 @@ async function git(args: string[], opts: { cwd: string; timeout?: number; env?: 
     env: { ...process.env, ...opts.env },
   })
   return stdout.trim()
-}
-
-export function isStaleLeaseError(err: unknown): boolean {
-  const stderr = (err as { stderr?: string } | null)?.stderr ?? ""
-  const message = err instanceof Error ? err.message : String(err ?? "")
-  const haystack = `${stderr}\n${message}`
-  return STALE_LEASE_PATTERNS.some((rx) => rx.test(haystack))
-}
-
-export async function pushWithLeaseRetry(
-  cwd: string,
-  branch: string,
-  runGit: (args: string[], opts: { cwd: string; timeout?: number; env?: Record<string, string> }) => Promise<string> = git,
-): Promise<void> {
-  try {
-    await runGit(["push", "--force-with-lease", "origin", branch], { cwd })
-    return
-  } catch (err) {
-    if (!isStaleLeaseError(err)) throw err
-    log.warn({ branch }, "force-with-lease rejected as stale — refreshing remote and retrying once")
-  }
-
-  await runGit(["fetch", "origin", branch], { cwd })
-
-  const localHead = await runGit(["rev-parse", "HEAD"], { cwd, timeout: 10_000 })
-  const remoteHead = await runGit(["rev-parse", `refs/remotes/origin/${branch}`], { cwd, timeout: 10_000 })
-
-  if (localHead === remoteHead) {
-    log.info({ branch }, "local HEAD already matches refreshed remote — skipping retry push")
-    return
-  }
-
-  try {
-    await runGit(["merge-base", "--is-ancestor", remoteHead, "HEAD"], { cwd, timeout: 10_000 })
-  } catch {
-    throw new Error(
-      `refusing to retry push for ${branch}: local HEAD ${localHead.slice(0, 8)} is not a descendant of remote ${remoteHead.slice(0, 8)}`,
-    )
-  }
-
-  await runGit(["push", "--force-with-lease", "origin", branch], { cwd })
 }
 
 function repoFromPrUrl(prUrl: string): string | undefined {
@@ -155,9 +110,38 @@ export class LandingManager {
       return
     }
 
-    const repo = prNodes.find((n) => n.prUrl)?.prUrl ? repoFromPrUrl(prNodes.find((n) => n.prUrl)!.prUrl!) : undefined
+    const repo = repoFromPrUrl(prNodes[0].prUrl!)
     const baseBranch = await this.detectBaseBranch(repo, topicSession, graph)
 
+    // Pre-flight: cherry-pick all nodes onto a throwaway branch off origin/<base>
+    await this.ctx.telegram.sendMessage(
+      formatLandPreflightStart(topicSession.slug, prNodes.length),
+      topicSession.threadId,
+    )
+
+    const hostCwd = this.findValidCwd(topicSession, graph)
+    const preflight = hostCwd
+      ? await runPreflightStaging(graph, prNodes, baseBranch, hostCwd)
+      : { ok: false as const, error: "no valid cwd for pre-flight staging" }
+
+    if (!preflight.ok) {
+      const title = preflight.failedNode?.title ?? "unknown node"
+      await this.ctx.telegram.sendMessage(
+        formatLandPreflightFailed(title, preflight.conflictFiles ?? []),
+        topicSession.threadId,
+      )
+      if (preflight.error) {
+        log.warn({ dagId: graph.id, nodeId: preflight.failedNode?.id, error: preflight.error }, "preflight failed with error")
+      }
+      return
+    }
+
+    await this.ctx.telegram.sendMessage(
+      formatLandPreflightPassed(prNodes.length),
+      topicSession.threadId,
+    )
+
+    // Clean up child worktrees so branch deletion doesn't hit a lock
     await this.pruneWorktrees(topicSession)
     await this.removeChildWorktrees(topicSession, graph)
     await this.pruneWorktrees(topicSession)
@@ -170,18 +154,9 @@ export class LandingManager {
     let succeeded = 0
     let skipped = 0
     const failedTitles: string[] = []
-    const skipNodeIds = new Set<string>()
 
     for (const node of prNodes) {
       if (signal.aborted) break
-      if (skipNodeIds.has(node.id)) {
-        skipped++
-        await this.ctx.telegram.sendMessage(
-          formatLandSkipped(node.title, "upstream restack failed"),
-          topicSession.threadId,
-        )
-        continue
-      }
       const nodeRepo = repoFromPrUrl(node.prUrl!) ?? repo
       const repoFlag = nodeRepo ? ["--repo", nodeRepo] : []
       const prNumber = prNumberFromUrl(node.prUrl!)
@@ -197,7 +172,6 @@ export class LandingManager {
 
       try {
         const prState = await gh(["pr", "view", prNumber, ...repoFlag, "--json", "state", "--jq", ".state"])
-
         if (prState === "MERGED") {
           node.status = "landed"
           skipped++
@@ -207,7 +181,6 @@ export class LandingManager {
           )
           continue
         }
-
         if (prState === "CLOSED") {
           try {
             await gh(["pr", "edit", prNumber, ...repoFlag, "--base", baseBranch])
@@ -226,36 +199,31 @@ export class LandingManager {
         log.warn({ err, nodeId: node.id }, "PR state check failed, attempting merge anyway")
       }
 
-      await this.ensureMergeable(node, baseBranch, topicSession, graph, signal)
-
-      const preRetarget = needsRestack(graph, node.id, { includeDone: true })
-      for (const ds of preRetarget) {
-        if (!ds.prUrl) continue
-        const dsNum = prNumberFromUrl(ds.prUrl)
-        if (!dsNum) continue
-        const dsRepo = repoFromPrUrl(ds.prUrl)
-        const dsFlag = dsRepo ? ["--repo", dsRepo] : repoFlag
-        try {
-          await gh(["pr", "edit", dsNum, ...dsFlag, "--base", baseBranch])
-        } catch (err) {
-          log.warn({ err, nodeId: ds.id }, "pre-merge retarget failed")
-        }
+      // Ensure PR is targeting the base branch (GitHub auto-retargets after upstream merge,
+      // but be explicit in case the previous merge didn't get picked up yet).
+      try {
+        await gh(["pr", "edit", prNumber, ...repoFlag, "--base", baseBranch])
+      } catch (err) {
+        log.warn({ err, nodeId: node.id }, "pre-merge retarget to base failed — continuing")
       }
+
+      await this.waitForMergeability(prNumber, repoFlag, signal)
 
       try {
         try {
-          await gh(["pr", "merge", prNumber, ...repoFlag, "--squash", "--delete-branch"])
+          await gh(["pr", "merge", prNumber, ...repoFlag, "--rebase", "--delete-branch"])
         } catch (mergeErr) {
           let actualState: string | undefined
           try {
             actualState = await gh(["pr", "view", prNumber, ...repoFlag, "--json", "state", "--jq", ".state"])
-          } catch { /* state re-check best-effort */ }
+          } catch { /* best-effort */ }
           if (actualState !== "MERGED") throw mergeErr
           log.warn(
             { nodeId: node.id, prNumber, err: mergeErr instanceof Error ? mergeErr.message : String(mergeErr) },
             "gh pr merge errored but PR state is MERGED — treating as success",
           )
         }
+
         node.status = "landed"
         succeeded++
 
@@ -263,7 +231,7 @@ export class LandingManager {
           const worktreePath = this.findWorktreePathForBranch(node)
           const cwd = this.findValidCwd(topicSession, graph)
           if (cwd) {
-            await cleanupMergedBranch(node.branch, worktreePath, cwd)
+            await cleanupMergedBranch(node.branch, worktreePath, cwd).catch(() => { /* best-effort */ })
           }
         }
 
@@ -272,108 +240,11 @@ export class LandingManager {
           topicSession.threadId,
         )
 
-        const toRestack = needsRestack(graph, node.id, { includeDone: true })
-        for (const downstream of toRestack) {
-          if (!downstream.branch || !downstream.prUrl) continue
+        // Update stack comments on remaining PRs so reviewers see the new state.
+        try { await updateAllStackComments(graph) } catch { /* non-critical */ }
 
-          const dsCwd = this.findWorktreePathForBranch(downstream)
-          const useOwnWorktree = !!(dsCwd && existsSync(dsCwd))
-          const restackCwd = useOwnWorktree ? dsCwd : this.findValidCwd(topicSession, graph)
-          if (!restackCwd) {
-            log.warn({ nodeId: downstream.id }, "no valid cwd for restacking — skipping")
-            continue
-          }
-
-          await this.ctx.telegram.sendMessage(
-            formatLandRestacking(downstream.title, downstream.branch),
-            topicSession.threadId,
-          )
-
-          try {
-            await git(["fetch", "origin", baseBranch, downstream.branch], { cwd: restackCwd })
-            if (!useOwnWorktree) {
-              await git(["checkout", downstream.branch], { cwd: restackCwd })
-            }
-            await git(["rebase", "--onto", baseBranch, downstream.mergeBase!, downstream.branch], { cwd: restackCwd })
-            await pushWithLeaseRetry(restackCwd, downstream.branch)
-
-            downstream.mergeBase = await git(["rev-parse", "HEAD"], { cwd: restackCwd, timeout: 10_000 })
-
-            const dsRepo = repoFromPrUrl(downstream.prUrl!)
-            const dsRepoFlag = dsRepo ? ["--repo", dsRepo] : repoFlag
-            const dsNumber = prNumberFromUrl(downstream.prUrl!)
-            if (dsNumber) {
-              await gh(["pr", "edit", dsNumber, ...dsRepoFlag, "--base", baseBranch])
-              const dsState = await gh(["pr", "view", dsNumber, ...dsRepoFlag, "--json", "state", "--jq", ".state"])
-              if (dsState === "CLOSED") {
-                await gh(["pr", "reopen", dsNumber, ...dsRepoFlag])
-              }
-            }
-          } catch (err) {
-            const errMsg = err instanceof Error ? err.message : String(err)
-            log.error({ err, nodeId: downstream.id, branch: downstream.branch }, "restack failed")
-
-            let conflictResolved = false
-            try {
-              const unmerged = await git(["diff", "--name-only", "--diff-filter=U"], { cwd: restackCwd })
-              if (unmerged.length > 0) {
-                const { resolved: phantomResolved, remaining } = await resolvePhantomConflicts(restackCwd)
-                if (remaining.length > 0) {
-                  await this.ctx.telegram.sendMessage(
-                    `🤖 Attempting conflict resolution for <b>${esc(downstream.title)}</b>…`,
-                    topicSession.threadId,
-                  )
-                  conflictResolved = await resolveConflictsWithAgent(restackCwd, downstream.branch!, baseBranch)
-                } else {
-                  conflictResolved = phantomResolved.length > 0
-                }
-
-                if (conflictResolved) {
-                  await git(["rebase", "--continue"], { cwd: restackCwd, env: { GIT_EDITOR: "true" } })
-                  await pushWithLeaseRetry(restackCwd, downstream.branch)
-                  downstream.mergeBase = await git(["rev-parse", "HEAD"], { cwd: restackCwd, timeout: 10_000 })
-
-                  const dsRepo = repoFromPrUrl(downstream.prUrl!)
-                  const dsRepoFlag = dsRepo ? ["--repo", dsRepo] : repoFlag
-                  const dsNumber = prNumberFromUrl(downstream.prUrl!)
-                  if (dsNumber) {
-                    await gh(["pr", "edit", dsNumber, ...dsRepoFlag, "--base", baseBranch])
-                  }
-                }
-
-                await this.ctx.telegram.sendMessage(
-                  formatLandConflictResolution(downstream.title, downstream.branch, conflictResolved),
-                  topicSession.threadId,
-                )
-              }
-            } catch {
-              // Conflict resolution itself failed
-            }
-
-            if (!conflictResolved) {
-              await this.ctx.telegram.sendMessage(
-                `⚠️ Restack failed for <b>${esc(downstream.title)}</b>: <code>${esc(errMsg)}</code>`,
-                topicSession.threadId,
-              )
-              try { await git(["rebase", "--abort"], { cwd: restackCwd }) } catch { /* ignore */ }
-
-              const transitiveSkips = getDownstreamNodes(graph, downstream.id)
-              for (const dep of transitiveSkips) {
-                skipNodeIds.add(dep.id)
-              }
-              skipNodeIds.add(downstream.id)
-              if (transitiveSkips.length > 0) {
-                const names = transitiveSkips.map((n) => n.title).join(", ")
-                await this.ctx.telegram.sendMessage(
-                  `⏭️ Skipping ${transitiveSkips.length} downstream node(s) due to restack failure: ${esc(names)}`,
-                  topicSession.threadId,
-                )
-              }
-            }
-          }
-        }
-
-        await new Promise((resolve) => setTimeout(resolve, 3000))
+        // Small pause so GitHub can process the auto-retarget of downstream PRs.
+        await new Promise((resolve) => setTimeout(resolve, LAND_STEP_DELAY_MS))
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err)
         failedTitles.push(node.title)
@@ -384,6 +255,8 @@ export class LandingManager {
         continue
       }
     }
+
+    try { await updateAllStackComments(graph) } catch { /* non-critical */ }
 
     if (failedTitles.length === 0 && skipped === 0) {
       await this.ctx.telegram.sendMessage(
@@ -398,143 +271,18 @@ export class LandingManager {
     }
   }
 
-  private async ensureMergeable(
-    node: DagNode,
-    baseBranch: string,
-    topicSession: TopicSession,
-    graph: DagGraph,
-    signal: AbortSignal,
-  ): Promise<void> {
-    if (signal.aborted) return
-    const repo = repoFromPrUrl(node.prUrl!)
-    const prNumber = prNumberFromUrl(node.prUrl!)
-    if (!repo || !prNumber) return
-
-    const repoFlag = ["--repo", repo]
-
-    let mergeable: string
-    try {
-      mergeable = await this.resolveMergeability(prNumber, repoFlag, signal)
-    } catch {
-      return
-    }
-
-    if (mergeable === "MERGEABLE") return
-    if (mergeable !== "CONFLICTING") {
-      log.info({ nodeId: node.id, mergeable }, "non-conflicting mergeability — letting gh pr merge proceed without local rebase")
-      return
-    }
-
-    if (!node.branch) {
-      log.warn({ nodeId: node.id, mergeable }, "PR conflicting and no branch info for rebase")
-      return
-    }
-
-    const nodeCwd = this.findWorktreePathForBranch(node)
-    const useOwnWorktree = !!(nodeCwd && existsSync(nodeCwd))
-    const cwd = useOwnWorktree ? nodeCwd : this.findValidCwd(topicSession, graph)
-    if (!cwd) {
-      log.warn({ nodeId: node.id }, "PR conflicting but no valid cwd for rebase")
-      return
-    }
-
-    await this.ctx.telegram.sendMessage(
-      `🔄 Rebasing <b>${esc(node.title)}</b> to resolve conflicts…`,
-      topicSession.threadId,
-    )
-
-    try {
-      await git(["fetch", "origin", node.branch, baseBranch], { cwd })
-      if (!useOwnWorktree) {
-        await git(["checkout", node.branch], { cwd })
-      }
-      if (node.mergeBase) {
-        await git(["rebase", "--onto", baseBranch, node.mergeBase, node.branch], { cwd })
-      } else {
-        await git(["rebase", baseBranch], { cwd })
-      }
-      await pushWithLeaseRetry(cwd, node.branch)
-
-      await this.ctx.telegram.sendMessage(
-        `✅ Rebased <b>${esc(node.title)}</b>`,
-        topicSession.threadId,
-      )
-
-      await this.waitForMergeability(prNumber, repoFlag)
-    } catch (rebaseErr) {
-      try {
-        const unmerged = await git(["diff", "--name-only", "--diff-filter=U"], { cwd })
-        if (unmerged.length > 0) {
-          const { resolved: phantomResolved, remaining } = await resolvePhantomConflicts(cwd)
-          let allResolved = remaining.length === 0 && phantomResolved.length > 0
-          if (remaining.length > 0) {
-            await this.ctx.telegram.sendMessage(
-              `🤖 Attempting conflict resolution for <b>${esc(node.title)}</b>…`,
-              topicSession.threadId,
-            )
-            allResolved = await resolveConflictsWithAgent(cwd, node.branch, baseBranch)
-          }
-
-          if (allResolved) {
-            await git(["rebase", "--continue"], { cwd, env: { GIT_EDITOR: "true" } })
-            await pushWithLeaseRetry(cwd, node.branch)
-
-            await this.ctx.telegram.sendMessage(
-              formatLandConflictResolution(node.title, node.branch, true),
-              topicSession.threadId,
-            )
-
-            await this.waitForMergeability(prNumber, repoFlag)
-            return
-          }
-        }
-      } catch { /* fall through */ }
-
-      try { await git(["rebase", "--abort"], { cwd }) } catch { /* ignore */ }
-      log.warn(
-        { nodeId: node.id, branch: node.branch, err: rebaseErr instanceof Error ? rebaseErr.message : String(rebaseErr) },
-        "local rebase failed for CONFLICTING PR — letting gh pr merge decide",
-      )
-      await this.ctx.telegram.sendMessage(
-        `⚠️ Could not resolve conflicts for <b>${esc(node.title)}</b>`,
-        topicSession.threadId,
-      )
-    }
-  }
-
-  private async resolveMergeability(
-    prNumber: string,
-    repoFlag: string[],
-    signal: AbortSignal,
-  ): Promise<string> {
-    const state = await gh(["pr", "view", prNumber, ...repoFlag, "--json", "mergeable", "--jq", ".mergeable"])
-    if (state !== "UNKNOWN") return state
-
-    log.info({ prNumber }, "mergeability UNKNOWN — polling before deciding to rebase")
-    const polled = await this.waitForMergeability(prNumber, repoFlag, signal)
-    return polled ?? "UNKNOWN"
-  }
-
-  private async waitForMergeability(
-    prNumber: string,
-    repoFlag: string[],
-    signal?: AbortSignal,
-  ): Promise<string | undefined> {
-    let last: string | undefined
+  private async waitForMergeability(prNumber: string, repoFlag: string[], signal?: AbortSignal): Promise<void> {
     for (let i = 0; i < MERGEABILITY_POLL_MAX; i++) {
-      if (signal?.aborted) return last
+      if (signal?.aborted) return
+      try {
+        const state = await gh(["pr", "view", prNumber, ...repoFlag, "--json", "mergeable", "--jq", ".mergeable"])
+        if (state === "MERGEABLE") return
+      } catch { /* continue polling */ }
       await new Promise<void>((r) => {
         const timer = setTimeout(r, MERGEABILITY_POLL_DELAY)
         signal?.addEventListener("abort", () => { clearTimeout(timer); r() }, { once: true })
       })
-      if (signal?.aborted) return last
-      try {
-        const state = await gh(["pr", "view", prNumber, ...repoFlag, "--json", "mergeable", "--jq", ".mergeable"])
-        last = state
-        if (state === "MERGEABLE" || state === "CONFLICTING") return state
-      } catch { /* continue polling */ }
     }
-    return last
   }
 
   private async pruneWorktrees(topicSession: TopicSession): Promise<void> {
@@ -732,7 +480,7 @@ export class LandingManager {
           topicSession.threadId,
         )
 
-        await new Promise((resolve) => setTimeout(resolve, 3000))
+        await new Promise((resolve) => setTimeout(resolve, LAND_STEP_DELAY_MS))
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err)
         failedTitles.push(title)

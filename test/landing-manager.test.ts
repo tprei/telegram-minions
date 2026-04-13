@@ -265,7 +265,7 @@ describe("LandingManager", () => {
       )
     })
 
-    it("falls back to topicSession.cwd when repoUrl is missing", async () => {
+    it("starts pre-flight check when DAG has a completed PR", async () => {
       const ctx = createMockContext()
       const graph: DagGraph = {
         id: "dag-1",
@@ -290,10 +290,8 @@ describe("LandingManager", () => {
 
       await manager.handleLandCommand(session)
 
-      expect(ctx.telegram.sendMessage).toHaveBeenCalledWith(
-        expect.stringContaining("Landing"),
-        100,
-      )
+      const calls = (ctx.telegram.sendMessage as ReturnType<typeof vi.fn>).mock.calls.map((c) => String(c[0]))
+      expect(calls.some((m) => m.includes("Pre-flight check"))).toBe(true)
     })
 
     it("skips zombie worktree directories in findValidCwd", async () => {

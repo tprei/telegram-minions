@@ -38,6 +38,7 @@ import {
   type DagNode,
   type DagInput,
 } from "./dag.js"
+import { updateAllStackComments } from "./pr-stack-comment.js"
 import { loggers } from "../logger.js"
 
 const log = loggers.dispatcher
@@ -281,9 +282,11 @@ export class DagOrchestrator {
 
     try {
       const { stdout } = await execFile("git", ["rev-parse", "HEAD"], { cwd, encoding: "utf-8", timeout: 10_000 })
-      node.mergeBase = stdout.trim()
+      const sha = stdout.trim()
+      node.mergeBase = sha
+      node.baseSha = sha
     } catch {
-      log.warn({ dagId: graph.id, nodeId: node.id }, "failed to record mergeBase")
+      log.warn({ dagId: graph.id, nodeId: node.id }, "failed to record baseSha/mergeBase")
     }
 
     const task = buildDagChildPrompt(
@@ -441,6 +444,7 @@ export class DagOrchestrator {
           }
         } else {
           node.prUrl = resolvedPrUrl
+          await this.captureHeadSha(node, childSession.cwd)
 
           const ciPolicy = this.ctx.config.ci.dagCiPolicy
           if (ciPolicy !== "skip" && this.ctx.config.ci.babysitEnabled && resolvedPrUrl) {
@@ -532,6 +536,7 @@ export class DagOrchestrator {
 
     try { await this.ctx.updatePinnedDagStatus(parent, graph) } catch { /* non-critical */ }
     try { await this.updateDagPRDescriptions(graph, childSession.cwd) } catch { /* non-critical */ }
+    try { await updateAllStackComments(graph, { cwd: childSession.cwd }) } catch { /* non-critical */ }
 
     if (isDagComplete(graph)) {
       try {
@@ -572,6 +577,27 @@ export class DagOrchestrator {
 
     await this.ctx.persistTopicSessions()
     await this.ctx.persistDags()
+  }
+
+  /**
+   * Record the current head SHA of the node's branch. Prefers the remote
+   * ref (since the child has already pushed by the time this runs) and
+   * falls back to the local branch if the fetch fails.
+   */
+  async captureHeadSha(node: DagNode, cwd: string): Promise<void> {
+    if (!node.branch) return
+    try {
+      await execFile("git", ["fetch", "origin", node.branch], { cwd, encoding: "utf-8", timeout: 30_000 })
+      const { stdout } = await execFile("git", ["rev-parse", `origin/${node.branch}`], { cwd, encoding: "utf-8", timeout: 10_000 })
+      node.headSha = stdout.trim()
+    } catch {
+      try {
+        const { stdout } = await execFile("git", ["rev-parse", node.branch], { cwd, encoding: "utf-8", timeout: 10_000 })
+        node.headSha = stdout.trim()
+      } catch {
+        log.warn({ dagId: node.id, branch: node.branch }, "failed to record headSha")
+      }
+    }
   }
 
   async updateDagPRDescriptions(graph: DagGraph, cwd: string): Promise<void> {

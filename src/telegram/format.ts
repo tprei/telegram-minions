@@ -1063,6 +1063,28 @@ export function formatLandStart(slug: string, count: number): string {
   return `🛬 <b>Landing stack</b>  ·  🏷 <code>${esc(slug)}</code>\nMerging ${count} PRs bottom-up…`
 }
 
+export function formatLandPreflightStart(slug: string, count: number): string {
+  return `🔍 <b>Pre-flight check</b>  ·  🏷 <code>${esc(slug)}</code>\nStaging ${count} PR${count === 1 ? "" : "s"} on a throwaway branch…`
+}
+
+export function formatLandPreflightPassed(count: number): string {
+  return `✅ <b>Pre-flight passed</b>  ·  Cherry-picked ${count} node${count === 1 ? "" : "s"} cleanly. Landing now…`
+}
+
+export function formatLandPreflightFailed(nodeTitle: string, files: string[]): string {
+  const fileList = files.length > 0
+    ? files.slice(0, 10).map((f) => `  • <code>${esc(f)}</code>`).join("\n")
+    : "  <i>(unknown files)</i>"
+  const extra = files.length > 10 ? `\n  …and ${files.length - 10} more` : ""
+  return [
+    `⚠️ <b>Pre-flight failed</b> at: ${esc(nodeTitle)}`,
+    `Conflicts in:`,
+    fileList + extra,
+    ``,
+    `<b>Nothing was landed.</b> Use <code>/resolve ${esc(nodeTitle)}</code> to route to the child session, or <code>/doctor</code> to diagnose.`,
+  ].join("\n")
+}
+
 export function formatLandProgress(title: string, prUrl: string, index: number, total: number): string {
   return `🛬 <b>${index + 1}/${total}</b> Merged: ${esc(title)} — <a href="${esc(prUrl)}">PR</a>`
 }
