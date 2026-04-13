@@ -5,7 +5,7 @@ import crypto from "node:crypto"
 import { EventEmitter } from "node:events"
 import type { TopicSession, SessionState, SessionDoneState } from "./domain/session-types.js"
 import type { ActiveSession } from "./session/session-manager.js"
-import type { DagGraph } from "./dag/dag.js"
+import type { DagGraph, DagNodeStatus } from "./dag/dag.js"
 import { loggers } from "./logger.js"
 
 const log = loggers.apiServer
@@ -243,6 +243,18 @@ export function topicSessionToApi(
   }
 }
 
+const dagNodeStatusToApi: Record<DagNodeStatus, ApiDagNode["status"]> = {
+  pending: "pending",
+  ready: "pending",
+  running: "running",
+  done: "completed",
+  failed: "failed",
+  skipped: "skipped",
+  "ci-pending": "ci-pending",
+  "ci-failed": "ci-failed",
+  landed: "landed",
+}
+
 export function dagToApi(
   graph: DagGraph,
   topicSessions: Map<number, TopicSession>,
@@ -274,11 +286,7 @@ export function dagToApi(
     nodes[node.id] = {
       id: node.id,
       slug: topicSession?.slug ?? node.title,
-      status: node.status === "done"
-        ? "completed"
-        : node.status === "ready"
-          ? "pending"
-          : node.status as ApiDagNode["status"],
+      status: dagNodeStatusToApi[node.status],
       dependencies: node.dependsOn,
       dependents: dependents.get(node.id) ?? [],
       session: apiSession,
