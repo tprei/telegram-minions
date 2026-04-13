@@ -19,6 +19,7 @@ import {
   isSessionError,
   isConfigError,
   isTelegramError,
+  isThreadNotFoundError,
 } from "../src/errors.js"
 
 describe("MinionError", () => {
@@ -301,6 +302,37 @@ describe("Type guards", () => {
     it("returns false for other MinionErrors", () => {
       expect(isTelegramError(new DagCycleError())).toBe(false)
       expect(isTelegramError(new ConfigError("test", "VAR"))).toBe(false)
+    })
+  })
+
+  describe("isThreadNotFoundError", () => {
+    it("returns true for TelegramHttpError with status 400 and thread not found message", () => {
+      const err = new TelegramHttpError("sendMessage", 400, "Bad Request: message thread not found")
+      expect(isThreadNotFoundError(err)).toBe(true)
+    })
+
+    it("returns false for TelegramHttpError with different status code", () => {
+      const err = new TelegramHttpError("sendMessage", 500, "message thread not found")
+      expect(isThreadNotFoundError(err)).toBe(false)
+    })
+
+    it("returns false for TelegramHttpError with 400 but different message", () => {
+      const err = new TelegramHttpError("sendMessage", 400, "Bad Request: chat not found")
+      expect(isThreadNotFoundError(err)).toBe(false)
+    })
+
+    it("returns false for other Telegram error types", () => {
+      expect(isThreadNotFoundError(new TelegramApiError("sendMessage", "error"))).toBe(false)
+      expect(isThreadNotFoundError(new TelegramRateLimitError("sendMessage", "rate limited", 30))).toBe(false)
+      expect(isThreadNotFoundError(new TelegramResponseError("sendMessage", "error"))).toBe(false)
+      expect(isThreadNotFoundError(new TelegramRetryExhaustedError("sendMessage", 3))).toBe(false)
+    })
+
+    it("returns false for non-Telegram errors", () => {
+      expect(isThreadNotFoundError(new Error("message thread not found"))).toBe(false)
+      expect(isThreadNotFoundError(new DagCycleError())).toBe(false)
+      expect(isThreadNotFoundError(null)).toBe(false)
+      expect(isThreadNotFoundError(undefined)).toBe(false)
     })
   })
 })
