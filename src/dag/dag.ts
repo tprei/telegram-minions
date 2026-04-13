@@ -41,6 +41,9 @@ export interface DagNode {
   error?: string
   recoveryAttempted?: boolean
   mergeBase?: string
+  baseSha?: string
+  headSha?: string
+  prCommentId?: number
 }
 
 export interface DagGraph {
@@ -361,36 +364,6 @@ export function getDownstreamNodes(graph: DagGraph, nodeId: string): DagNode[] {
   }
 
   return downstream
-}
-
-/**
- * Identify downstream nodes that need restacking after an upstream node changed.
- *
- * A node needs restacking when:
- * 1. It has a branch (already started work)
- * 2. It has a recorded mergeBase (the commit it was originally based on)
- * 3. It is a transitive dependent of the changed node
- * 4. It is not in a terminal state (done/failed/skipped)
- *
- * Returns nodes in topological order so they can be restacked parent-first.
- */
-export function needsRestack(graph: DagGraph, changedNodeId: string, opts?: { includeDone?: boolean }): DagNode[] {
-  const sorted = topologicalSort(graph)
-  const downstream = getDownstreamNodes(graph, changedNodeId)
-  const downstreamIds = new Set(downstream.map((n) => n.id))
-
-  const idx = nodeIndex(graph)
-  return sorted
-    .filter((id) => downstreamIds.has(id))
-    .map((id) => idx.get(id)!)
-    .filter((node) =>
-      node.branch != null &&
-      node.mergeBase != null &&
-      (opts?.includeDone || node.status !== "done") &&
-      node.status !== "failed" &&
-      node.status !== "skipped" &&
-      node.status !== "landed",
-    )
 }
 
 /**
