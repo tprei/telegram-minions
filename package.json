@@ -1,6 +1,6 @@
 {
   "name": "@tprei/telegram-minions",
-  "version": "1.104.6",
+  "version": "1.104.7",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
