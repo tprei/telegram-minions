@@ -329,7 +329,7 @@ export function buildMergeConflictPrompt(
     "### Instructions",
     "",
     `1. Fetch the latest base branch: \`git fetch origin ${baseBranch}\``,
-    `2. Merge or rebase onto the base branch: \`git merge origin/${baseBranch}\` or \`git rebase origin/${baseBranch}\``,
+    `2. Merge or rebase onto the base branch: \`git merge ${baseBranch}\` or \`git rebase ${baseBranch}\``,
     "3. Resolve any conflicts in the affected files",
     "4. Run local quality gates (tests, lint, typecheck) to verify the resolution didn't break anything",
     "5. Push the resolved changes",

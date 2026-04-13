@@ -235,6 +235,53 @@ describe("landing retarget fixes", () => {
     expect(calls.some((m) => m.includes("Landing failed"))).toBe(true)
   })
 
+  it("restacks downstream using local base branch ref (no origin/ prefix)", async () => {
+    installDefaultMock()
+
+    const ctx = createMockContext()
+    ctx.dags.set("dag-1", makeTwoNodeDag())
+
+    const manager = new LandingManager(ctx)
+    const session = makeSession({ dagId: "dag-1", cwd: tmpDir })
+
+    await runLanding(manager, session)
+
+    const rebaseCmd = callLog.find(
+      (c) => c.startsWith("git rebase --onto") && c.includes("minion/b"),
+    )
+    expect(rebaseCmd).toBeDefined()
+    expect(rebaseCmd).toContain("master")
+    expect(rebaseCmd).not.toContain("origin/master")
+  })
+
+  it("rebases non-mergeable PRs onto local base branch (no origin/ prefix)", async () => {
+    execFilePromise.mockImplementation((cmd: string, args: string[]) => {
+      const key = `${cmd} ${args.join(" ")}`.trim()
+      callLog.push(key)
+
+      if (key.includes("repo view") && key.includes("defaultBranchRef")) return ok("master")
+      if (key.includes("pr view") && key.includes("mergeable")) return ok("CONFLICTING")
+      if (key.includes("pr view") && key.includes(".state")) return ok("OPEN")
+      if (key.includes("rev-parse HEAD")) return ok("abc123")
+      return ok()
+    })
+
+    const ctx = createMockContext()
+    ctx.dags.set("dag-1", makeTwoNodeDag())
+
+    const manager = new LandingManager(ctx)
+    const session = makeSession({ dagId: "dag-1", cwd: tmpDir })
+
+    await runLanding(manager, session)
+
+    const rebaseOntoCmd = callLog.find(
+      (c) => c.startsWith("git rebase --onto") && c.includes("minion/a"),
+    )
+    expect(rebaseOntoCmd).toBeDefined()
+    expect(rebaseOntoCmd).toContain("master")
+    expect(rebaseOntoCmd).not.toContain("origin/master")
+  })
+
   it("reopens auto-closed PRs during restack", async () => {
     let prView2StateCount = 0
     execFilePromise.mockImplementation((cmd: string, args: string[]) => {

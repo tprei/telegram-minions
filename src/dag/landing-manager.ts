@@ -243,13 +243,11 @@ export class LandingManager {
           )
 
           try {
-            const newBase = `origin/${baseBranch}`
-
             await git(["fetch", "origin", baseBranch, downstream.branch], { cwd: restackCwd })
             if (!useOwnWorktree) {
               await git(["checkout", downstream.branch], { cwd: restackCwd })
             }
-            await git(["rebase", "--onto", newBase, downstream.mergeBase!, downstream.branch], { cwd: restackCwd })
+            await git(["rebase", "--onto", baseBranch, downstream.mergeBase!, downstream.branch], { cwd: restackCwd })
             await git(["push", "--force-with-lease", "origin", downstream.branch], { cwd: restackCwd })
 
             downstream.mergeBase = await git(["rev-parse", "HEAD"], { cwd: restackCwd, timeout: 10_000 })
@@ -400,9 +398,9 @@ export class LandingManager {
         await git(["checkout", node.branch], { cwd })
       }
       if (node.mergeBase) {
-        await git(["rebase", "--onto", `origin/${baseBranch}`, node.mergeBase, node.branch], { cwd })
+        await git(["rebase", "--onto", baseBranch, node.mergeBase, node.branch], { cwd })
       } else {
-        await git(["rebase", `origin/${baseBranch}`], { cwd })
+        await git(["rebase", baseBranch], { cwd })
       }
       await git(["push", "--force-with-lease", "origin", node.branch], { cwd })
 
@@ -562,7 +560,7 @@ export class LandingManager {
     if (cwd) {
       for (const name of ["main", "master"]) {
         try {
-          await git(["rev-parse", "--verify", `origin/${name}`], { cwd, timeout: 10_000 })
+          await git(["rev-parse", "--verify", `refs/heads/${name}`], { cwd, timeout: 10_000 })
           return name
         } catch { /* try next */ }
       }
