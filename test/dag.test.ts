@@ -17,6 +17,7 @@ import {
   renderDagStatus,
   renderDagForGitHub,
   upsertDagSection,
+  nodeIndex,
   DAG_STATUS_START,
   DAG_STATUS_END,
   type DagGraph,
@@ -1262,5 +1263,34 @@ describe("ci-pending and ci-failed statuses", () => {
     const toRestack = needsRestack(graph, "a")
     expect(toRestack).toHaveLength(1)
     expect(toRestack[0].id).toBe("b")
+  })
+})
+
+describe("nodeIndex", () => {
+  it("builds a Map from node ID to DagNode", () => {
+    const items: DagInput[] = [
+      { id: "a", title: "A", description: "", dependsOn: [] },
+      { id: "b", title: "B", description: "", dependsOn: ["a"] },
+      { id: "c", title: "C", description: "", dependsOn: ["a"] },
+    ]
+    const graph = buildDag("idx-test", items, 1, "repo")
+    const idx = nodeIndex(graph)
+
+    expect(idx.size).toBe(3)
+    expect(idx.get("a")).toBe(graph.nodes[0])
+    expect(idx.get("b")).toBe(graph.nodes[1])
+    expect(idx.get("c")).toBe(graph.nodes[2])
+    expect(idx.get("nonexistent")).toBeUndefined()
+  })
+
+  it("returns references to the same node objects (mutations are visible)", () => {
+    const items: DagInput[] = [
+      { id: "x", title: "X", description: "", dependsOn: [] },
+    ]
+    const graph = buildDag("mut-test", items, 1, "repo")
+    const idx = nodeIndex(graph)
+
+    idx.get("x")!.status = "running"
+    expect(graph.nodes[0].status).toBe("running")
   })
 })
