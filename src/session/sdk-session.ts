@@ -10,6 +10,7 @@ import { isQuotaError, parseResetTime } from "./quota-detection.js"
 import { DEFAULT_TASK_PROMPT, DEFAULT_PLAN_PROMPT, DEFAULT_THINK_PROMPT, DEFAULT_REVIEW_PROMPT, DEFAULT_DAG_REVIEW_PROMPT, DEFAULT_SHIP_PLAN_PROMPT, DEFAULT_SHIP_VERIFY_PROMPT } from "../config/prompts.js"
 import { createSessionLogger } from "../logger.js"
 import { injectAgentFiles } from "./inject-assets.js"
+import { CappedStderrBuffer } from "./capped-stderr-buffer.js"
 import { type SessionConfig, SCREENSHOTS_DIR } from "./session.js"
 
 export type SDKSessionEventCallback = (event: GooseStreamEvent) => void
@@ -50,7 +51,7 @@ export class SDKSessionHandle implements SessionPort {
   private inactivityHandle: ReturnType<typeof setTimeout> | null = null
   private completionResolve: ((result: SessionDoneState) => void) | null = null
   private completionPromise: Promise<SessionDoneState>
-  private stderrChunks: string[] = []
+  private stderrBuffer = new CappedStderrBuffer()
   private log: ReturnType<typeof createSessionLogger>
 
   constructor(
@@ -530,13 +531,13 @@ export class SDKSessionHandle implements SessionPort {
     proc.stderr?.on("data", (chunk: Buffer) => {
       resetInactivityTimer()
       const text = chunk.toString()
-      this.stderrChunks.push(text)
+      this.stderrBuffer.push(text)
       this.log.debug({ stderr: text }, "process stderr")
     })
 
     proc.on("close", (code) => {
       this.clearTimers()
-      const stderrText = this.stderrChunks.join("")
+      const stderrText = this.stderrBuffer.toString()
 
       if (code !== 0 && code !== null) {
         if (isQuotaError(stderrText)) {
