@@ -32,6 +32,7 @@ export interface PendingTask {
   repoUrl?: string
   mode: "task" | "plan" | "think" | "review" | "ship-think"
   autoAdvance?: AutoAdvance
+  createdAt: number
 }
 
 /**
