@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process"
-import { createInterface } from "node:readline"
+import { createInterface, type Interface } from "node:readline"
 import fs from "node:fs"
 import path from "node:path"
 import type { GooseStreamEvent } from "../domain/goose-types.js"
@@ -50,6 +50,7 @@ export class SDKSessionHandle implements SessionPort {
   private inactivityHandle: ReturnType<typeof setTimeout> | null = null
   private completionResolve: ((result: SessionDoneState) => void) | null = null
   private completionPromise: Promise<SessionDoneState>
+  private rl: Interface | null = null
   private stderrChunks: string[] = []
   private log: ReturnType<typeof createSessionLogger>
 
@@ -503,7 +504,7 @@ export class SDKSessionHandle implements SessionPort {
     const proc = this.process!
     this.state = "working"
 
-    const rl = createInterface({ input: proc.stdout! })
+    this.rl = createInterface({ input: proc.stdout! })
 
     const resetInactivityTimer = () => {
       if (this.inactivityHandle !== null) clearTimeout(this.inactivityHandle)
@@ -520,7 +521,7 @@ export class SDKSessionHandle implements SessionPort {
     }
     resetInactivityTimer()
 
-    rl.on("line", (line) => {
+    this.rl.on("line", (line) => {
       const trimmed = line.trim()
       if (!trimmed) return
       resetInactivityTimer()
@@ -612,6 +613,10 @@ export class SDKSessionHandle implements SessionPort {
     if (this.inactivityHandle !== null) {
       clearTimeout(this.inactivityHandle)
       this.inactivityHandle = null
+    }
+    if (this.rl !== null) {
+      this.rl.close()
+      this.rl = null
     }
   }
 }
