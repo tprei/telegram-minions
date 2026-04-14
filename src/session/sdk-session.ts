@@ -53,6 +53,9 @@ export class SDKSessionHandle implements SessionPort {
   private completionPromise: Promise<SessionDoneState>
   private stderrBuffer = new CappedStderrBuffer()
   private log: ReturnType<typeof createSessionLogger>
+  private lastStdoutAt: number = 0
+  private stdoutLineCount: number = 0
+  private startedAt: number = 0
 
   constructor(
     readonly meta: SessionMeta,
@@ -503,18 +506,37 @@ export class SDKSessionHandle implements SessionPort {
   private attachProcessHandlers(): void {
     const proc = this.process!
     this.state = "working"
+    this.startedAt = Date.now()
+    this.lastStdoutAt = this.startedAt
 
     const rl = createInterface({ input: proc.stdout! })
 
     const resetInactivityTimer = () => {
       if (this.inactivityHandle !== null) clearTimeout(this.inactivityHandle)
       this.inactivityHandle = setTimeout(() => {
-        this.log.warn({ inactivityTimeoutMs: this.inactivityTimeoutMs }, "inactivity timeout — no stdout, killing")
+        const now = Date.now()
+        const sinceLastStdout = now - this.lastStdoutAt
+        const sinceStart = now - this.startedAt
+        this.log.warn(
+          {
+            inactivityTimeoutMs: this.inactivityTimeoutMs,
+            slug: this.meta.topicName,
+            cwd: this.meta.cwd,
+            mode: this.meta.mode,
+            stdoutLineCount: this.stdoutLineCount,
+            msSinceLastStdout: sinceLastStdout,
+            msSinceStart: sinceStart,
+            stderrTail: this.stderrBuffer.toString().slice(-1500),
+          },
+          "inactivity timeout — no stdout, killing",
+        )
         captureException(new Error("SDK session inactivity timeout"), {
           sessionId: this.meta.sessionId,
           repo: this.meta.repo,
           mode: this.meta.mode,
           inactivityTimeoutMs: this.inactivityTimeoutMs,
+          stdoutLineCount: this.stdoutLineCount,
+          msSinceLastStdout: sinceLastStdout,
         })
         this.interrupt()
       }, this.inactivityTimeoutMs)
@@ -524,6 +546,8 @@ export class SDKSessionHandle implements SessionPort {
     rl.on("line", (line) => {
       const trimmed = line.trim()
       if (!trimmed) return
+      this.lastStdoutAt = Date.now()
+      this.stdoutLineCount++
       resetInactivityTimer()
       this.parseClaudeLine(trimmed)
     })
@@ -535,7 +559,7 @@ export class SDKSessionHandle implements SessionPort {
       this.log.debug({ stderr: text }, "process stderr")
     })
 
-    proc.on("close", (code) => {
+    proc.on("close", (code, signal) => {
       this.clearTimers()
       const stderrText = this.stderrBuffer.toString()
 
@@ -550,11 +574,16 @@ export class SDKSessionHandle implements SessionPort {
           return
         }
 
+        this.log.error(
+          { exitCode: code, signal, stderrTail: stderrText.slice(-2000), stderrBytes: this.stderrBuffer.byteLength },
+          "SDK session process exited non-zero",
+        )
         captureException(new Error(`SDK session process exited with code ${code}`), {
           sessionId: this.meta.sessionId,
           repo: this.meta.repo,
           mode: this.meta.mode,
           exitCode: code,
+          stderrTail: stderrText.slice(-2000),
         })
       }
       const finalState: SessionDoneState = code === 0 ? "completed" : "errored"
@@ -578,12 +607,23 @@ export class SDKSessionHandle implements SessionPort {
     })
 
     this.timeoutHandle = setTimeout(() => {
-      this.log.warn({ timeoutMs: this.timeoutMs }, "session timeout")
+      this.log.warn(
+        {
+          timeoutMs: this.timeoutMs,
+          slug: this.meta.topicName,
+          cwd: this.meta.cwd,
+          mode: this.meta.mode,
+          stdoutLineCount: this.stdoutLineCount,
+          msSinceLastStdout: Date.now() - this.lastStdoutAt,
+        },
+        "session timeout",
+      )
       captureException(new Error("SDK session timed out"), {
         sessionId: this.meta.sessionId,
         repo: this.meta.repo,
         mode: this.meta.mode,
         timeoutMs: this.timeoutMs,
+        stdoutLineCount: this.stdoutLineCount,
       })
       this.interrupt()
     }, this.timeoutMs)
