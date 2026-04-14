@@ -70,13 +70,6 @@ interface AdvocateOutput {
   searchCount: number
 }
 
-export interface JudgeArenaResult {
-  decision?: JudgeDecision
-  options?: JudgeOption[]
-  advocateResults?: JudgeAdvocateResult[]
-  error?: string
-}
-
 export class JudgeOrchestrator {
   private readonly ctx: DispatcherContext
 
