@@ -1061,18 +1061,24 @@ export function formatLandPreflightPassed(count: number): string {
   return `✅ <b>Pre-flight passed</b>  ·  Cherry-picked ${count} node${count === 1 ? "" : "s"} cleanly. Landing now…`
 }
 
-export function formatLandPreflightFailed(nodeTitle: string, files: string[]): string {
-  const fileList = files.length > 0
-    ? files.slice(0, 10).map((f) => `  • <code>${esc(f)}</code>`).join("\n")
-    : "  <i>(unknown files)</i>"
-  const extra = files.length > 10 ? `\n  …and ${files.length - 10} more` : ""
-  return [
-    `⚠️ <b>Pre-flight failed</b> at: ${esc(nodeTitle)}`,
-    `Conflicts in:`,
-    fileList + extra,
+export function formatLandPreflightFailed(nodeTitle: string, files: string[], errorMessage?: string): string {
+  const lines: string[] = [`⚠️ <b>Pre-flight failed</b> at: ${esc(nodeTitle)}`]
+
+  if (files.length > 0) {
+    const fileList = files.slice(0, 10).map((f) => `  • <code>${esc(f)}</code>`).join("\n")
+    const extra = files.length > 10 ? `\n  …and ${files.length - 10} more` : ""
+    lines.push(`Conflicts in:`, fileList + extra)
+  } else if (errorMessage) {
+    lines.push(`Reason: <code>${esc(errorMessage)}</code>`)
+  } else {
+    lines.push(`Reason: <i>unknown (no conflict files reported)</i>`)
+  }
+
+  lines.push(
     ``,
     `<b>Nothing was landed.</b> Use <code>/resolve ${esc(nodeTitle)}</code> to route to the child session, or <code>/doctor</code> to diagnose.`,
-  ].join("\n")
+  )
+  return lines.join("\n")
 }
 
 export function formatLandProgress(title: string, prUrl: string, index: number, total: number): string {

@@ -166,6 +166,23 @@ describe("runPreflightStaging", () => {
     }
   })
 
+  it("identifies the owning node when a branch is missing on origin", async () => {
+    const { localCwd, graph, nodes } = setupFixture(false)
+    fixtures.push(localCwd)
+
+    // Delete minion/b from the remote so preflight's fetch fails on it
+    execFileSync("git", ["push", "origin", "--delete", "minion/b"], { cwd: localCwd, stdio: "pipe" })
+
+    const result = await runPreflightStaging(graph, nodes, "master", localCwd)
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.failedNode?.id).toBe("b")
+      expect(result.error).toContain("minion/b")
+      expect(result.error).toContain("does not exist on origin")
+    }
+  })
+
   it("leaves the host worktree clean after a conflict", async () => {
     const { localCwd, graph, nodes } = setupFixture(true)
     fixtures.push(localCwd)
