@@ -127,7 +127,7 @@ export class LandingManager {
     if (!preflight.ok) {
       const title = preflight.failedNode?.title ?? "unknown node"
       await this.ctx.telegram.sendMessage(
-        formatLandPreflightFailed(title, preflight.conflictFiles ?? []),
+        formatLandPreflightFailed(title, preflight.conflictFiles ?? [], preflight.error),
         topicSession.threadId,
       )
       if (preflight.error) {

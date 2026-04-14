@@ -102,6 +102,18 @@ export async function runPreflightStaging(
       await git(["fetch", "origin", baseBranch, ...branches], hostCwd, FETCH_TIMEOUT)
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
+      const missingMatch = msg.match(/couldn't find remote ref (\S+)/)
+      if (missingMatch) {
+        const missingBranch = missingMatch[1].trim()
+        const failedNode = prNodes.find((n) => n.branch === missingBranch)
+        return {
+          ok: false,
+          failedNode,
+          error: failedNode
+            ? `Branch ${missingBranch} does not exist on origin — node "${failedNode.id}" never pushed (its child session likely errored before pushing)`
+            : `Branch ${missingBranch} does not exist on origin`,
+        }
+      }
       return { ok: false, error: `fetch failed: ${msg}` }
     }
 
