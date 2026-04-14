@@ -7,7 +7,7 @@ import { SDKSessionHandle } from "../session/sdk-session.js"
 import { ReplyQueue } from "../reply-queue.js"
 import { Observer } from "../telegram/observer.js"
 import type { GooseStreamEvent } from "../domain/goose-types.js"
-import type { SessionMeta, SessionDoneState, SessionPort, TopicSession, SessionMode, SessionState, TopicMessage } from "../domain/session-types.js"
+import type { SessionMeta, SessionDoneState, SessionPort, TopicSession, SessionMode, SessionState, TopicMessage, WorkspaceRef } from "../domain/session-types.js"
 import type { TelegramPhotoSize } from "../domain/telegram-types.js"
 import type { AutoAdvance } from "../domain/workflow-types.js"
 import { generateSlug, taskToLabel } from "../slugs.js"
@@ -746,7 +746,7 @@ export class Dispatcher {
     if (shouldSkip) {
       await this.platform.chat.sendMessage(`⏭️ Skipping — previous PR still open.`, String(threadId))
       await this.platform.threads.deleteThread(String(threadId))
-      await this.removeWorkspace({ cwd, slug, threadId, repo, conversation: [], pendingFeedback: [], mode: "task", lastActivityAt: 0 })
+      await this.removeWorkspace({ cwd })
       this.loopScheduler?.recordOutcome(loopId, {
         runNumber: state.totalRuns + 1,
         startedAt: Date.now(),
@@ -1841,7 +1841,7 @@ export class Dispatcher {
     return prepareWorkspace(slug, this.config.workspace.root, repoUrl, startBranch)
   }
 
-  private async removeWorkspace(topicSession: TopicSession): Promise<void> {
+  private async removeWorkspace(topicSession: WorkspaceRef): Promise<void> {
     return removeWorkspace(topicSession, this.config.workspace.root)
   }
 

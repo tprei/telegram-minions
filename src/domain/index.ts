@@ -33,6 +33,7 @@ export type {
   SessionMeta,
   TopicMessage,
   TopicSession,
+  WorkspaceRef,
   PendingDagItem,
 } from "./session-types.js"
 
