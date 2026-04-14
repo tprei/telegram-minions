@@ -5,7 +5,9 @@ import { topologicalSort, type DagGraph, type DagNode, type DagNodeStatus } from
 
 const log = loggers.dispatcher
 const execFile = promisify(execFileCb)
-const GH_TIMEOUT = 30_000
+const GH_LIST_TIMEOUT = 90_000
+const GH_PATCH_TIMEOUT = 90_000
+const GH_POST_TIMEOUT = 90_000
 
 const SENTINEL_START = "<!-- tm-stack-comment-start -->"
 const SENTINEL_END = "<!-- tm-stack-comment-end -->"
@@ -125,7 +127,7 @@ async function findOurComment(
     const { stdout } = await execFile(
       "gh",
       ["api", `repos/${owner}/${repo}/issues/${prNumber}/comments`, "--paginate"],
-      { timeout: GH_TIMEOUT, encoding: "utf-8", env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } },
+      { timeout: GH_LIST_TIMEOUT, encoding: "utf-8", env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } },
     )
     const parsed = JSON.parse(stdout) as Array<{ id: number; body: string }>
     for (const c of parsed) {
@@ -161,7 +163,7 @@ async function patchComment(
     let stderr = ""
     proc.stderr?.on("data", (chunk: Buffer) => { stderr += chunk.toString() })
     proc.stdin.end(JSON.stringify({ body }))
-    const timer = setTimeout(() => { proc.kill("SIGKILL"); reject(new Error("gh api PATCH timed out")) }, GH_TIMEOUT)
+    const timer = setTimeout(() => { proc.kill("SIGKILL"); reject(new Error("gh api PATCH timed out")) }, GH_PATCH_TIMEOUT)
     proc.on("close", (code) => {
       clearTimeout(timer)
       if (code === 0) resolve()
@@ -194,7 +196,7 @@ async function postNewComment(
     proc.stdout?.on("data", (chunk: Buffer) => { stdout += chunk.toString() })
     proc.stderr?.on("data", (chunk: Buffer) => { stderr += chunk.toString() })
     proc.stdin.end(JSON.stringify({ body }))
-    const timer = setTimeout(() => { proc.kill("SIGKILL"); reject(new Error("gh api POST timed out")) }, GH_TIMEOUT)
+    const timer = setTimeout(() => { proc.kill("SIGKILL"); reject(new Error("gh api POST timed out")) }, GH_POST_TIMEOUT)
     proc.on("close", (code) => {
       clearTimeout(timer)
       if (code !== 0) { reject(new Error(`gh api POST exited ${code}: ${stderr.trim()}`)); return }

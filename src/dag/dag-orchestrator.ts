@@ -617,7 +617,7 @@ export class DagOrchestrator {
         const { stdout: currentBody } = await execFile(
           "gh",
           ["pr", "view", prNumber, ...repoFlag, "--json", "body", "--jq", ".body"],
-          { cwd, timeout: 30_000, encoding: "utf-8", env: { ...process.env } },
+          { cwd, timeout: 90_000, encoding: "utf-8", env: { ...process.env } },
         )
 
         const newBody = upsertDagSection(currentBody, dagSection)
@@ -629,7 +629,7 @@ export class DagOrchestrator {
             env: { ...process.env },
           })
           proc.stdin.end(newBody)
-          const timer = setTimeout(() => { proc.kill(); reject(new Error("gh pr edit timed out")) }, 30_000)
+          const timer = setTimeout(() => { proc.kill(); reject(new Error("gh pr edit timed out")) }, 90_000)
           proc.on("close", (code) => { clearTimeout(timer); if (code === 0) resolve(); else reject(new Error(`gh pr edit exited ${code}`)) })
           proc.on("error", (err) => { clearTimeout(timer); reject(err) })
         })
