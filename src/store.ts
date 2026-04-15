@@ -13,6 +13,15 @@ interface StoreData {
   offset: number
 }
 
+function isStoreData(value: unknown): value is StoreData {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "sessions" in value &&
+    Array.isArray((value as StoreData).sessions)
+  )
+}
+
 export class SessionStore {
   private readonly filePath: string
   private readonly backupPath: string
@@ -74,10 +83,10 @@ export class SessionStore {
   private async loadFile(filePath: string): Promise<{ parsed: unknown; raw: string; offset: number } | null> {
     try {
       const raw = await fs.readFile(filePath, "utf-8")
-      const parsed = JSON.parse(raw)
+      const parsed: unknown = JSON.parse(raw)
       let offset = 0
-      if (parsed && !Array.isArray(parsed)) {
-        offset = (parsed as StoreData).offset || 0
+      if (isStoreData(parsed)) {
+        offset = parsed.offset || 0
       }
       return { parsed, raw, offset }
     } catch (err) {
@@ -93,9 +102,9 @@ export class SessionStore {
   private parseEntries(parsed: unknown, _raw: string, active: Map<number, TopicSession>, expired: Map<number, TopicSession>): void {
     let entries: [number, TopicSession][]
     if (Array.isArray(parsed)) {
-      entries = parsed as [number, TopicSession][]
-    } else if (parsed && typeof parsed === "object") {
-      entries = (parsed as StoreData).sessions ?? []
+      entries = parsed
+    } else if (isStoreData(parsed)) {
+      entries = parsed.sessions
     } else {
       entries = []
     }
