@@ -79,6 +79,8 @@ export interface TopicSession {
   pipelineAdvancing?: boolean
 }
 
+export type WorkspaceRef = Pick<TopicSession, "cwd" | "repoUrl" | "branch">
+
 export interface PendingDagItem {
   id: string
   title: string

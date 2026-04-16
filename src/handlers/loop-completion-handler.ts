@@ -23,7 +23,7 @@ export interface LoopSchedulerProvider {
 }
 
 export interface LoopThreadCleaner {
-  removeWorkspace(topicSession: import("../domain/session-types.js").TopicSession): Promise<void>
+  removeWorkspace(topicSession: import("../domain/session-types.js").WorkspaceRef): Promise<void>
   deleteTopicSession(threadId: number): void
   broadcastSessionDeleted(slug: string): void
 }

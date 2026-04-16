@@ -65,6 +65,22 @@ import {
   formatLandSummary,
   formatLandConflictResolution,
   formatLandRestacking,
+  formatPinnedStatus,
+  formatQuotaSleep,
+  formatStats,
+  formatDagAnalyzing,
+  formatDagStart,
+  formatDagNodeSkipped,
+  formatDagAllDone,
+  formatDagReviewStart,
+  formatDagReviewComplete,
+  formatThinkStart, formatThinkComplete, formatThinkIteration,
+  formatDagCIWaiting,
+  formatDagCIFailed,
+  formatDagForceAdvance,
+  formatLandPreflightStart,
+  formatLandPreflightPassed,
+  formatLandPreflightFailed,
 } from "../src/telegram/format.js"
 import type { ClaudeUsageResponse } from "../src/claude-usage.js"
 import type { AggregateStats, SessionRecord, ModeBreakdown } from "../src/stats.js"
@@ -2016,6 +2032,250 @@ describe("formatPinnedDagStatus", () => {
       expect(result).toContain("cool-fox")
       expect(result).toContain("3/3 attempts")
       expect(result).toContain("/reply")
+    })
+  })
+
+  describe("formatPinnedStatus", () => {
+    it("maps status to correct icon and label", () => {
+      expect(formatPinnedStatus("s", "r", "completed")).toContain("✅")
+      expect(formatPinnedStatus("s", "r", "errored")).toContain("❌")
+      expect(formatPinnedStatus("s", "r", "working")).toContain("⚡")
+    })
+
+    it("includes slug, repo, and PR link", () => {
+      const result = formatPinnedStatus("bold-arc", "org/repo", "completed", "https://github.com/org/repo/pull/42")
+      expect(result).toContain("bold-arc")
+      expect(result).toContain("org/repo")
+      expect(result).toContain("#42")
+    })
+
+    it("shows extra label/state when no PR", () => {
+      const result = formatPinnedStatus("s", "r", "working", undefined, { label: "auth", state: "Planning" })
+      expect(result).toContain("Planning")
+      expect(result).toContain("auth")
+    })
+
+    it("escapes HTML entities", () => {
+      const result = formatPinnedStatus("a<b", "r&p", "completed")
+      expect(result).toContain("a&lt;b")
+      expect(result).toContain("r&amp;p")
+    })
+  })
+
+  describe("formatQuotaSleep", () => {
+    it("includes slug, minutes, and attempt info", () => {
+      const result = formatQuotaSleep("cool-fox", 30 * 60_000, 2, 5)
+      expect(result).toContain("Quota exhausted")
+      expect(result).toContain("cool-fox")
+      expect(result).toContain("~30 min")
+      expect(result).toContain("attempt 2/5")
+      expect(result).toContain("resume automatically")
+    })
+  })
+
+  describe("formatStats", () => {
+    it("formats aggregate stats with counts and tokens", () => {
+      const result = formatStats({ totalSessions: 10, completedSessions: 8, erroredSessions: 2, totalTokens: 50000, totalDurationMs: 3600_000, avgDurationMs: 360_000 })
+      expect(result).toContain("10 total")
+      expect(result).toContain("8 completed")
+      expect(result).toContain("50,000")
+    })
+
+    it("shows n/a avg when no completed sessions", () => {
+      const result = formatStats({ totalSessions: 1, completedSessions: 0, erroredSessions: 1, totalTokens: 0, totalDurationMs: 0, avgDurationMs: 0 })
+      expect(result).toContain("n/a")
+    })
+  })
+
+  describe("formatDagAnalyzing", () => {
+    it("includes slug and analyzing message", () => {
+      const result = formatDagAnalyzing("cool-fox")
+      expect(result).toContain("Analyzing conversation")
+      expect(result).toContain("cool-fox")
+      expect(result).toContain("dependencies")
+    })
+  })
+
+  describe("formatDagStart", () => {
+    it("formats DAG mode with children and dependencies", () => {
+      const children = [{ slug: "a", title: "Add auth", dependsOn: [] as string[] }, { slug: "b", title: "Add tests", dependsOn: ["a"] }]
+      const result = formatDagStart("cool-fox", children, false)
+      expect(result).toContain("DAG: 2 tasks")
+      expect(result).toContain("← a")
+      expect(result).toContain("parallel")
+    })
+
+    it("formats stack mode with sequential message", () => {
+      const result = formatDagStart("s", [{ slug: "a", title: "Step 1", dependsOn: [] }], true)
+      expect(result).toContain("Stack: 1 tasks")
+      expect(result).toContain("sequentially")
+    })
+  })
+
+  describe("formatDagNodeSkipped", () => {
+    it("includes title and reason", () => {
+      const result = formatDagNodeSkipped("Add tests", "dependency failed")
+      expect(result).toContain("Skipped")
+      expect(result).toContain("Add tests")
+      expect(result).toContain("dependency failed")
+    })
+  })
+
+  describe("formatDagAllDone", () => {
+    it("shows success count", () => {
+      const result = formatDagAllDone(3, 3, 0)
+      expect(result).toContain("DAG complete")
+      expect(result).toContain("3/3 succeeded")
+      expect(result).not.toContain("failed")
+    })
+
+    it("shows failure count when present", () => {
+      const result = formatDagAllDone(2, 3, 1)
+      expect(result).toContain("2/3 succeeded")
+      expect(result).toContain("1 failed")
+    })
+  })
+
+  describe("formatDagReviewStart", () => {
+    it("includes slug, repo, and task", () => {
+      const result = formatDagReviewStart("org/repo", "cool-fox", "review the dag")
+      expect(result).toContain("cool-fox")
+      expect(result).toContain("org/repo")
+      expect(result).toContain("review the dag")
+    })
+  })
+
+  describe("formatThinkStart / formatThinkComplete / formatThinkIteration", () => {
+    it("formatThinkStart includes slug and repo", () => {
+      const result = formatThinkStart("org/repo", "cool-fox", "analyze auth flow")
+      expect(result).toContain("cool-fox")
+      expect(result).toContain("org/repo")
+    })
+
+    it("formatThinkComplete includes slug", () => {
+      expect(formatThinkComplete("cool-fox")).toContain("cool-fox")
+    })
+
+    it("formatThinkIteration includes slug and iteration", () => {
+      const result = formatThinkIteration("cool-fox", 3)
+      expect(result).toContain("cool-fox")
+      expect(result).toContain("3")
+    })
+  })
+
+  describe("formatDagReviewComplete", () => {
+    it("includes slug", () => {
+      expect(formatDagReviewComplete("cool-fox")).toContain("cool-fox")
+    })
+  })
+
+  describe("formatDagCIWaiting", () => {
+    it("includes slug, node title, and PR link", () => {
+      const result = formatDagCIWaiting("cool-fox", "Add auth", "https://github.com/org/repo/pull/42")
+      expect(result).toContain("cool-fox")
+      expect(result).toContain("Add auth")
+      expect(result).toContain("https://github.com/org/repo/pull/42")
+    })
+
+    it("escapes HTML in node title", () => {
+      const result = formatDagCIWaiting("slug", "Fix <script>", "https://github.com/org/repo/pull/1")
+      expect(result).toContain("Fix &lt;script&gt;")
+      expect(result).not.toContain("<script>")
+    })
+  })
+
+  describe("formatDagCIFailed", () => {
+    it("includes slug, node title, and PR link", () => {
+      const result = formatDagCIFailed("cool-fox", "Add auth", "https://github.com/org/repo/pull/42", "block")
+      expect(result).toContain("cool-fox")
+      expect(result).toContain("Add auth")
+      expect(result).toContain("https://github.com/org/repo/pull/42")
+    })
+
+    it("shows block message when policy is block", () => {
+      const result = formatDagCIFailed("slug", "node", "https://github.com/org/repo/pull/1", "block")
+      expect(result).toContain("Dependents blocked")
+      expect(result).toContain("/force")
+      expect(result).toContain("/retry")
+    })
+
+    it("shows proceed message when policy is warn", () => {
+      const result = formatDagCIFailed("slug", "node", "https://github.com/org/repo/pull/1", "warn")
+      expect(result).toContain("Proceeding with dependents")
+      expect(result).toContain("warn")
+    })
+  })
+
+  describe("formatDagForceAdvance", () => {
+    it("includes node title and node ID", () => {
+      const result = formatDagForceAdvance("Add auth middleware", "auth-node")
+      expect(result).toContain("Add auth middleware")
+      expect(result).toContain("auth-node")
+    })
+
+    it("escapes HTML in arguments", () => {
+      const result = formatDagForceAdvance("Fix <b>", "node-<id>")
+      expect(result).toContain("Fix &lt;b&gt;")
+      expect(result).toContain("node-&lt;id&gt;")
+    })
+  })
+
+  describe("formatLandPreflightStart", () => {
+    it("includes slug and count", () => {
+      const result = formatLandPreflightStart("cool-fox", 3)
+      expect(result).toContain("cool-fox")
+      expect(result).toContain("3 PRs")
+    })
+
+    it("uses singular for count of 1", () => {
+      const result = formatLandPreflightStart("cool-fox", 1)
+      expect(result).toContain("1 PR")
+      expect(result).not.toContain("1 PRs")
+    })
+  })
+
+  describe("formatLandPreflightPassed", () => {
+    it("includes count with plural", () => {
+      const result = formatLandPreflightPassed(4)
+      expect(result).toContain("4 nodes")
+      expect(result).toContain("Pre-flight passed")
+    })
+
+    it("uses singular for count of 1", () => {
+      const result = formatLandPreflightPassed(1)
+      expect(result).toContain("1 node")
+      expect(result).not.toContain("1 nodes")
+    })
+  })
+
+  describe("formatLandPreflightFailed", () => {
+    it("shows conflict files", () => {
+      const result = formatLandPreflightFailed("Add auth", ["src/auth.ts", "src/config.ts"])
+      expect(result).toContain("Pre-flight failed")
+      expect(result).toContain("Add auth")
+      expect(result).toContain("src/auth.ts")
+      expect(result).toContain("src/config.ts")
+      expect(result).toContain("Conflicts in")
+    })
+
+    it("shows error message when no conflict files", () => {
+      const result = formatLandPreflightFailed("Add auth", [], "branch not found")
+      expect(result).toContain("Pre-flight failed")
+      expect(result).toContain("branch not found")
+    })
+
+    it("shows unknown reason when no files and no error", () => {
+      const result = formatLandPreflightFailed("Add auth", [])
+      expect(result).toContain("unknown")
+    })
+
+    it("caps conflict files at 10 with overflow message", () => {
+      const files = Array.from({ length: 15 }, (_, i) => `file${i}.ts`)
+      const result = formatLandPreflightFailed("node", files)
+      expect(result).toContain("file0.ts")
+      expect(result).toContain("file9.ts")
+      expect(result).not.toContain("file10.ts")
+      expect(result).toContain("5 more")
     })
   })
 })
