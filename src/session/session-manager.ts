@@ -9,7 +9,7 @@ import path from "node:path"
 import fs from "node:fs"
 import os from "node:os"
 import crypto from "node:crypto"
-import type { SessionMeta, SessionPort, TopicSession } from "../domain/session-types.js"
+import type { SessionMeta, SessionPort, TopicSession, WorkspaceRef } from "../domain/session-types.js"
 import type { AutoAdvance } from "../domain/workflow-types.js"
 import { extractRepoName } from "../commands/command-parser.js"
 import { loggers } from "../logger.js"
@@ -279,7 +279,7 @@ export function prepareWorkspace(
  * Remove a workspace directory, handling worktrees for repos.
  */
 export async function removeWorkspace(
-  topicSession: TopicSession,
+  topicSession: WorkspaceRef,
   workspaceRoot: string,
 ): Promise<void> {
   if (!topicSession.cwd || !fs.existsSync(topicSession.cwd)) return

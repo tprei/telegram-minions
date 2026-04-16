@@ -264,7 +264,7 @@ export class DagOrchestrator {
             threadId,
           )
           await this.ctx.telegram.deleteForumTopic(threadId)
-          await this.ctx.removeWorkspace({ cwd, repoUrl: parent.repoUrl } as TopicSession).catch(() => {})
+          await this.ctx.removeWorkspace({ cwd, repoUrl: parent.repoUrl }).catch(() => {})
           return null
         }
         conflictFiles = mergeResult.conflictFiles

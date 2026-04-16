@@ -11,7 +11,7 @@
 import type { TelegramClient } from "../telegram/telegram.js"
 import type { ChatPlatform } from "../provider/chat-platform.js"
 import type { Observer } from "../telegram/observer.js"
-import type { TopicSession, TopicMessage, SessionDoneState } from "../domain/session-types.js"
+import type { TopicSession, TopicMessage, SessionDoneState, WorkspaceRef } from "../domain/session-types.js"
 import type { TelegramPhotoSize } from "../domain/telegram-types.js"
 import type { MinionConfig, McpConfig } from "../config/config-types.js"
 import type { DagGraph, DagNode, DagInput } from "../dag/dag.js"
@@ -75,7 +75,7 @@ export interface DispatcherContext {
   prepareWorkspace(slug: string, repoUrl?: string, startBranch?: string): Promise<string | null>
 
   /** Remove a session's workspace directory. */
-  removeWorkspace(topicSession: TopicSession): Promise<void>
+  removeWorkspace(topicSession: WorkspaceRef): Promise<void>
 
   /** Clean build artifacts from a workspace. */
   cleanBuildArtifacts(cwd: string): void
