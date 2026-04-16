@@ -1,30 +1,49 @@
 import type { GooseStreamEvent } from "../domain/goose-types.js"
-interface ClaudeStreamEvent {
-  type: string
+
+interface ClaudeContentBlock {
+  type: "text" | "tool_use" | "tool_result" | (string & {})
+  text?: string
+  id?: string
+  name?: string
+  input?: Record<string, unknown>
+  content?: unknown
+}
+
+interface ClaudeStreamEventBase {
   subtype?: string
-  event?: {
-    type: string
-    index?: number
-    content_block?: { type: string; text?: string; id?: string; name?: string }
-    delta?: { type: string; text?: string; partial_json?: string }
-  }
-  message?: {
-    role: string
-    content: Array<{
-      type: string
-      text?: string
-      id?: string
-      name?: string
-      input?: Record<string, unknown>
-      content?: unknown
-    }>
-  }
   result?: string
   is_error?: boolean
   total_cost_usd?: number
   usage?: { output_tokens?: number; input_tokens?: number }
   session_id?: string
 }
+
+interface ClaudeStreamEventStream extends ClaudeStreamEventBase {
+  type: "stream_event"
+  event?: {
+    type: string
+    index?: number
+    content_block?: { type: string; text?: string; id?: string; name?: string }
+    delta?: { type: string; text?: string; partial_json?: string }
+  }
+}
+
+interface ClaudeStreamEventMessage extends ClaudeStreamEventBase {
+  type: "assistant" | "user"
+  message?: {
+    role: "assistant" | "user"
+    content: ClaudeContentBlock[]
+  }
+}
+
+interface ClaudeStreamEventResult extends ClaudeStreamEventBase {
+  type: "result"
+}
+
+type ClaudeStreamEvent =
+  | ClaudeStreamEventStream
+  | ClaudeStreamEventMessage
+  | ClaudeStreamEventResult
 
 export function translateClaudeEvent(raw: ClaudeStreamEvent): GooseStreamEvent | null {
   switch (raw.type) {
