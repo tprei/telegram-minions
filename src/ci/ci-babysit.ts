@@ -87,7 +87,9 @@ export async function findPRByBranch(branch: string, cwd: string): Promise<strin
   }
 }
 
-export async function waitForCI(prUrl: string, cwd: string, ciConfig: CiConfig, signal?: AbortSignal): Promise<CIWaitResult> {
+export type CIProgressCallback = (checks: CICheckResult[]) => void
+
+export async function waitForCI(prUrl: string, cwd: string, ciConfig: CiConfig, signal?: AbortSignal, onProgress?: CIProgressCallback): Promise<CIWaitResult> {
   const baseIntervalMs = ciConfig.pollIntervalMs
   const maxIntervalMs = Math.max(baseIntervalMs, 30_000)
   const timeoutMs = ciConfig.pollTimeoutMs
@@ -115,6 +117,7 @@ export async function waitForCI(prUrl: string, cwd: string, ciConfig: CiConfig, 
         }
       } else {
         emptyChecksSince = null
+        onProgress?.(result.checks)
         const pending = result.checks.filter((c) => c.bucket === "pending")
         if (pending.length === 0) {
           const failed = result.checks.filter((c) => c.bucket === "fail")

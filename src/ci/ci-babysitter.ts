@@ -10,6 +10,7 @@ import {
   buildMergeConflictPrompt,
   checkPRMergeability,
 } from "./ci-babysit.js"
+import type { CICheckResult } from "./ci-babysit.js"
 import {
   formatCIWatching,
   formatCIFailed,
@@ -94,10 +95,20 @@ export class CIBabysitter {
       ? initialQualityReport
       : undefined
 
-    await this.ctx.telegram.sendMessage(
+    const watchMsg = await this.ctx.telegram.sendMessage(
       formatCIWatching(topicSession.slug, prUrl),
       topicSession.threadId,
     )
+    const watchMsgId = watchMsg.messageId
+
+    const updateWatching = (checks: CICheckResult[]) => {
+      if (watchMsgId == null) return
+      this.ctx.telegram.editMessage(
+        watchMsgId,
+        formatCIWatching(topicSession.slug, prUrl, checks),
+        topicSession.threadId,
+      )
+    }
 
     log.info({ prUrl, maxRetries }, "watching CI for PR")
 
@@ -155,12 +166,12 @@ export class CIBabysitter {
     }
 
     if (signal.aborted) return
-    const result = await waitForCI(prUrl, topicSession.cwd, this.ctx.config.ci, signal)
+    const result = await waitForCI(prUrl, topicSession.cwd, this.ctx.config.ci, signal, updateWatching)
     if (signal.aborted) return
 
     if (result.passed && localReport == null) {
       await this.ctx.telegram.sendMessage(
-        formatCIPassed(topicSession.slug, prUrl),
+        formatCIPassed(topicSession.slug, prUrl, result.checks),
         topicSession.threadId,
       )
       log.info({ prUrl }, "CI passed")
@@ -178,19 +189,19 @@ export class CIBabysitter {
 
     const failedChecks = result.checks.filter((c) => c.bucket === "fail")
     const hasRemoteFailures = failedChecks.length > 0
+    let lastChecks: CICheckResult[] = result.checks
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       if (signal.aborted) return
-      const failedGateNames = localReport != null
-        ? localReport.results.filter((r) => !r.passed).map((r) => r.gate)
+      const localFailedChecks: CICheckResult[] = localReport != null
+        ? localReport.results.filter((r) => !r.passed).map((r) => ({
+          name: `local:${r.gate}`, state: "failure" as const, bucket: "fail",
+        }))
         : []
-      const allFailedNames = [
-        ...failedChecks.map((c) => c.name),
-        ...failedGateNames.map((g) => `local:${g}`),
-      ]
+      const allChecks = [...lastChecks, ...localFailedChecks]
 
       await this.ctx.telegram.sendMessage(
-        formatCIFailed(topicSession.slug, allFailedNames, attempt, maxRetries),
+        formatCIFailed(topicSession.slug, allChecks, attempt, maxRetries),
         topicSession.threadId,
       )
 
@@ -250,12 +261,14 @@ export class CIBabysitter {
       }
 
       if (signal.aborted) return
-      const recheck = await waitForCI(prUrl, topicSession.cwd, this.ctx.config.ci, signal)
+      const recheck = await waitForCI(prUrl, topicSession.cwd, this.ctx.config.ci, signal, updateWatching)
       if (signal.aborted) return
+
+      lastChecks = recheck.checks
 
       if (recheck.passed && localFixed) {
         await this.ctx.telegram.sendMessage(
-          formatCIPassed(topicSession.slug, prUrl),
+          formatCIPassed(topicSession.slug, prUrl, recheck.checks),
           topicSession.threadId,
         )
         log.info({ prUrl, attempt }, "CI passed after fix attempt")
@@ -271,7 +284,7 @@ export class CIBabysitter {
     }
 
     await this.ctx.telegram.sendMessage(
-      formatCIGaveUp(topicSession.slug, maxRetries),
+      formatCIGaveUp(topicSession.slug, maxRetries, lastChecks),
       topicSession.threadId,
     )
     topicSession.mode = "task"
@@ -292,12 +305,28 @@ export class CIBabysitter {
 
   private async _babysitDagChildCI(childSession: TopicSession, prUrl: string, signal: AbortSignal): Promise<boolean> {
     await this.ctx.refreshGitToken()
-    const result = await waitForCI(prUrl, childSession.cwd, this.ctx.config.ci, signal)
+
+    const watchMsg = await this.ctx.telegram.sendMessage(
+      formatCIWatching(childSession.slug, prUrl),
+      childSession.threadId,
+    )
+    const watchMsgId = watchMsg.messageId
+
+    const updateWatching = (checks: CICheckResult[]) => {
+      if (watchMsgId == null) return
+      this.ctx.telegram.editMessage(
+        watchMsgId,
+        formatCIWatching(childSession.slug, prUrl, checks),
+        childSession.threadId,
+      )
+    }
+
+    const result = await waitForCI(prUrl, childSession.cwd, this.ctx.config.ci, signal, updateWatching)
     if (signal.aborted) return false
 
     if (result.passed) {
       await this.ctx.telegram.sendMessage(
-        formatCIPassed(childSession.slug, prUrl),
+        formatCIPassed(childSession.slug, prUrl, result.checks),
         childSession.threadId,
       )
       return true
@@ -316,10 +345,11 @@ export class CIBabysitter {
 
     // Attempt CI fix
     const maxRetries = this.ctx.config.ci.maxRetries
+    let lastChecks: CICheckResult[] = result.checks
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       if (signal.aborted) return false
       await this.ctx.telegram.sendMessage(
-        formatCIFailed(childSession.slug, failedChecks.map((c) => c.name), attempt, maxRetries),
+        formatCIFailed(childSession.slug, lastChecks, attempt, maxRetries),
         childSession.threadId,
       )
 
@@ -339,11 +369,12 @@ export class CIBabysitter {
       })
 
       if (signal.aborted) return false
-      const recheck = await waitForCI(prUrl, childSession.cwd, this.ctx.config.ci, signal)
+      const recheck = await waitForCI(prUrl, childSession.cwd, this.ctx.config.ci, signal, updateWatching)
       if (signal.aborted) return false
+      lastChecks = recheck.checks
       if (recheck.passed) {
         await this.ctx.telegram.sendMessage(
-          formatCIPassed(childSession.slug, prUrl),
+          formatCIPassed(childSession.slug, prUrl, recheck.checks),
           childSession.threadId,
         )
         childSession.mode = "task"
@@ -352,7 +383,7 @@ export class CIBabysitter {
     }
 
     await this.ctx.telegram.sendMessage(
-      formatCIGaveUp(childSession.slug, maxRetries),
+      formatCIGaveUp(childSession.slug, maxRetries, lastChecks),
       childSession.threadId,
     )
     childSession.mode = "task"
