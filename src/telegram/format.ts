@@ -72,16 +72,6 @@ export function formatActivityLog(
   return [header, "", ...lines].join("\n")
 }
 
-export function formatToolActivity(
-  toolName: string,
-  args: Record<string, unknown>,
-  toolCount: number,
-): string {
-  const line = formatToolLine(toolName, args)
-  const countPart = toolCount > 1 ? ` (${toolCount} tools)` : ""
-  return `${line}${countPart}`
-}
-
 export function formatSessionStart(
   repo: string,
   slug: string,
