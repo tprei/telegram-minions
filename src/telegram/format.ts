@@ -728,17 +728,32 @@ export function formatStats(
   ].join("\n")
 }
 
-export function formatCIWatching(slug: string, prUrl: string): string {
-  const prNum = prUrl.match(/\/pull\/(\d+)/)?.[1] ?? prUrl
-  return `👀 <b>Watching CI</b>  ·  🏷 <code>${esc(slug)}</code>  ·  PR #${esc(prNum)}`
+import type { CICheckResult } from "../ci/ci-babysit.js"
+
+function checkIcon(bucket: string): string {
+  if (bucket === "pass") return "✅"
+  if (bucket === "fail") return "❌"
+  return "⏳"
 }
 
-export function formatCIFailed(slug: string, failedChecks: string[], attempt: number, maxAttempts: number): string {
-  const checkList = failedChecks.map((c) => `  ❌ ${esc(c)}`).join("\n")
+export function formatCheckList(checks: CICheckResult[]): string {
+  if (checks.length === 0) return ""
+  return checks.map((c) => `  ${checkIcon(c.bucket)} ${esc(c.name)}`).join("\n")
+}
+
+export function formatCIWatching(slug: string, prUrl: string, checks: CICheckResult[] = []): string {
+  const prNum = prUrl.match(/\/pull\/(\d+)/)?.[1] ?? prUrl
+  const header = `👀 <b>Watching CI</b>  ·  🏷 <code>${esc(slug)}</code>  ·  PR #${esc(prNum)}`
+  const list = formatCheckList(checks)
+  return list ? `${header}\n\n${list}` : header
+}
+
+export function formatCIFailed(slug: string, checks: CICheckResult[], attempt: number, maxAttempts: number): string {
+  const list = formatCheckList(checks)
   return [
     `❌ <b>CI failed</b>  ·  🏷 <code>${esc(slug)}</code>  ·  attempt ${attempt}/${maxAttempts}`,
     ``,
-    checkList,
+    list,
   ].join("\n")
 }
 
@@ -746,13 +761,17 @@ export function formatCIFixing(slug: string, attempt: number, maxAttempts: numbe
   return `🔧 <b>Fixing CI</b>  ·  🏷 <code>${esc(slug)}</code>  ·  attempt ${attempt}/${maxAttempts}`
 }
 
-export function formatCIPassed(slug: string, prUrl: string): string {
+export function formatCIPassed(slug: string, prUrl: string, checks: CICheckResult[] = []): string {
   const prNum = prUrl.match(/\/pull\/(\d+)/)?.[1] ?? prUrl
-  return `✅ <b>CI passed</b>  ·  🏷 <code>${esc(slug)}</code>  ·  PR #${esc(prNum)}`
+  const header = `✅ <b>CI passed</b>  ·  🏷 <code>${esc(slug)}</code>  ·  PR #${esc(prNum)}`
+  const list = formatCheckList(checks)
+  return list ? `${header}\n\n${list}` : header
 }
 
-export function formatCIGaveUp(slug: string, maxAttempts: number): string {
-  return `🛑 <b>CI still failing</b>  ·  🏷 <code>${esc(slug)}</code>  ·  gave up after ${maxAttempts} attempt${maxAttempts === 1 ? "" : "s"}`
+export function formatCIGaveUp(slug: string, maxAttempts: number, checks: CICheckResult[] = []): string {
+  const header = `🛑 <b>CI still failing</b>  ·  🏷 <code>${esc(slug)}</code>  ·  gave up after ${maxAttempts} attempt${maxAttempts === 1 ? "" : "s"}`
+  const list = formatCheckList(checks)
+  return list ? `${header}\n\n${list}` : header
 }
 
 export function formatCIConflicts(slug: string, prUrl: string): string {

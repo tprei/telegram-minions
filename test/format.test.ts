@@ -30,6 +30,7 @@ import {
   formatCIConflicts,
   formatCIResolvingConflicts,
   formatCINoChecks,
+  formatCheckList,
   formatCIWatching,
   formatCIFailed,
   formatCIFixing,
@@ -1904,6 +1905,24 @@ describe("formatPinnedDagStatus", () => {
   })
 
 
+  describe("formatCheckList", () => {
+    it("returns empty string for empty checks", () => {
+      expect(formatCheckList([])).toBe("")
+    })
+
+    it("renders pass/fail/pending icons per check", () => {
+      const checks = [
+        { name: "build", state: "success", bucket: "pass" },
+        { name: "lint", state: "failure", bucket: "fail" },
+        { name: "deploy", state: "pending", bucket: "pending" },
+      ]
+      const result = formatCheckList(checks)
+      expect(result).toContain("✅ build")
+      expect(result).toContain("❌ lint")
+      expect(result).toContain("⏳ deploy")
+    })
+  })
+
   describe("formatCIWatching", () => {
     it("includes slug and PR number", () => {
       const result = formatCIWatching("cool-fox", "https://github.com/org/repo/pull/42")
@@ -1921,20 +1940,38 @@ describe("formatPinnedDagStatus", () => {
       const result = formatCIWatching("<b>test</b>", "https://github.com/org/repo/pull/1")
       expect(result).toContain("&lt;b&gt;test&lt;/b&gt;")
     })
+
+    it("shows check statuses when checks are provided", () => {
+      const checks = [
+        { name: "build", state: "success", bucket: "pass" },
+        { name: "test", state: "pending", bucket: "pending" },
+      ]
+      const result = formatCIWatching("cool-fox", "https://github.com/org/repo/pull/42", checks)
+      expect(result).toContain("Watching CI")
+      expect(result).toContain("✅ build")
+      expect(result).toContain("⏳ test")
+    })
   })
 
   describe("formatCIFailed", () => {
-    it("includes slug, attempt info, and failed check names", () => {
-      const result = formatCIFailed("cool-fox", ["build", "lint"], 1, 3)
+    it("includes slug, attempt info, and check statuses", () => {
+      const checks = [
+        { name: "build", state: "failure", bucket: "fail" },
+        { name: "lint", state: "failure", bucket: "fail" },
+        { name: "deploy", state: "success", bucket: "pass" },
+      ]
+      const result = formatCIFailed("cool-fox", checks, 1, 3)
       expect(result).toContain("CI failed")
       expect(result).toContain("cool-fox")
       expect(result).toContain("attempt 1/3")
       expect(result).toContain("❌ build")
       expect(result).toContain("❌ lint")
+      expect(result).toContain("✅ deploy")
     })
 
     it("escapes HTML in check names", () => {
-      const result = formatCIFailed("slug", ["<script>alert</script>"], 1, 1)
+      const checks = [{ name: "<script>alert</script>", state: "failure", bucket: "fail" }]
+      const result = formatCIFailed("slug", checks, 1, 1)
       expect(result).toContain("&lt;script&gt;alert&lt;/script&gt;")
     })
   })
@@ -1960,6 +1997,17 @@ describe("formatPinnedDagStatus", () => {
       const result = formatCIPassed("slug", "https://example.com/other")
       expect(result).toContain("PR #https://example.com/other")
     })
+
+    it("shows check statuses when checks are provided", () => {
+      const checks = [
+        { name: "build", state: "success", bucket: "pass" },
+        { name: "test", state: "success", bucket: "pass" },
+      ]
+      const result = formatCIPassed("cool-fox", "https://github.com/org/repo/pull/99", checks)
+      expect(result).toContain("CI passed")
+      expect(result).toContain("✅ build")
+      expect(result).toContain("✅ test")
+    })
   })
 
   describe("formatCIGaveUp", () => {
@@ -1974,6 +2022,17 @@ describe("formatPinnedDagStatus", () => {
       const result = formatCIGaveUp("cool-fox", 1)
       expect(result).toContain("1 attempt")
       expect(result).not.toContain("1 attempts")
+    })
+
+    it("shows check statuses when checks are provided", () => {
+      const checks = [
+        { name: "build", state: "failure", bucket: "fail" },
+        { name: "test", state: "success", bucket: "pass" },
+      ]
+      const result = formatCIGaveUp("cool-fox", 3, checks)
+      expect(result).toContain("CI still failing")
+      expect(result).toContain("❌ build")
+      expect(result).toContain("✅ test")
     })
   })
 
