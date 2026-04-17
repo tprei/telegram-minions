@@ -90,15 +90,19 @@ export function formatSessionComplete(
   durationMs: number,
   totalTokens: number | null | undefined,
   sessionToolCount?: number,
+  totalCostUsd?: number,
+  numTurns?: number,
 ): string {
   const secs = Math.round(durationMs / 1000)
   const dur = secs >= 60
     ? `${Math.floor(secs / 60)}m ${secs % 60}s`
     : `${secs}s`
 
+  const costPart = totalCostUsd != null ? `  ·  💲${totalCostUsd.toFixed(2)}` : ""
   const tokenPart = totalTokens != null ? `  ·  🪙 ${totalTokens.toLocaleString()} tokens` : ""
   const toolPart = sessionToolCount && sessionToolCount > 0 ? `  ·  🔧 ${sessionToolCount} tool${sessionToolCount === 1 ? "" : "s"}` : ""
-  return `✅ <b>Complete</b>  ·  🏷 <code>${esc(slug)}</code>  ·  ⏱ ${dur}${tokenPart}${toolPart}`
+  const turnPart = numTurns != null ? `  ·  🔄 ${numTurns} turn${numTurns === 1 ? "" : "s"}` : ""
+  return `✅ <b>Complete</b>  ·  🏷 <code>${esc(slug)}</code>  ·  ⏱ ${dur}${costPart}${tokenPart}${toolPart}${turnPart}`
 }
 
 export function formatSessionError(slug: string, error: string): string {
@@ -297,14 +301,18 @@ export function formatTaskComplete(
   slug: string,
   durationMs: number,
   totalTokens: number | null | undefined,
+  totalCostUsd?: number,
+  numTurns?: number,
 ): string {
   const secs = Math.round(durationMs / 1000)
   const dur = secs >= 60
     ? `${Math.floor(secs / 60)}m ${secs % 60}s`
     : `${secs}s`
+  const costPart = totalCostUsd != null ? `  ·  💲${totalCostUsd.toFixed(2)}` : ""
   const tokenPart = totalTokens != null ? `  ·  🪙 ${totalTokens.toLocaleString()} tokens` : ""
+  const turnPart = numTurns != null ? `  ·  🔄 ${numTurns} turn${numTurns === 1 ? "" : "s"}` : ""
   return [
-    `✅ <b>Complete</b>  ·  🏷 <code>${esc(slug)}</code>  ·  ⏱ ${dur}${tokenPart}`,
+    `✅ <b>Complete</b>  ·  🏷 <code>${esc(slug)}</code>  ·  ⏱ ${dur}${costPart}${tokenPart}${turnPart}`,
     ``,
     `Use <code>/reply</code> (or <code>/r</code>) to give feedback.`,
   ].join("\n")

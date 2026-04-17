@@ -387,7 +387,7 @@ export class Observer {
     if (finalState === "errored") {
       await this.safeSendMessage(meta, formatSessionError(meta.topicName, "Session ended with an error. Check logs."))
     } else {
-      await this.safeSendMessage(meta, formatSessionComplete(meta.topicName, durationMs, meta.totalTokens, sessionToolCount))
+      await this.safeSendMessage(meta, formatSessionComplete(meta.topicName, durationMs, meta.totalTokens, sessionToolCount, meta.totalCostUsd, meta.numTurns))
     }
   }
 

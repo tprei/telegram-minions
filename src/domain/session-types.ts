@@ -35,6 +35,8 @@ export interface SessionMeta {
   cwd: string
   startedAt: number
   totalTokens?: number
+  totalCostUsd?: number
+  numTurns?: number
   mode: SessionMode
   screenshotDir?: string
 }

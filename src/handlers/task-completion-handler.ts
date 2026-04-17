@@ -48,7 +48,7 @@ export class TaskCompletionHandler implements CompletionHandler {
       await this.observer.flushAndComplete(meta, state, durationMs)
 
       await this.platform.chat.sendMessage(
-        formatTaskComplete(topicSession.slug, durationMs, meta.totalTokens),
+        formatTaskComplete(topicSession.slug, durationMs, meta.totalTokens, meta.totalCostUsd, meta.numTurns),
         String(topicSession.threadId),
       )
 

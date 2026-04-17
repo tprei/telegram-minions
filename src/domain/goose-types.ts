@@ -72,5 +72,5 @@ export type GooseStreamEvent =
   | { type: "message"; message: GooseMessage }
   | { type: "notification"; extensionId: string; message?: string; progress?: number; total?: number | null }
   | { type: "error"; error: string }
-  | { type: "complete"; total_tokens: number | null }
+  | { type: "complete"; total_tokens: number | null; total_cost_usd: number | null; num_turns: number | null }
   | { type: "quota_exhausted"; resetAt?: number; rawMessage: string }

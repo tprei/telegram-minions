@@ -79,7 +79,7 @@ describe("translateClaudeEvent", () => {
       usage: { input_tokens: 100, output_tokens: 50 },
     })
 
-    expect(result).toEqual({ type: "complete", total_tokens: 150 })
+    expect(result).toEqual({ type: "complete", total_tokens: 150, total_cost_usd: null, num_turns: null })
   })
 
   it("translates a result with no usage to null total_tokens", () => {
@@ -88,7 +88,18 @@ describe("translateClaudeEvent", () => {
       result: "done",
       is_error: false,
     })
-    expect(result).toEqual({ type: "complete", total_tokens: null })
+    expect(result).toEqual({ type: "complete", total_tokens: null, total_cost_usd: null, num_turns: null })
+  })
+
+  it("parses total_cost_usd and num_turns from result event", () => {
+    const result = translateClaudeEvent({
+      type: "result",
+      result: "done",
+      is_error: false,
+      total_cost_usd: 5.57,
+      num_turns: 82,
+    })
+    expect(result).toEqual({ type: "complete", total_tokens: null, total_cost_usd: 5.57, num_turns: 82 })
   })
 
   it("translates an error result", () => {
@@ -144,7 +155,7 @@ describe("translateClaudeEvents", () => {
       is_error: false,
       usage: { input_tokens: 10, output_tokens: 20 },
     })
-    expect(events).toEqual([{ type: "complete", total_tokens: 30 }])
+    expect(events).toEqual([{ type: "complete", total_tokens: 30, total_cost_usd: null, num_turns: null }])
   })
 
   it("returns empty array for null-producing events", () => {

@@ -495,6 +495,8 @@ export class SDKSessionHandle implements SessionPort {
       for (const event of events) {
         if (event.type === "complete") {
           this.meta.totalTokens = event.total_tokens ?? undefined
+          this.meta.totalCostUsd = event.total_cost_usd ?? undefined
+          this.meta.numTurns = event.num_turns ?? undefined
         }
         this.onEvent(event)
       }

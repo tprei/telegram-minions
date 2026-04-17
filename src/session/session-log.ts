@@ -15,6 +15,8 @@ export interface SessionLogEntry {
   completedAt: number
   durationMs: number
   totalTokens: number
+  totalCostUsd?: number
+  numTurns?: number
   state: "completed" | "errored" | "quota_exhausted"
   qualityGates?: QualityReport
   conversationLength: number
@@ -36,6 +38,8 @@ export function writeSessionLog(
     completedAt: Date.now(),
     durationMs,
     totalTokens: meta.totalTokens ?? 0,
+    totalCostUsd: meta.totalCostUsd,
+    numTurns: meta.numTurns,
     state,
     qualityGates: qualityReport,
     conversationLength: topicSession.conversation.length,
