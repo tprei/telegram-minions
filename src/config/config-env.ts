@@ -88,7 +88,7 @@ export function configFromEnv(overrides?: Partial<MinionConfig>): MinionConfig {
       maxConcurrentSessions: optionalNumber("MAX_CONCURRENT_SESSIONS", 5),
       maxDagConcurrency: optionalNumber("MAX_DAG_CONCURRENCY", 2),
       maxSplitItems: optionalNumber("MAX_SPLIT_ITEMS", 5),
-      sessionTokenBudget: optionalNumber("SESSION_TOKEN_BUDGET", 200_000),
+      sessionTokenBudget: optionalNumber("SESSION_TOKEN_BUDGET", 1_000_000),
       sessionBudgetUsd: optionalNumber("SESSION_BUDGET_USD", 10),
       sessionTimeoutMs: optionalNumber("SESSION_TIMEOUT_MS", 3600000),
       sessionInactivityTimeoutMs: optionalNumber("SESSION_INACTIVITY_TIMEOUT_MS", 900_000),
