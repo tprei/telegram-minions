@@ -517,6 +517,8 @@ describe("DagOrchestrator", () => {
 
       expect(ctx.updateTopicTitle).toHaveBeenCalledWith(expect.any(Object), "✅")
       expect(ctx.closeChildSessions).toHaveBeenCalled()
+      expect(ctx.dags.has("dag-test")).toBe(false)
+      expect(ctx.broadcastDagDeleted).toHaveBeenCalledWith("dag-test")
     })
 
     it("advances ship pipeline when DAG complete in ship mode", async () => {

@@ -569,6 +569,8 @@ export class DagOrchestrator {
         } else {
           await this.ctx.updateTopicTitle(parent, "✅")
           await this.ctx.closeChildSessions(parent)
+          this.ctx.dags.delete(graph.id)
+          this.ctx.broadcastDagDeleted(graph.id)
         }
       } catch (err) {
         log.error({ err, dagId: graph.id }, "DAG completion handling failed")
