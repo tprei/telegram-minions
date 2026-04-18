@@ -8,6 +8,7 @@ import type { SessionMeta, SessionDoneState } from "../domain/session-types.js"
 import { captureException } from "../sentry.js"
 import { loggers } from "../logger.js"
 import { isThreadNotFoundError } from "../errors.js"
+import type { EngineEventBus } from "../engine/events.js"
 import {
   formatToolLine,
   formatActivityLog,
@@ -79,14 +80,16 @@ export class Observer {
   private readonly sessions = new Map<string, SessionState>()
   private readonly textFlushDebounceMs: number
   private readonly activityEditDebounceMs: number
+  private readonly events?: EngineEventBus
 
   constructor(
     private readonly platform: ChatPlatform,
     private readonly throttleMs: number,
-    opts?: { textFlushDebounceMs?: number; activityEditDebounceMs?: number },
+    opts?: { textFlushDebounceMs?: number; activityEditDebounceMs?: number; events?: EngineEventBus },
   ) {
     this.textFlushDebounceMs = opts?.textFlushDebounceMs ?? 5000
     this.activityEditDebounceMs = opts?.activityEditDebounceMs ?? 5000
+    this.events = opts?.events
   }
 
   async onSessionStart(
@@ -180,6 +183,14 @@ export class Observer {
         const filePath = path.join(dir, entry)
         state.sentScreenshots.add(entry)
         await this.platform.files?.sendPhoto(filePath, String(meta.threadId), `📸 ${entry}`)
+        if (this.events) {
+          void this.events.emit({
+            type: "screenshot_captured",
+            sessionId: meta.sessionId,
+            path: filePath,
+            timestamp: Date.now(),
+          })
+        }
       }
     } catch {
       // Directory may not exist yet
@@ -299,6 +310,15 @@ export class Observer {
       state.onTextCapture(meta.sessionId, text)
     }
 
+    if (this.events) {
+      void this.events.emit({
+        type: "assistant_text",
+        sessionId: meta.sessionId,
+        text,
+        timestamp: Date.now(),
+      })
+    }
+
     if (text.length < MIN_TEXT_LENGTH) return
     if (reason === "tool" && text.length < PRE_TOOL_NARRATION_LIMIT) return
 
@@ -381,11 +401,19 @@ export class Observer {
     const { messageId } = await this.safeSendMessage(meta, html)
     state.activityMessageId = messageId
 
+    const activityPlain = formatActivityLogPlain(state.activityLog, state.toolCount)
+
     if (state.onActivityCapture) {
-      state.onActivityCapture(
-        meta.sessionId,
-        formatActivityLogPlain(state.activityLog, state.toolCount),
-      )
+      state.onActivityCapture(meta.sessionId, activityPlain)
+    }
+
+    if (this.events) {
+      void this.events.emit({
+        type: "assistant_activity",
+        sessionId: meta.sessionId,
+        activity: activityPlain,
+        timestamp: Date.now(),
+      })
     }
   }
 

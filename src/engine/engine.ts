@@ -145,7 +145,7 @@ export class MinionEngine {
   private readonly commandHandler: CommandHandler
   private readonly pinnedMessages: PinnedMessageManager
   private readonly eventBus: EventBus
-  private readonly engineEvents = new EngineEventBus()
+  private readonly engineEvents: EngineEventBus
   private readonly completionChain: CompletionHandlerChain
 
   constructor(
@@ -155,9 +155,11 @@ export class MinionEngine {
     eventBus: EventBus,
     broadcaster?: StateBroadcaster,
     private readonly tokenProvider?: GitHubTokenProvider,
+    engineEvents?: EngineEventBus,
   ) {
     this.broadcaster = broadcaster
     this.eventBus = eventBus
+    this.engineEvents = engineEvents ?? new EngineEventBus()
     this.store = new SessionStore(this.config.workspace.root)
     this.dagStore = new DagStore(this.config.workspace.root)
     this.loopStore = new LoopStore(this.config.workspace.root)

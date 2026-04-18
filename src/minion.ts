@@ -12,6 +12,7 @@ import { loggers } from "./logger.js"
 import { initSentry } from "./sentry.js"
 import { GitHubTokenProvider } from "./github/index.js"
 import { EventBus } from "./events/event-bus.js"
+import { EngineEventBus } from "./engine/events.js"
 import { DEFAULT_LOOPS } from "./loops/index.js"
 
 const log = loggers.minion
@@ -54,15 +55,17 @@ function findUiDistPath(): string {
 export function createMinion(config: MinionConfig, options?: MinionOptions): MinionInstance {
   const telegram = new TelegramClient(config.telegram.botToken, config.telegram.chatId, config.telegramQueue.minSendIntervalMs)
   const platform = new TelegramPlatform(telegram, config.telegram.chatId)
+  const engineEvents = new EngineEventBus()
   const observer = new Observer(platform, config.observer.activityThrottleMs, {
     textFlushDebounceMs: config.observer.textFlushDebounceMs,
     activityEditDebounceMs: config.observer.activityEditDebounceMs,
+    events: engineEvents,
   })
   const broadcaster = new StateBroadcaster()
   const eventBus = new EventBus()
   const tokenProvider = new GitHubTokenProvider(config.githubApp)
   tokenProvider.setTokenFilePath(path.join(config.workspace.root, ".github-token"))
-  const dispatcher = new MinionEngine(platform, observer, config, eventBus, broadcaster, tokenProvider)
+  const dispatcher = new MinionEngine(platform, observer, config, eventBus, broadcaster, tokenProvider, engineEvents)
 
   let apiServer: http.Server | undefined
 

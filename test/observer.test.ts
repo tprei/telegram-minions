@@ -5,6 +5,7 @@ import path from "node:path"
 import { Observer } from "../src/telegram/observer.js"
 import type { GooseStreamEvent } from "../src/domain/goose-types.js"
 import type { SessionMeta } from "../src/domain/session-types.js"
+import { EngineEventBus, type EngineEvent } from "../src/engine/events.js"
 import { makeMockPlatform } from "./test-helpers.js"
 
 function makeMeta(overrides: Partial<SessionMeta> = {}): SessionMeta {
@@ -857,6 +858,68 @@ describe("Observer", () => {
 
       ;(platform.chat.sendMessage as ReturnType<typeof vi.fn>).mockClear()
       expect(platform.chat.sendMessage).not.toHaveBeenCalled()
+    })
+  })
+
+  describe("EngineEventBus emission", () => {
+    it("emits assistant_text on text flush", async () => {
+      const platform = makeMockPlatform()
+      const events = new EngineEventBus()
+      const seen: EngineEvent[] = []
+      events.onAny((e) => { seen.push(e) })
+      const observer = new Observer(platform, 3000, {
+        textFlushDebounceMs: 1500,
+        activityEditDebounceMs: 2000,
+        events,
+      })
+      const meta = makeMeta()
+
+      await observer.onSessionStart(meta, "task")
+      await observer.onEvent(meta, {
+        type: "message",
+        message: {
+          role: "assistant",
+          created: 0,
+          content: [{ type: "text", text: "hello world from assistant plus filler" }],
+        },
+      })
+      await vi.advanceTimersByTimeAsync(1700)
+
+      const textEvents = seen.filter((e) => e.type === "assistant_text")
+      expect(textEvents).toHaveLength(1)
+      expect(textEvents[0]).toMatchObject({ sessionId: meta.sessionId })
+      expect((textEvents[0] as { text: string }).text).toContain("hello world")
+    })
+
+    it("emits assistant_activity when a tool is used", async () => {
+      const platform = makeMockPlatform()
+      const events = new EngineEventBus()
+      const seen: EngineEvent[] = []
+      events.onAny((e) => { seen.push(e) })
+      const observer = new Observer(platform, 3000, {
+        textFlushDebounceMs: 1500,
+        activityEditDebounceMs: 2000,
+        events,
+      })
+      const meta = makeMeta()
+
+      await observer.onSessionStart(meta, "task")
+      await observer.onEvent(meta, {
+        type: "message",
+        message: {
+          role: "assistant",
+          created: 0,
+          content: [{
+            type: "toolRequest",
+            id: "t1",
+            toolCall: { status: "success", value: { name: "shell", arguments: { command: "ls" } } },
+          }],
+        },
+      } as unknown as GooseStreamEvent)
+
+      const activity = seen.filter((e) => e.type === "assistant_activity")
+      expect(activity).toHaveLength(1)
+      expect(activity[0]).toMatchObject({ sessionId: meta.sessionId })
     })
   })
 })
