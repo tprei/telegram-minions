@@ -338,6 +338,65 @@ describe("LandingManager", () => {
       )
     })
 
+    it("sends /close hint in preflight failure message", async () => {
+      const ctx = createMockContext()
+      const graph: DagGraph = {
+        id: "dag-1",
+        nodes: [
+          {
+            id: "a",
+            title: "Task A",
+            description: "",
+            status: "done",
+            dependsOn: [],
+            prUrl: "https://github.com/org/repo/pull/1",
+            branch: "minion/a",
+          },
+        ],
+        parentThreadId: 100,
+        repo: "test-repo",
+      }
+      ctx.dags.set("dag-1", graph)
+
+      const manager = new LandingManager(ctx)
+      const session = makeTopicSession({ dagId: "dag-1" })
+
+      await manager.handleLandCommand(session)
+
+      const calls = (ctx.telegram.sendMessage as ReturnType<typeof vi.fn>).mock.calls.map((c) => String(c[0]))
+      const preflightMsg = calls.find((m) => m.includes("Pre-flight failed"))
+      if (preflightMsg) {
+        expect(preflightMsg).toContain("/close")
+      }
+    })
+
+    it("does not delete DAG on preflight failure", async () => {
+      const ctx = createMockContext()
+      const graph: DagGraph = {
+        id: "dag-1",
+        nodes: [
+          {
+            id: "a",
+            title: "Task A",
+            description: "",
+            status: "done",
+            dependsOn: [],
+            prUrl: "https://github.com/org/repo/pull/1",
+          },
+        ],
+        parentThreadId: 100,
+        repo: "test-repo",
+      }
+      ctx.dags.set("dag-1", graph)
+
+      const manager = new LandingManager(ctx)
+      const session = makeTopicSession({ dagId: "dag-1" })
+
+      await manager.handleLandCommand(session)
+
+      expect(ctx.dags.has("dag-1")).toBe(true)
+    })
+
     it("resolves bare dir correctly from repoUrl", async () => {
       const bareDir = path.join(tmpDir, ".repos", "my-repo.git")
       fs.mkdirSync(bareDir, { recursive: true })

@@ -1114,6 +1114,7 @@ export function formatLandPreflightFailed(nodeTitle: string, files: string[], er
   lines.push(
     ``,
     `<b>Nothing was landed.</b> Use <code>/resolve ${esc(nodeTitle)}</code> to route to the child session, or <code>/doctor</code> to diagnose.`,
+    `Use <code>/close</code> to clean up sessions and free resources if you're done.`,
   )
   return lines.join("\n")
 }
@@ -1142,6 +1143,7 @@ export function formatLandSummary(succeeded: number, failed: number, skipped: nu
     for (const title of failedTitles) {
       parts.push(`  • ${esc(title)}`)
     }
+    parts.push(`\nUse <code>/close</code> to clean up sessions and free resources.`)
   }
   return parts.join("\n")
 }

@@ -263,6 +263,11 @@ export class LandingManager {
         formatLandComplete(succeeded, prNodes.length, baseBranch),
         topicSession.threadId,
       )
+      // All PRs landed — clean up DAG and child sessions to free memory
+      this.ctx.dags.delete(graph.id)
+      this.ctx.broadcastDagDeleted(graph.id)
+      await this.ctx.closeChildSessions(topicSession)
+      await this.ctx.persistDags()
     } else {
       await this.ctx.telegram.sendMessage(
         formatLandSummary(succeeded, failedTitles.length, skipped, prNodes.length, failedTitles, baseBranch),
@@ -497,6 +502,8 @@ export class LandingManager {
         formatLandComplete(succeeded, prUrls.length),
         topicSession.threadId,
       )
+      // All PRs landed — clean up child sessions to free memory
+      await this.ctx.closeChildSessions(topicSession)
     } else {
       await this.ctx.telegram.sendMessage(
         formatLandSummary(succeeded, failedTitles.length, skipped, prUrls.length, failedTitles),
