@@ -4,7 +4,6 @@ import {
   truncate,
   formatToolLine,
   formatActivityLog,
-  formatToolActivity,
   formatSessionStart,
   formatSessionComplete,
   formatSessionError,
@@ -172,18 +171,6 @@ describe("formatActivityLog", () => {
   it("pluralizes tool count", () => {
     const log = formatActivityLog(["a", "b"], 5)
     expect(log).toContain("5 tools")
-  })
-})
-
-describe("formatToolActivity", () => {
-  it("includes tool count when > 1", () => {
-    const result = formatToolActivity("Bash", { command: "ls" }, 3)
-    expect(result).toContain("(3 tools)")
-  })
-
-  it("omits tool count when 1", () => {
-    const result = formatToolActivity("Bash", { command: "ls" }, 1)
-    expect(result).not.toContain("(1 tool")
   })
 })
 

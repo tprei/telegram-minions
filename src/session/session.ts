@@ -40,6 +40,7 @@ interface SpawnClaudeOpts {
 }
 
 type McpServerConfig = {
+  type?: never
   command: string
   args: string[]
   env?: Record<string, string>
@@ -254,11 +255,10 @@ export class SessionHandle implements SessionPort {
       if ("type" in server && server.type === "http") {
         continue
       }
-      const stdioServer = server as McpServerConfig
-      const envPrefix = stdioServer.env
-        ? Object.entries(stdioServer.env).map(([k, v]) => `${k}=${v}`).join(" ") + " "
+      const envPrefix = server.env
+        ? Object.entries(server.env).map(([k, v]) => `${k}=${v}`).join(" ") + " "
         : ""
-      const cmdWithArgs = envPrefix + [stdioServer.command, ...stdioServer.args].join(" ")
+      const cmdWithArgs = envPrefix + [server.command, ...server.args].join(" ")
       args.push("--with-extension", cmdWithArgs)
     }
 
@@ -278,11 +278,10 @@ export class SessionHandle implements SessionPort {
           headers: server.headers,
         }
       } else {
-        const stdioServer = server as McpServerConfig
         mcpConfig[name] = {
-          command: stdioServer.command,
-          args: stdioServer.args,
-          env: stdioServer.env,
+          command: server.command,
+          args: server.args,
+          env: server.env,
         }
       }
     }

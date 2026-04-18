@@ -26,6 +26,7 @@ interface SpawnOpts {
 }
 
 type McpServerConfig = {
+  type?: never
   command: string
   args: string[]
   env?: Record<string, string>
@@ -347,11 +348,10 @@ export class SDKSessionHandle implements SessionPort {
           headers: server.headers,
         }
       } else {
-        const stdioServer = server as McpServerConfig
         mcpConfig[name] = {
-          command: stdioServer.command,
-          args: stdioServer.args,
-          env: stdioServer.env,
+          command: server.command,
+          args: server.args,
+          env: server.env,
         }
       }
     }
