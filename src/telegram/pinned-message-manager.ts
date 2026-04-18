@@ -62,7 +62,9 @@ export class PinnedMessageManager {
     const lines: string[] = [`🤖 <b>Minion Sessions</b> (${sessions.length} total)`, ``]
 
     for (const s of topLevel) {
-      const icon = s.activeSessionId ? "⚡" : s.lastState === "errored" ? "❌" : s.prUrl ? "✅" : "💬"
+      const icon = s.activeSessionId
+        ? (s.isIdle ? "💬" : "⚡")
+        : s.lastState === "errored" ? "❌" : s.prUrl ? "✅" : "💬"
       const link = threadLink(chatId, s.threadId)
       const slugPart = link
         ? `<a href="${esc(link)}">${esc(s.slug)}</a>`
@@ -83,7 +85,9 @@ export class PinnedMessageManager {
           const child = children[i]
           const isLast = i === children.length - 1
           const branch = isLast ? "└── " : "├── "
-          const childIcon = child.activeSessionId ? "⚡" : child.lastState === "errored" ? "❌" : child.prUrl ? "✅" : "⏳"
+          const childIcon = child.activeSessionId
+            ? (child.isIdle ? "💬" : "⚡")
+            : child.lastState === "errored" ? "❌" : child.prUrl ? "✅" : "⏳"
           const childLink = threadLink(chatId, child.threadId)
           const childSlug = childLink
             ? `<a href="${esc(childLink)}">${esc(child.slug)}</a>`

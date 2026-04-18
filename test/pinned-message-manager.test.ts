@@ -188,6 +188,7 @@ describe("PinnedMessageManager", () => {
       topicSessions.set(2, makeSession({ threadId: 2, slug: "done-one", activeSessionId: undefined, prUrl: "https://pr/1" })) // done → ✅
       topicSessions.set(3, makeSession({ threadId: 3, slug: "errored-one", activeSessionId: undefined, lastState: "errored" })) // errored → ❌
       topicSessions.set(4, makeSession({ threadId: 4, slug: "idle-one", activeSessionId: undefined })) // idle → 💬
+      topicSessions.set(5, makeSession({ threadId: 5, slug: "waiting-one", isIdle: true })) // active but idle → 💬
 
       const mgr = new PinnedMessageManager({ telegram, topicSessions, workspaceRoot: "/tmp/workspace" })
       mgr.updatePinnedSummary()
@@ -199,6 +200,7 @@ describe("PinnedMessageManager", () => {
       expect(html).toMatch(/✅.*done-one/)
       expect(html).toMatch(/❌.*errored-one/)
       expect(html).toMatch(/💬.*idle-one/)
+      expect(html).toMatch(/💬.*waiting-one/)
     })
 
     it("works with string chatId", async () => {

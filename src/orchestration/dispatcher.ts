@@ -1319,6 +1319,10 @@ export class Dispatcher {
         this.quotaEvents.set(topicSession.threadId, { resetAt: event.resetAt, rawMessage: event.rawMessage })
       }
 
+      if (event.type === "idle" && topicSession.activeSessionId === sessionId) {
+        this.markTopicIdle(topicSession, true)
+      }
+
       if (event.type === "complete" && meta.totalTokens != null && meta.totalTokens > this.config.workspace.sessionTokenBudget) {
         log.warn({ sessionId, totalTokens: meta.totalTokens, budget: this.config.workspace.sessionTokenBudget }, "session exceeded token budget")
         this.platform.chat.sendMessage(
@@ -1372,6 +1376,14 @@ export class Dispatcher {
     }).catch((err) => {
       log.error({ err, sessionId: m.sessionId }, "session.completed event dispatch error")
     })
+  }
+
+  private markTopicIdle(topicSession: TopicSession, idle: boolean): void {
+    if ((topicSession.isIdle ?? false) === idle) return
+    topicSession.isIdle = idle
+    this.pinnedMessages.updateTopicTitle(topicSession, idle ? "💬" : "⚡").catch(() => {})
+    this.pinnedMessages.updatePinnedSummary()
+    this.broadcastSession(topicSession, "session_updated")
   }
 
   private handleQuotaSleep(topicSession: TopicSession, rawMessage: string): void {
@@ -1577,7 +1589,10 @@ export class Dispatcher {
 
       if (isSDK && activeSession) {
         const injected = activeSession.handle.injectReply(fullFeedback, imagePaths.length > 0 ? imagePaths : undefined)
-        if (injected) await queue.markDelivered(queued.id)
+        if (injected) {
+          await queue.markDelivered(queued.id)
+          this.markTopicIdle(topicSession, false)
+        }
         this.pushToConversation(topicSession, {
           role: "user",
           text: fullFeedback,

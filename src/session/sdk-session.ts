@@ -187,6 +187,7 @@ export class SDKSessionHandle implements SessionPort {
         this.log.info({ textLength: text.length, imageCount: images?.length ?? 0 }, "injected reply via stdin")
       }
     })
+    if (this.state === "idle") this.state = "working"
     return true
   }
 
@@ -203,11 +204,11 @@ export class SDKSessionHandle implements SessionPort {
   }
 
   isActive(): boolean {
-    return this.state === "spawning" || this.state === "working"
+    return this.state === "spawning" || this.state === "working" || this.state === "idle"
   }
 
   interrupt(): void {
-    if (this.process && this.state === "working") {
+    if (this.process && (this.state === "working" || this.state === "idle")) {
       this.killProcessGroup(this.process, "SIGINT")
     }
   }
@@ -503,6 +504,13 @@ export class SDKSessionHandle implements SessionPort {
           this.meta.numTurns = event.num_turns ?? undefined
         }
         this.onEvent(event)
+        // The Claude CLI stays alive after a turn finishes (stdin kept open for
+        // follow-up replies). Signal idle so the dispatcher can flip UI out of
+        // "running" without killing the process.
+        if (event.type === "complete" && this.state === "working") {
+          this.state = "idle"
+          this.onEvent({ type: "idle" })
+        }
       }
     } catch {
       this.log.warn({ line: trimmed.slice(0, 200) }, "invalid Claude JSON line")
