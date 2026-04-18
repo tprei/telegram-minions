@@ -491,9 +491,13 @@ export function validateMinionConfig(config: unknown): ValidationResult {
   }
   const c = config as Partial<MinionConfig>
 
-  // Required nested configs
-  const telegramResult = validateTelegramConfig(c.telegram)
-  errors.push(...telegramResult.errors)
+  // Telegram is optional from v2: only validate when credentials are supplied.
+  // Consumers that require Telegram (i.e. register a TelegramConnector) should
+  // call validateTelegramConfig explicitly on their path.
+  if (c.telegram && typeof c.telegram === "object" && (c.telegram as { botToken?: string }).botToken) {
+    const telegramResult = validateTelegramConfig(c.telegram)
+    errors.push(...telegramResult.errors)
+  }
 
   const telegramQueueResult = validateTelegramQueueConfig(c.telegramQueue)
   errors.push(...telegramQueueResult.errors)

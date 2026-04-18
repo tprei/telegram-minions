@@ -12,10 +12,13 @@ import {
 export interface HttpConnectorOptions {
   port: number
   uiDistPath: string
-  /** Telegram chat id — still needed for ApiSession serialization (links in UI). */
-  chatId: string
-  /** Telegram bot token — still used by api-server to validate Telegram login flow. */
-  botToken: string
+  /** Telegram chat id — embedded into t.me links in ApiSession payloads
+   *  when a TelegramConnector is also registered. Leave undefined for
+   *  PWA-only deployments. */
+  chatId?: string
+  /** Telegram bot token — enables the /validate endpoint used by the
+   *  Telegram WebApp login flow. Leave undefined for PWA-only deployments. */
+  botToken?: string
   apiToken?: string
   corsAllowedOrigins?: string[]
   repos?: Record<string, string>

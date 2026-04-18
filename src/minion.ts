@@ -3,10 +3,12 @@ import { fileURLToPath } from "node:url"
 import http from "node:http"
 import fs from "node:fs"
 import type { MinionConfig } from "./config/config-types.js"
+import type { ChatPlatform } from "./provider/chat-platform.js"
 import { Observer } from "./telegram/observer.js"
 import { MinionEngine } from "./engine/engine.js"
 import { TelegramConnector } from "./connectors/telegram-connector.js"
 import { HttpConnector } from "./connectors/http-connector.js"
+import { LocalPlatform } from "./local/local-platform.js"
 import { loggers } from "./logger.js"
 import { initSentry } from "./sentry.js"
 import { GitHubTokenProvider } from "./github/index.js"
@@ -47,14 +49,20 @@ function findUiDistPath(): string {
 }
 
 export function createMinion(config: MinionConfig, options?: MinionOptions): MinionInstance {
-  const telegramConnector = new TelegramConnector({
-    botToken: config.telegram.botToken,
-    chatId: config.telegram.chatId,
-    minSendIntervalMs: config.telegramQueue.minSendIntervalMs,
-  })
+  const telegramEnabled = Boolean(config.telegram?.botToken)
+  const telegramConnector: TelegramConnector | null = telegramEnabled
+    ? new TelegramConnector({
+        botToken: config.telegram.botToken,
+        chatId: config.telegram.chatId,
+        minSendIntervalMs: config.telegramQueue.minSendIntervalMs,
+      })
+    : null
+
+  const platform: ChatPlatform = telegramConnector?.platform
+    ?? new LocalPlatform(config.telegram?.chatId || "local")
 
   const engineEvents = new EngineEventBus()
-  const observer = new Observer(telegramConnector.platform, config.observer.activityThrottleMs, {
+  const observer = new Observer(platform, config.observer.activityThrottleMs, {
     textFlushDebounceMs: config.observer.textFlushDebounceMs,
     activityEditDebounceMs: config.observer.activityEditDebounceMs,
     events: engineEvents,
@@ -64,28 +72,28 @@ export function createMinion(config: MinionConfig, options?: MinionOptions): Min
   const tokenProvider = new GitHubTokenProvider(config.githubApp)
   tokenProvider.setTokenFilePath(path.join(config.workspace.root, ".github-token"))
   const engine = new MinionEngine(
-    telegramConnector.platform,
+    platform,
     observer,
     config,
     eventBus,
     tokenProvider,
     engineEvents,
   )
-  telegramConnector.attach(engine)
+  if (telegramConnector) engine.use(telegramConnector)
 
   const apiPort = options?.apiPort ?? (process.env["API_PORT"] ? parseInt(process.env["API_PORT"], 10) : undefined)
   const httpConnector = apiPort
     ? new HttpConnector({
         port: apiPort,
         uiDistPath: findUiDistPath(),
-        chatId: config.telegram.chatId,
-        botToken: config.telegram.botToken,
+        chatId: telegramEnabled ? config.telegram.chatId : undefined,
+        botToken: telegramEnabled ? config.telegram.botToken : undefined,
         apiToken: config.api?.apiToken,
         corsAllowedOrigins: config.api?.corsAllowedOrigins,
         repos: config.repos,
       })
     : null
-  httpConnector?.attach(engine)
+  if (httpConnector) engine.use(httpConnector)
 
   return {
     async start() {
@@ -93,7 +101,7 @@ export function createMinion(config: MinionConfig, options?: MinionOptions): Min
 
       if (httpConnector) {
         await httpConnector.start()
-        log.info({ port: apiPort }, "API server listening")
+        log.info({ port: apiPort, telegram: telegramEnabled }, "API server listening")
       }
 
       await tokenProvider.refreshEnv()
@@ -106,8 +114,6 @@ export function createMinion(config: MinionConfig, options?: MinionOptions): Min
     stop() {
       tokenProvider.stopPeriodicRefresh()
       engine.stop()
-      httpConnector?.detach()
-      telegramConnector.detach()
     },
     getApiServer() {
       return httpConnector?.getServer() ?? undefined

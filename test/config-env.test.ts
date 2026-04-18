@@ -35,16 +35,10 @@ describe("configFromEnv", () => {
   })
 
   describe("error handling", () => {
-    it("throws ConfigError for missing required env var", () => {
+    it("leaves telegram.botToken empty when TELEGRAM_BOT_TOKEN is unset (v2: Telegram is opt-in)", () => {
       delete process.env["TELEGRAM_BOT_TOKEN"]
-      expect(() => configFromEnv()).toThrow(ConfigError)
-      try {
-        configFromEnv()
-      } catch (err) {
-        expect(err).toBeInstanceOf(ConfigError)
-        expect((err as ConfigError).varName).toBe("TELEGRAM_BOT_TOKEN")
-        expect((err as ConfigError).message).toContain("Missing required env var")
-      }
+      const config = configFromEnv()
+      expect(config.telegram.botToken).toBe("")
     })
 
     it("throws ConfigFormatError for invalid number format", () => {

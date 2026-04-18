@@ -61,6 +61,7 @@ import { CommandHandler } from "../commands/command-handler.js"
 import { parseResetTime } from "../session/quota-detection.js"
 import type { EventBus } from "../events/event-bus.js"
 import { EngineEventBus } from "./events.js"
+import type { Connector } from "../connectors/connector.js"
 import { LoopScheduler, type LoopSchedulerConfig } from "../loops/loop-scheduler.js"
 import type { LoopDefinition, LoopState } from "../loops/domain-types.js"
 import { LoopStore } from "../loops/loop-store.js"
@@ -143,6 +144,7 @@ export class MinionEngine {
   private readonly pinnedMessages: PinnedMessageManager
   private readonly eventBus: EventBus
   private readonly engineEvents: EngineEventBus
+  private readonly connectors: Connector[] = []
   private readonly completionChain: CompletionHandlerChain
 
   constructor(
@@ -329,6 +331,18 @@ export class MinionEngine {
     return this.engineEvents
   }
 
+  /**
+   * Register a connector. Calls `connector.attach(this)` immediately and
+   * remembers the connector so `stop()` can detach it.
+   *
+   * Returns `this` to allow chaining (`engine.use(a).use(b)`).
+   */
+  use(connector: Connector): this {
+    this.connectors.push(connector)
+    void connector.attach(this)
+    return this
+  }
+
   private broadcastSession(session: TopicSession, eventType: "session_created" | "session_updated", sessionState?: SessionDoneState): void {
     void this.engineEvents.emit({ type: eventType, session, sessionState })
   }
@@ -506,6 +520,13 @@ export class MinionEngine {
     this.pendingTimers.clear()
     for (const { handle } of this.sessions.values()) {
       handle.interrupt()
+    }
+    for (const connector of this.connectors) {
+      try {
+        void connector.detach()
+      } catch (err) {
+        log.warn({ err, connector: connector.name }, "connector detach threw")
+      }
     }
     this.persistTopicSessions(true).catch(() => {})
     log.info("stopped")

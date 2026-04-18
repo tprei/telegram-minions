@@ -208,7 +208,7 @@ export function computeQuickActions(
 
 export function topicSessionToApi(
   session: TopicSession,
-  chatId: string,
+  chatId: string | undefined,
   activeSessionId?: string,
   sessionState?: SessionState | SessionDoneState,
 ): ApiSession {
@@ -232,7 +232,7 @@ export function topicSessionToApi(
     branch: session.branch,
     prUrl: session.prUrl,
     threadId: session.threadId,
-    chatId: parseInt(chatId, 10),
+    chatId: chatId ? parseInt(chatId, 10) : undefined,
     createdAt: new Date().toISOString(),
     updatedAt: new Date(session.lastActivityAt).toISOString(),
     parentId: session.parentThreadId?.toString(),
@@ -249,7 +249,7 @@ export function dagToApi(
   graph: DagGraph,
   topicSessions: Map<number, TopicSession>,
   sessions: Map<number, ActiveSession>,
-  chatId: string,
+  chatId: string | undefined,
 ): ApiDagGraph {
   const nodes: Record<string, ApiDagNode> = {}
 
@@ -308,8 +308,10 @@ export function dagToApi(
 export interface ApiServerOptions {
   port: number
   uiDistPath: string
-  chatId: string
-  botToken: string
+  /** Telegram chat id — only present when a TelegramConnector is registered. */
+  chatId?: string
+  /** Telegram bot token — only present when a TelegramConnector is registered. */
+  botToken?: string
   broadcaster: StateBroadcaster
   apiToken?: string
   corsAllowedOrigins?: string[]
@@ -382,6 +384,11 @@ export function createApiServer(
     }
 
     if (url.pathname === "/validate") {
+      if (!botToken || !chatId) {
+        res.writeHead(503, { "Content-Type": "application/json" })
+        res.end(JSON.stringify({ error: "Telegram login is not configured on this minion" }))
+        return
+      }
       await handleValidation(req, res, chatId, botToken)
       return
     }
@@ -397,7 +404,7 @@ async function handleApiRoute(
   res: http.ServerResponse,
   url: URL,
   dispatcher: DispatcherApi,
-  chatId: string,
+  chatId: string | undefined,
   sseClients: Set<http.ServerResponse>,
   repos?: Record<string, string>,
 ): Promise<void> {

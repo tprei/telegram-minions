@@ -781,8 +781,16 @@ describe("validateConfigOrThrow", () => {
 
   it("throws for invalid config", () => {
     const config = createValidMinionConfig()
-    config.telegram.botToken = ""
+    config.workspace.maxConcurrentSessions = -1
     expect(() => validateConfigOrThrow(config)).toThrow(ConfigValidationError)
+  })
+
+  it("accepts an empty telegram.botToken (v2: Telegram is opt-in)", () => {
+    const config = createValidMinionConfig()
+    config.telegram.botToken = ""
+    config.telegram.chatId = ""
+    config.telegram.allowedUserIds = []
+    expect(() => validateConfigOrThrow(config)).not.toThrow()
   })
 })
 

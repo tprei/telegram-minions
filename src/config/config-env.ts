@@ -2,12 +2,6 @@ import type { MinionConfig, GitHubAppConfig } from "./config-types.js"
 import { ConfigError, ConfigFormatError } from "../errors.js"
 import { validateMinionConfig, ConfigValidationError } from "./config-validator.js"
 
-function required(name: string): string {
-  const val = process.env[name]
-  if (!val) throw new ConfigError(`Missing required env var: ${name}`, name)
-  return val
-}
-
 function optional(name: string, fallback: string): string {
   return process.env[name] ?? fallback
 }
@@ -65,8 +59,8 @@ function buildAgentDefs(): MinionConfig["agentDefs"] {
 export function configFromEnv(overrides?: Partial<MinionConfig>): MinionConfig {
   const base: MinionConfig = {
     telegram: {
-      botToken: required("TELEGRAM_BOT_TOKEN"),
-      chatId: required("TELEGRAM_CHAT_ID"),
+      botToken: process.env["TELEGRAM_BOT_TOKEN"] ?? "",
+      chatId: process.env["TELEGRAM_CHAT_ID"] ?? "",
       allowedUserIds: (process.env["ALLOWED_USER_IDS"] ?? "")
         .split(",")
         .map((s) => s.trim())

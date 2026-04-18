@@ -45,6 +45,7 @@ vi.mock("../src/engine/engine.js", () => {
     this.apiSendReply = vi.fn()
     this.apiStopSession = vi.fn()
     this.apiCloseSession = vi.fn()
+    this.use = vi.fn()
   })
   return { MinionEngine: MockMinionEngine }
 })
