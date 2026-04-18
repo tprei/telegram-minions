@@ -79,6 +79,7 @@ export function createMinion(config: MinionConfig, options?: MinionOptions): Min
       sendReply: (threadId: number, message: string) => dispatcher.apiSendReply(threadId, message),
       stopSession: (threadId: number) => dispatcher.apiStopSession(threadId),
       closeSession: (threadId: number) => dispatcher.apiCloseSession(threadId),
+      handleIncomingText: (text: string, sessionSlug?: string) => dispatcher.handleIncomingText(text, sessionSlug),
     }
 
     apiServer = createApiServer(dispatcherApi, {
@@ -87,6 +88,8 @@ export function createMinion(config: MinionConfig, options?: MinionOptions): Min
       chatId: config.telegram.chatId,
       botToken: config.telegram.botToken,
       broadcaster,
+      apiToken: config.api?.apiToken,
+      corsAllowedOrigins: config.api?.corsAllowedOrigins,
     })
   }
 

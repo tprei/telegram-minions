@@ -7,6 +7,7 @@ import type { TopicSession, SessionState, SessionDoneState } from "./domain/sess
 import type { ActiveSession } from "./session/session-manager.js"
 import type { DagGraph } from "./dag/dag.js"
 import { loggers } from "./logger.js"
+import pkg from "../package.json" with { type: "json" }
 
 const log = loggers.apiServer
 
@@ -106,6 +107,7 @@ export interface DispatcherApi {
   sendReply(threadId: number, message: string): Promise<void>
   stopSession(threadId: number): void
   closeSession(threadId: number): Promise<void>
+  handleIncomingText(text: string, sessionSlug?: string): Promise<void>
 }
 
 export class StateBroadcaster extends EventEmitter {
@@ -309,16 +311,41 @@ export interface ApiServerOptions {
   chatId: string
   botToken: string
   broadcaster: StateBroadcaster
+  apiToken?: string
+  corsAllowedOrigins?: string[]
+}
+
+function resolveOrigin(req: http.IncomingMessage, allowed?: string[]): string | null {
+  if (!allowed || allowed.length === 0) return "*"
+  const origin = req.headers["origin"]
+  if (origin && allowed.includes(origin)) return origin
+  return null
+}
+
+function requireAuth(req: http.IncomingMessage, res: http.ServerResponse, token?: string): boolean {
+  if (!token) return true
+  if (req.method === "OPTIONS") return true
+  const url = new URL(req.url ?? "", "http://x")
+  if (url.pathname === "/validate") return true
+
+  const authHeader = req.headers["authorization"]
+  const bearer = authHeader?.startsWith("Bearer ") ? authHeader.slice("Bearer ".length) : undefined
+  const queryToken = url.searchParams.get("token") ?? undefined
+
+  if (bearer === token || queryToken === token) return true
+
+  res.writeHead(401, { "Content-Type": "application/json" })
+  res.end(JSON.stringify({ data: null, error: "unauthorized" }))
+  return false
 }
 
 export function createApiServer(
   dispatcher: DispatcherApi,
   options: ApiServerOptions,
 ): http.Server {
-  const { port, uiDistPath, chatId, botToken, broadcaster } = options
+  const { port, uiDistPath, chatId, botToken, broadcaster, apiToken, corsAllowedOrigins } = options
   const sseClients = new Set<http.ServerResponse>()
 
-  // Broadcast events to all SSE clients
   broadcaster.on("event", (event: SseEvent) => {
     const data = `data: ${JSON.stringify(event)}\n\n`
     for (const client of sseClients) {
@@ -329,10 +356,16 @@ export function createApiServer(
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", `http://localhost:${port}`)
 
-    // CORS headers for development
-    res.setHeader("Access-Control-Allow-Origin", "*")
+    const origin = resolveOrigin(req, corsAllowedOrigins)
+    if (origin === "*") {
+      res.setHeader("Access-Control-Allow-Origin", "*")
+    } else if (origin) {
+      res.setHeader("Access-Control-Allow-Origin", origin)
+      res.setHeader("Vary", "Origin")
+    }
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type")
+    res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type")
+    res.setHeader("Access-Control-Max-Age", "600")
 
     if (req.method === "OPTIONS") {
       res.writeHead(204)
@@ -340,19 +373,17 @@ export function createApiServer(
       return
     }
 
-    // API routes
     if (url.pathname.startsWith("/api/")) {
+      if (!requireAuth(req, res, apiToken)) return
       await handleApiRoute(req, res, url, dispatcher, chatId, sseClients)
       return
     }
 
-    // Telegram Mini App validation endpoint
     if (url.pathname === "/validate") {
       await handleValidation(req, res, chatId, botToken)
       return
     }
 
-    // Serve static files
     await serveStatic(req, res, url, uiDistPath)
   })
 
@@ -515,12 +546,41 @@ async function handleApiRoute(
 
       sseClients.add(res)
 
-      // Send initial connection message
       res.write(": connected\n\n")
 
       req.on("close", () => {
         sseClients.delete(res)
       })
+      return
+    }
+
+    // POST /api/messages
+    if (pathname === "/api/messages" && req.method === "POST") {
+      const body = await readBody(req)
+      const parsed = JSON.parse(body) as { text?: unknown; sessionId?: unknown }
+      const text = typeof parsed.text === "string" ? parsed.text.trim() : ""
+      if (!text) {
+        res.writeHead(400, { "Content-Type": "application/json" })
+        res.end(JSON.stringify({ data: null, error: "text required" }))
+        return
+      }
+      const sessionId = typeof parsed.sessionId === "string" ? parsed.sessionId : undefined
+      await dispatcher.handleIncomingText(text, sessionId)
+      res.writeHead(200, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ data: { ok: true, sessionId: sessionId ?? null } }))
+      return
+    }
+
+    // GET /api/version
+    if (pathname === "/api/version" && req.method === "GET") {
+      res.writeHead(200, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({
+        data: {
+          apiVersion: "1",
+          libraryVersion: pkg.version,
+          features: ["messages", "auth", "cors-allowlist"],
+        },
+      }))
       return
     }
 

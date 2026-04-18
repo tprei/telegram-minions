@@ -142,6 +142,12 @@ export function configFromEnv(overrides?: Partial<MinionConfig>): MinionConfig {
     sentry: {
       dsn: process.env["SENTRY_DSN"] ?? undefined,
     },
+    api: {
+      apiToken: process.env["MINION_API_TOKEN"] || undefined,
+      corsAllowedOrigins: process.env["CORS_ALLOWED_ORIGINS"]
+        ? process.env["CORS_ALLOWED_ORIGINS"].split(",").map((s) => s.trim()).filter((s) => s.length > 0)
+        : undefined,
+    },
     githubApp: buildGitHubAppConfig(),
     agentDefs: buildAgentDefs(),
     repos: {},

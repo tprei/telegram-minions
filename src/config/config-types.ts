@@ -126,6 +126,8 @@ export interface ApiServerConfig {
   port?: number
   apiToken?: string
   host?: string
+  /** Origins permitted via `Access-Control-Allow-Origin`; empty/omitted falls back to `*` for dev backcompat. */
+  corsAllowedOrigins?: string[]
 }
 
 export interface SystemPrompts {
