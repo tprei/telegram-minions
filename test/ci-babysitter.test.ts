@@ -282,7 +282,7 @@ describe("CIBabysitter", () => {
       mockCheckPRMergeability.mockResolvedValue("MERGEABLE")
       mockWaitForCI.mockResolvedValue({ passed: true, checks: [], timedOut: false })
       mockBuildQualityGateFixPrompt.mockReturnValue("quality fix prompt")
-      mockRunQualityGates.mockReturnValue({ allPassed: true, results: [] })
+      mockRunQualityGates.mockResolvedValue({ allPassed: true, results: [] })
 
       await babysitter.babysitPR(session, "https://github.com/org/repo/pull/1", qualityReport)
 
