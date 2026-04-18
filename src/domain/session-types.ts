@@ -85,6 +85,10 @@ export interface TopicSession {
   verificationState?: VerificationState
   loopId?: string
   pipelineAdvancing?: boolean
+  /** True when the SDK process is alive but the current turn has finished —
+   *  agent is waiting for a reply via stdin. Distinct from `activeSessionId`:
+   *  the process is still attached to the topic, just not actively working. */
+  isIdle?: boolean
 }
 
 export interface PendingDagItem {

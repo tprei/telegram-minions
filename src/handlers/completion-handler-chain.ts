@@ -99,6 +99,7 @@ export class CompletionHandlerChain {
       log.error({ err, slug: topicSession.slug }, "sessions.delete threw during bookkeeping")
     }
     topicSession.activeSessionId = undefined
+    topicSession.isIdle = false
     topicSession.lastActivityAt = Date.now()
     try {
       this.broadcaster.broadcastSession(topicSession, "session_updated", event.state)

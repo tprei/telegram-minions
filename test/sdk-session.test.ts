@@ -143,6 +143,36 @@ describe("SDKSessionHandle", () => {
     })
   })
 
+  describe("idle transitions", () => {
+    it("transitions working → idle on a per-turn complete event and emits an idle event", () => {
+      const received: GooseStreamEvent[] = []
+      const handle = makeHandle(undefined, undefined, (ev) => received.push(ev))
+      ;(handle as unknown as { state: string }).state = "working"
+
+      const resultLine = JSON.stringify({
+        type: "result",
+        is_error: false,
+        total_cost_usd: 0.001,
+        num_turns: 1,
+        usage: { input_tokens: 10, output_tokens: 20 },
+      })
+      ;(handle as unknown as { parseClaudeLine: (l: string) => void }).parseClaudeLine(resultLine)
+
+      expect(handle.getState()).toBe("idle")
+      expect(handle.isActive()).toBe(true)
+      expect(handle.isClosed()).toBe(false)
+      expect(received.some((e) => e.type === "complete")).toBe(true)
+      expect(received.some((e) => e.type === "idle")).toBe(true)
+    })
+
+    it("stays in spawning when a complete event arrives before process start", () => {
+      const handle = makeHandle()
+      const resultLine = JSON.stringify({ type: "result", is_error: false })
+      ;(handle as unknown as { parseClaudeLine: (l: string) => void }).parseClaudeLine(resultLine)
+      expect(handle.getState()).toBe("spawning")
+    })
+  })
+
   describe("interrupt and kill", () => {
     it("interrupt is a no-op when not working", () => {
       const handle = makeHandle()
