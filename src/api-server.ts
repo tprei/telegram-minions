@@ -313,6 +313,7 @@ export interface ApiServerOptions {
   broadcaster: StateBroadcaster
   apiToken?: string
   corsAllowedOrigins?: string[]
+  repos?: Record<string, string>
 }
 
 function resolveOrigin(req: http.IncomingMessage, allowed?: string[]): string | null {
@@ -344,7 +345,7 @@ export function createApiServer(
   dispatcher: DispatcherApi,
   options: ApiServerOptions,
 ): http.Server {
-  const { port, uiDistPath, chatId, botToken, broadcaster, apiToken, corsAllowedOrigins } = options
+  const { port, uiDistPath, chatId, botToken, broadcaster, apiToken, corsAllowedOrigins, repos } = options
   const sseClients = new Set<http.ServerResponse>()
 
   broadcaster.on("event", (event: SseEvent) => {
@@ -376,7 +377,7 @@ export function createApiServer(
 
     if (url.pathname.startsWith("/api/")) {
       if (!requireAuth(req, res, apiToken)) return
-      await handleApiRoute(req, res, url, dispatcher, chatId, sseClients)
+      await handleApiRoute(req, res, url, dispatcher, chatId, sseClients, repos)
       return
     }
 
@@ -398,6 +399,7 @@ async function handleApiRoute(
   dispatcher: DispatcherApi,
   chatId: string,
   sseClients: Set<http.ServerResponse>,
+  repos?: Record<string, string>,
 ): Promise<void> {
   const pathname = url.pathname
 
@@ -574,12 +576,16 @@ async function handleApiRoute(
 
     // GET /api/version
     if (pathname === "/api/version" && req.method === "GET") {
+      const repoList = repos
+        ? Object.entries(repos).map(([alias, url]) => ({ alias, url }))
+        : []
       res.writeHead(200, { "Content-Type": "application/json" })
       res.end(JSON.stringify({
         data: {
           apiVersion: "1",
           libraryVersion: pkg.version,
-          features: ["messages", "auth", "cors-allowlist"],
+          features: ["messages", "auth", "cors-allowlist", "repos"],
+          repos: repoList,
         },
       }))
       return

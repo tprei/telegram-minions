@@ -90,6 +90,7 @@ export function createMinion(config: MinionConfig, options?: MinionOptions): Min
       broadcaster,
       apiToken: config.api?.apiToken,
       corsAllowedOrigins: config.api?.corsAllowedOrigins,
+      repos: config.repos,
     })
   }
 
