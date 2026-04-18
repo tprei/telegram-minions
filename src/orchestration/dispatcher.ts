@@ -1719,6 +1719,8 @@ export class Dispatcher {
       this.dags.delete(topicSession.dagId)
     }
 
+    this.ciBabysitter.pendingBabysitPRs.delete(threadId)
+
     this.topicSessions.delete(threadId)
     this.broadcastSessionDeleted(topicSession.slug)
     await this.persistTopicSessions()
@@ -1947,17 +1949,6 @@ export class Dispatcher {
       throw new SessionNotFoundError(threadId, Array.from(this.topicSessions.keys()))
     }
 
-    const activeSession = this.sessions.get(threadId)
-    if (activeSession) {
-      activeSession.handle.interrupt()
-      this.sessions.delete(threadId)
-    }
-
-    await this.platform.threads.deleteThread(String(threadId))
-    await this.removeWorkspace(topicSession)
-    this.topicSessions.delete(threadId)
-    this.broadcastSessionDeleted(topicSession.slug)
-    await this.persistTopicSessions()
-    this.pinnedMessages.updatePinnedSummary()
+    await this.handleCloseCommandInternal(topicSession)
   }
 }

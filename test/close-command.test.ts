@@ -9,6 +9,8 @@ import type { MinionConfig } from "../src/config/config-types.js"
 import type { TopicSession } from "../src/domain/session-types.js"
 import { loggers } from "../src/logger.js"
 import { EventBus } from "../src/events/event-bus.js"
+import { SessionNotFoundError } from "../src/errors.js"
+import type { CIBabysitter } from "../src/ci/ci-babysitter.js"
 
 const WORKSPACE_ROOT = "/tmp/test-workspace-close-command"
 const SESSIONS_FILE = path.join(WORKSPACE_ROOT, ".sessions.json")
@@ -396,5 +398,193 @@ describe("closeChildSessions orphan detection", () => {
     // Unrelated session should remain
     expect(topicSessions.has(9100)).toBe(true)
     expect(topicSessions.size).toBe(1)
+  })
+})
+
+describe("apiCloseSession delegates to handleCloseCommandInternal", () => {
+  it("cleans up replyQueues, abortControllers, and quotaSleepTimers", async () => {
+    const telegram = makeMockTelegram()
+    const config = makeConfig()
+    const platform = new TelegramPlatform(telegram, String(config.telegram.chatId))
+    const observer = new Observer(platform, 1)
+    const dispatcher = new Dispatcher(platform, observer, config, new EventBus())
+
+    const topicSession: TopicSession = {
+      threadId: 300,
+      repo: "test-repo",
+      cwd: "/tmp/nonexistent-workspace",
+      slug: "api-close-slug",
+      conversation: [],
+      pendingFeedback: [],
+      mode: "task",
+      lastActivityAt: Date.now(),
+    }
+
+    const topicSessions = (dispatcher as unknown as { topicSessions: Map<number, TopicSession> }).topicSessions
+    const replyQueues = (dispatcher as unknown as { replyQueues: Map<number, unknown> }).replyQueues
+    const abortControllers = (dispatcher as unknown as { abortControllers: Map<number, AbortController> }).abortControllers
+    const quotaSleepTimers = (dispatcher as unknown as { quotaSleepTimers: Map<number, ReturnType<typeof setTimeout>> }).quotaSleepTimers
+
+    topicSessions.set(300, topicSession)
+    replyQueues.set(300, { messages: [] })
+    abortControllers.set(300, new AbortController())
+    quotaSleepTimers.set(300, setTimeout(() => {}, 100_000))
+
+    await dispatcher.apiCloseSession(300)
+
+    expect(topicSessions.has(300)).toBe(false)
+    expect(replyQueues.has(300)).toBe(false)
+    expect(abortControllers.has(300)).toBe(false)
+    expect(quotaSleepTimers.has(300)).toBe(false)
+  })
+
+  it("closes child sessions when parent is closed via API", async () => {
+    const telegram = makeMockTelegram()
+    const config = makeConfig()
+    const platform = new TelegramPlatform(telegram, String(config.telegram.chatId))
+    const observer = new Observer(platform, 1)
+    const dispatcher = new Dispatcher(platform, observer, config, new EventBus())
+
+    const topicSessions = (dispatcher as unknown as { topicSessions: Map<number, TopicSession> }).topicSessions
+
+    const parentSession: TopicSession = {
+      threadId: 400,
+      repo: "test-repo",
+      cwd: "/tmp/workspace-parent",
+      slug: "api-parent",
+      conversation: [],
+      pendingFeedback: [],
+      mode: "task",
+      lastActivityAt: Date.now(),
+      childThreadIds: [401, 402],
+    }
+    topicSessions.set(400, parentSession)
+
+    for (const childId of [401, 402]) {
+      topicSessions.set(childId, {
+        threadId: childId,
+        repo: "test-repo",
+        cwd: `/tmp/workspace-child-${childId}`,
+        slug: `api-child-${childId}`,
+        conversation: [],
+        pendingFeedback: [],
+        mode: "task",
+        lastActivityAt: Date.now(),
+        parentThreadId: 400,
+      })
+    }
+
+    await dispatcher.apiCloseSession(400)
+
+    expect(topicSessions.has(400)).toBe(false)
+    expect(topicSessions.has(401)).toBe(false)
+    expect(topicSessions.has(402)).toBe(false)
+  })
+
+  it("cleans up DAG state when parent has dagId", async () => {
+    const telegram = makeMockTelegram()
+    const config = makeConfig()
+    const platform = new TelegramPlatform(telegram, String(config.telegram.chatId))
+    const observer = new Observer(platform, 1)
+    const dispatcher = new Dispatcher(platform, observer, config, new EventBus())
+
+    const topicSessions = (dispatcher as unknown as { topicSessions: Map<number, TopicSession> }).topicSessions
+    const dags = (dispatcher as unknown as { dags: Map<string, unknown> }).dags
+
+    const dagId = "test-dag-123"
+    dags.set(dagId, { id: dagId, nodes: [] })
+
+    const topicSession: TopicSession = {
+      threadId: 500,
+      repo: "test-repo",
+      cwd: "/tmp/workspace-dag",
+      slug: "api-dag-close",
+      conversation: [],
+      pendingFeedback: [],
+      mode: "task",
+      lastActivityAt: Date.now(),
+      dagId,
+    }
+    topicSessions.set(500, topicSession)
+
+    await dispatcher.apiCloseSession(500)
+
+    expect(topicSessions.has(500)).toBe(false)
+    expect(dags.has(dagId)).toBe(false)
+  })
+
+  it("throws SessionNotFoundError for unknown threadId", async () => {
+    const telegram = makeMockTelegram()
+    const config = makeConfig()
+    const platform = new TelegramPlatform(telegram, String(config.telegram.chatId))
+    const observer = new Observer(platform, 1)
+    const dispatcher = new Dispatcher(platform, observer, config, new EventBus())
+
+    await expect(dispatcher.apiCloseSession(99999)).rejects.toThrow(SessionNotFoundError)
+  })
+
+  it("clears pendingBabysitPRs on close", async () => {
+    const telegram = makeMockTelegram()
+    const config = makeConfig()
+    const platform = new TelegramPlatform(telegram, String(config.telegram.chatId))
+    const observer = new Observer(platform, 1)
+    const dispatcher = new Dispatcher(platform, observer, config, new EventBus())
+
+    const topicSessions = (dispatcher as unknown as { topicSessions: Map<number, TopicSession> }).topicSessions
+    const ciBabysitter = (dispatcher as unknown as { ciBabysitter: CIBabysitter }).ciBabysitter
+
+    const topicSession: TopicSession = {
+      threadId: 600,
+      repo: "test-repo",
+      cwd: "/tmp/workspace-babysit",
+      slug: "babysit-close",
+      conversation: [],
+      pendingFeedback: [],
+      mode: "task",
+      lastActivityAt: Date.now(),
+    }
+    topicSessions.set(600, topicSession)
+
+    // Simulate queued babysit entries
+    ciBabysitter.pendingBabysitPRs.set(600, [
+      { childSession: topicSession, prUrl: "https://github.com/org/repo/pull/1" },
+    ])
+
+    await dispatcher.apiCloseSession(600)
+
+    expect(ciBabysitter.pendingBabysitPRs.has(600)).toBe(false)
+  })
+})
+
+describe("handleCloseCommand clears pendingBabysitPRs", () => {
+  it("deletes pendingBabysitPRs entry for the closed session", async () => {
+    const telegram = makeMockTelegram()
+    const config = makeConfig()
+    const platform = new TelegramPlatform(telegram, String(config.telegram.chatId))
+    const observer = new Observer(platform, 1)
+    const dispatcher = new Dispatcher(platform, observer, config, new EventBus())
+
+    const topicSessions = (dispatcher as unknown as { topicSessions: Map<number, TopicSession> }).topicSessions
+    const ciBabysitter = (dispatcher as unknown as { ciBabysitter: CIBabysitter }).ciBabysitter
+
+    const topicSession: TopicSession = {
+      threadId: 700,
+      repo: "test-repo",
+      cwd: "/tmp/workspace-babysit-close",
+      slug: "babysit-direct-close",
+      conversation: [],
+      pendingFeedback: [],
+      mode: "task",
+      lastActivityAt: Date.now(),
+    }
+    topicSessions.set(700, topicSession)
+
+    ciBabysitter.pendingBabysitPRs.set(700, [
+      { childSession: topicSession, prUrl: "https://github.com/org/repo/pull/2" },
+    ])
+
+    await dispatcher.handleCloseCommand(700)
+
+    expect(ciBabysitter.pendingBabysitPRs.has(700)).toBe(false)
   })
 })
