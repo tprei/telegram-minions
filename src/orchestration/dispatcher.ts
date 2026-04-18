@@ -2006,13 +2006,16 @@ export class Dispatcher {
       ? [...this.topicSessions.values()].find((s) => s.slug === sessionSlug)
       : undefined
 
-    if (topicSession) {
+    const isSlashCommand = text.trimStart().startsWith("/")
+
+    if (topicSession && !isSlashCommand) {
       await this.handleTopicFeedback(topicSession, text)
       return
     }
 
-    // No matching session — synthesize a message update through the normal poll path.
-    // /task ... sent via this route runs through SDKSessionHandle with mid-execution reply injection.
+    // Slash commands always route through handleChatUpdate so /stop, /close,
+    // /execute, /split, /stack, /dag, /doctor, /ship are parsed as commands
+    // rather than reply-injected as session feedback.
     const userId = this.config.telegram.allowedUserIds[0]
     if (!userId) return
 
@@ -2020,6 +2023,7 @@ export class Dispatcher {
       type: "message",
       message: {
         messageId: crypto.randomUUID(),
+        threadId: topicSession ? String(topicSession.threadId) : undefined,
         from: { id: String(userId), isBot: false },
         text,
         timestamp: Date.now(),
