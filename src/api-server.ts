@@ -7,6 +7,9 @@ import type { TopicSession, SessionState, SessionDoneState } from "./domain/sess
 import type { ActiveSession } from "./session/session-manager.js"
 import type { DagGraph } from "./dag/dag.js"
 import { loggers } from "./logger.js"
+import { computeWorkspaceDiff } from "./session/workspace-diff.js"
+import { listSessionScreenshots, resolveScreenshotPath } from "./session/workspace-screenshots.js"
+import { fetchPrPreview } from "./github/pr-preview.js"
 import pkg from "../package.json" with { type: "json" }
 
 const log = loggers.apiServer
@@ -460,6 +463,108 @@ async function handleApiRoute(
       return
     }
 
+    // GET /api/sessions/:id/diff
+    const diffMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/diff$/)
+    if (diffMatch && req.method === "GET") {
+      const slug = diffMatch[1]
+      const session = [...dispatcher.getTopicSessions().values()].find((s) => s.slug === slug)
+      if (!session || !session.cwd) {
+        res.writeHead(404, { "Content-Type": "application/json" })
+        res.end(JSON.stringify({ data: null, error: "Session not found" }))
+        return
+      }
+      try {
+        const diff = await computeWorkspaceDiff(session.cwd, session.branch)
+        res.writeHead(200, { "Content-Type": "application/json" })
+        res.end(JSON.stringify({ data: diff }))
+      } catch (err) {
+        res.writeHead(500, { "Content-Type": "application/json" })
+        res.end(JSON.stringify({ data: null, error: err instanceof Error ? err.message : String(err) }))
+      }
+      return
+    }
+
+    // GET /api/sessions/:id/screenshots — list captured PNGs
+    const screenshotsMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/screenshots$/)
+    if (screenshotsMatch && req.method === "GET") {
+      const slug = screenshotsMatch[1]
+      const session = [...dispatcher.getTopicSessions().values()].find((s) => s.slug === slug)
+      if (!session || !session.cwd) {
+        res.writeHead(404, { "Content-Type": "application/json" })
+        res.end(JSON.stringify({ data: null, error: "Session not found" }))
+        return
+      }
+      const screenshots = await listSessionScreenshots(session.cwd)
+      res.writeHead(200, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({
+        data: {
+          screenshots: screenshots.map((s) => ({
+            ...s,
+            url: `/api/sessions/${slug}/screenshots/${encodeURIComponent(s.filename)}`,
+          })),
+        },
+      }))
+      return
+    }
+
+    // GET /api/sessions/:id/screenshots/:filename — stream the PNG
+    const screenshotFileMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/screenshots\/([^/]+)$/)
+    if (screenshotFileMatch && req.method === "GET") {
+      const [, slug, rawName] = screenshotFileMatch
+      const filename = decodeURIComponent(rawName)
+      const session = [...dispatcher.getTopicSessions().values()].find((s) => s.slug === slug)
+      if (!session || !session.cwd) {
+        res.writeHead(404, { "Content-Type": "application/json" })
+        res.end(JSON.stringify({ data: null, error: "Session not found" }))
+        return
+      }
+      const absPath = resolveScreenshotPath(session.cwd, filename)
+      if (!absPath) {
+        res.writeHead(400, { "Content-Type": "application/json" })
+        res.end(JSON.stringify({ data: null, error: "Invalid screenshot filename" }))
+        return
+      }
+      try {
+        const data = await fs.promises.readFile(absPath)
+        res.writeHead(200, {
+          "Content-Type": "image/png",
+          "Content-Length": data.length,
+          "Cache-Control": "private, max-age=300",
+        })
+        res.end(data)
+      } catch {
+        res.writeHead(404, { "Content-Type": "application/json" })
+        res.end(JSON.stringify({ data: null, error: "Screenshot not found" }))
+      }
+      return
+    }
+
+    // GET /api/sessions/:id/pr — pull request preview card (gh pr view + checks)
+    const prMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/pr$/)
+    if (prMatch && req.method === "GET") {
+      const slug = prMatch[1]
+      const session = [...dispatcher.getTopicSessions().values()].find((s) => s.slug === slug)
+      if (!session) {
+        res.writeHead(404, { "Content-Type": "application/json" })
+        res.end(JSON.stringify({ data: null, error: "Session not found" }))
+        return
+      }
+      if (!session.prUrl) {
+        res.writeHead(404, { "Content-Type": "application/json" })
+        res.end(JSON.stringify({ data: null, error: "Session has no open PR" }))
+        return
+      }
+      try {
+        const preview = await fetchPrPreview(session.prUrl)
+        res.writeHead(200, { "Content-Type": "application/json" })
+        res.end(JSON.stringify({ data: preview }))
+      } catch (err) {
+        res.writeHead(502, { "Content-Type": "application/json" })
+        res.end(JSON.stringify({ data: null, error: err instanceof Error ? err.message : String(err) }))
+      }
+      return
+    }
+
     // GET /api/dags
     if (pathname === "/api/dags" && req.method === "GET") {
       const dags = dispatcher.getDags()
@@ -644,7 +749,16 @@ async function handleApiRoute(
         data: {
           apiVersion: "1",
           libraryVersion: pkg.version,
-          features: ["messages", "auth", "cors-allowlist", "repos", "sessions-create"],
+          features: [
+            "messages",
+            "auth",
+            "cors-allowlist",
+            "repos",
+            "sessions-create",
+            "diff-viewer",
+            "screenshots-http",
+            "pr-preview",
+          ],
           repos: repoList,
         },
       }))
