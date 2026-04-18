@@ -11,6 +11,7 @@ import { isThreadNotFoundError } from "../errors.js"
 import {
   formatToolLine,
   formatActivityLog,
+  formatActivityLogPlain,
   formatSessionStart,
   formatPlanStart,
   formatThinkStart,
@@ -68,6 +69,10 @@ interface SessionState {
   onTextCapture?: TextCaptureCallback
   // Optional callback fired when the Telegram thread no longer exists
   onDeadThread?: () => void
+  // Optional callback fired when tool activity is posted to Telegram — the
+  // plain-text activity summary, so API consumers (e.g. the PWA) can surface
+  // tool use in the conversation feed just like Telegram users see it.
+  onActivityCapture?: (sessionId: string, activityText: string) => void
 }
 
 export class Observer {
@@ -89,6 +94,7 @@ export class Observer {
     task: string,
     onTextCapture?: TextCaptureCallback,
     onDeadThread?: () => void,
+    onActivityCapture?: (sessionId: string, activityText: string) => void,
   ): Promise<void> {
     this.sessions.set(meta.sessionId, {
       textBuffer: "",
@@ -104,6 +110,7 @@ export class Observer {
       sentScreenshots: new Set(),
       onTextCapture,
       onDeadThread,
+      onActivityCapture,
     })
     const msg = meta.mode === "ship-think"
       ? formatShipThinkStart(meta.repo, meta.topicName, task)
@@ -373,6 +380,13 @@ export class Observer {
     state.activityLastSentAt = now
     const { messageId } = await this.safeSendMessage(meta, html)
     state.activityMessageId = messageId
+
+    if (state.onActivityCapture) {
+      state.onActivityCapture(
+        meta.sessionId,
+        formatActivityLogPlain(state.activityLog, state.toolCount),
+      )
+    }
   }
 
   async onSessionComplete(

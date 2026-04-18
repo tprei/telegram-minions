@@ -72,6 +72,26 @@ export function formatActivityLog(
   return [header, "", ...lines].join("\n")
 }
 
+function stripHtmlToMarkdown(line: string): string {
+  return line
+    .replace(/<code>/g, "`")
+    .replace(/<\/code>/g, "`")
+    .replace(/<b>/g, "**")
+    .replace(/<\/b>/g, "**")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+}
+
+export function formatActivityLogPlain(
+  lines: string[],
+  toolCount: number,
+): string {
+  const header = `**🔧 Activity · ${toolCount} tool${toolCount === 1 ? "" : "s"}**`
+  const body = lines.map((l) => `- ${stripHtmlToMarkdown(l)}`)
+  return [header, "", ...body].join("\n")
+}
+
 export function formatToolActivity(
   toolName: string,
   args: Record<string, unknown>,
