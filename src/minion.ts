@@ -3,11 +3,10 @@ import { fileURLToPath } from "node:url"
 import http from "node:http"
 import fs from "node:fs"
 import type { MinionConfig } from "./config/config-types.js"
-import { TelegramClient } from "./telegram/telegram.js"
-import { TelegramPlatform } from "./telegram/telegram-platform.js"
 import { Observer } from "./telegram/observer.js"
 import { MinionEngine } from "./engine/engine.js"
-import { createApiServer, StateBroadcaster, type DispatcherApi } from "./api-server.js"
+import { TelegramConnector } from "./connectors/telegram-connector.js"
+import { HttpConnector } from "./connectors/http-connector.js"
 import { loggers } from "./logger.js"
 import { initSentry } from "./sentry.js"
 import { GitHubTokenProvider } from "./github/index.js"
@@ -28,13 +27,9 @@ export interface MinionOptions {
 }
 
 function findUiDistPath(): string {
-  // Try multiple locations for UI dist
   const possiblePaths = [
-    // From compiled dist/
     path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "ui", "dist"),
-    // From source src/
     path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "ui", "dist"),
-    // From assets/
     path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "assets", "ui"),
   ]
 
@@ -48,85 +43,74 @@ function findUiDistPath(): string {
     }
   }
 
-  // Default to relative path
   return path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "ui", "dist")
 }
 
 export function createMinion(config: MinionConfig, options?: MinionOptions): MinionInstance {
-  const telegram = new TelegramClient(config.telegram.botToken, config.telegram.chatId, config.telegramQueue.minSendIntervalMs)
-  const platform = new TelegramPlatform(telegram, config.telegram.chatId)
+  const telegramConnector = new TelegramConnector({
+    botToken: config.telegram.botToken,
+    chatId: config.telegram.chatId,
+    minSendIntervalMs: config.telegramQueue.minSendIntervalMs,
+  })
+
   const engineEvents = new EngineEventBus()
-  const observer = new Observer(platform, config.observer.activityThrottleMs, {
+  const observer = new Observer(telegramConnector.platform, config.observer.activityThrottleMs, {
     textFlushDebounceMs: config.observer.textFlushDebounceMs,
     activityEditDebounceMs: config.observer.activityEditDebounceMs,
     events: engineEvents,
   })
-  const broadcaster = new StateBroadcaster()
+
   const eventBus = new EventBus()
   const tokenProvider = new GitHubTokenProvider(config.githubApp)
   tokenProvider.setTokenFilePath(path.join(config.workspace.root, ".github-token"))
-  const dispatcher = new MinionEngine(platform, observer, config, eventBus, broadcaster, tokenProvider, engineEvents)
+  const engine = new MinionEngine(
+    telegramConnector.platform,
+    observer,
+    config,
+    eventBus,
+    tokenProvider,
+    engineEvents,
+  )
+  telegramConnector.attach(engine)
 
-  let apiServer: http.Server | undefined
-
-  // Set up API server if port is configured
   const apiPort = options?.apiPort ?? (process.env["API_PORT"] ? parseInt(process.env["API_PORT"], 10) : undefined)
-  const uiDistPath = findUiDistPath()
-
-  if (apiPort) {
-    const dispatcherApi: DispatcherApi = {
-      getSessions: () => dispatcher.getSessions(),
-      getTopicSessions: () => dispatcher.getTopicSessions(),
-      getDags: () => dispatcher.getDags(),
-      getSessionState: (threadId: number) => dispatcher.getSessionState(threadId),
-      sendReply: (threadId: number, message: string) => dispatcher.apiSendReply(threadId, message),
-      stopSession: (threadId: number) => dispatcher.apiStopSession(threadId),
-      closeSession: (threadId: number) => dispatcher.apiCloseSession(threadId),
-      handleIncomingText: (text: string, sessionSlug?: string) => dispatcher.handleIncomingText(text, sessionSlug),
-    }
-
-    apiServer = createApiServer(dispatcherApi, {
-      port: apiPort,
-      uiDistPath,
-      chatId: config.telegram.chatId,
-      botToken: config.telegram.botToken,
-      broadcaster,
-      apiToken: config.api?.apiToken,
-      corsAllowedOrigins: config.api?.corsAllowedOrigins,
-      repos: config.repos,
-    })
-  }
+  const httpConnector = apiPort
+    ? new HttpConnector({
+        port: apiPort,
+        uiDistPath: findUiDistPath(),
+        chatId: config.telegram.chatId,
+        botToken: config.telegram.botToken,
+        apiToken: config.api?.apiToken,
+        corsAllowedOrigins: config.api?.corsAllowedOrigins,
+        repos: config.repos,
+      })
+    : null
+  httpConnector?.attach(engine)
 
   return {
     async start() {
       await initSentry(config.sentry?.dsn)
 
-      // Start API server first
-      if (apiServer) {
-        await new Promise<void>((resolve) => {
-          apiServer!.listen(apiPort!, () => {
-            log.info({ port: apiPort }, "API server listening")
-            resolve()
-          })
-        })
+      if (httpConnector) {
+        await httpConnector.start()
+        log.info({ port: apiPort }, "API server listening")
       }
 
       await tokenProvider.refreshEnv()
       tokenProvider.startPeriodicRefresh()
-      await dispatcher.loadPersistedSessions()
-      dispatcher.startCleanupTimer()
-      await dispatcher.startLoops(DEFAULT_LOOPS)
-      await dispatcher.start()
+      await engine.loadPersistedSessions()
+      engine.startCleanupTimer()
+      await engine.startLoops(DEFAULT_LOOPS)
+      await engine.start()
     },
     stop() {
       tokenProvider.stopPeriodicRefresh()
-      dispatcher.stop()
-      if (apiServer) {
-        apiServer.close()
-      }
+      engine.stop()
+      httpConnector?.detach()
+      telegramConnector.detach()
     },
     getApiServer() {
-      return apiServer
+      return httpConnector?.getServer() ?? undefined
     },
   }
 }

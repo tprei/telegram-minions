@@ -32,8 +32,6 @@ import {
 import { StatsTracker } from "../stats.js"
 import { truncateConversation } from "../conversation-limits.js"
 import { DEFAULT_CI_FIX_PROMPT } from "../config/prompts.js"
-import type { StateBroadcaster } from "../api-server.js"
-import { topicSessionToApi, dagToApi } from "../api-server.js"
 import { loggers } from "../logger.js"
 import { SessionNotFoundError } from "../errors.js"
 import {
@@ -125,7 +123,6 @@ export class MinionEngine {
   private readonly profileStore: ProfileStore
   private readonly dags = new Map<string, DagGraph>()
   private readonly abortControllers = new Map<number, AbortController>()
-  private readonly broadcaster?: StateBroadcaster
   private offset = 0
   private running = false
   private cleanupTimer: ReturnType<typeof setInterval> | null = null
@@ -153,11 +150,9 @@ export class MinionEngine {
     private readonly observer: Observer,
     private readonly config: MinionConfig,
     eventBus: EventBus,
-    broadcaster?: StateBroadcaster,
     private readonly tokenProvider?: GitHubTokenProvider,
     engineEvents?: EngineEventBus,
   ) {
-    this.broadcaster = broadcaster
     this.eventBus = eventBus
     this.engineEvents = engineEvents ?? new EngineEventBus()
     this.store = new SessionStore(this.config.workspace.root)
@@ -186,7 +181,6 @@ export class MinionEngine {
       observer: this.observer,
       stats: this.stats,
       profileStore: this.profileStore,
-      broadcaster: this.broadcaster,
       sessions: this.sessions,
       topicSessions: this.topicSessions,
       dags: this.dags,
@@ -337,28 +331,18 @@ export class MinionEngine {
 
   private broadcastSession(session: TopicSession, eventType: "session_created" | "session_updated", sessionState?: SessionDoneState): void {
     void this.engineEvents.emit({ type: eventType, session, sessionState })
-    if (!this.broadcaster) return
-    const apiSession = topicSessionToApi(session, this.config.telegram.chatId, session.activeSessionId, sessionState)
-    this.broadcaster.broadcast({ type: eventType, session: apiSession })
   }
 
   private broadcastSessionDeleted(slug: string): void {
     void this.engineEvents.emit({ type: "session_deleted", sessionId: slug })
-    if (!this.broadcaster) return
-    this.broadcaster.broadcast({ type: "session_deleted", sessionId: slug })
   }
 
   private broadcastDag(graph: DagGraph, eventType: "dag_created" | "dag_updated"): void {
     void this.engineEvents.emit({ type: eventType, dag: graph })
-    if (!this.broadcaster) return
-    const apiDag = dagToApi(graph, this.topicSessions, this.sessions, this.config.telegram.chatId)
-    this.broadcaster.broadcast({ type: eventType, dag: apiDag })
   }
 
   private broadcastDagDeleted(dagId: string): void {
     void this.engineEvents.emit({ type: "dag_deleted", dagId })
-    if (!this.broadcaster) return
-    this.broadcaster.broadcast({ type: "dag_deleted", dagId })
   }
 
   // ── Session persistence & lifecycle ───────────────────────────────────

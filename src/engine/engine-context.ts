@@ -19,7 +19,6 @@ import type { QualityReport } from "../ci/quality-gates.js"
 import type { ActiveSession, MergeResult, PendingTask } from "../session/session-manager.js"
 import type { StatsTracker } from "../stats.js"
 import type { ProfileStore } from "../profile-store.js"
-import type { StateBroadcaster } from "../api-server.js"
 
 export interface EngineContext {
   // ── Configuration ──────────────────────────────────────────────────
@@ -31,7 +30,6 @@ export interface EngineContext {
   readonly observer: Observer
   readonly stats: StatsTracker
   readonly profileStore: ProfileStore
-  readonly broadcaster?: StateBroadcaster
 
   // ── Shared mutable state ───────────────────────────────────────────
   /** Active running sessions keyed by threadId. */
