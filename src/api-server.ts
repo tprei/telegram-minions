@@ -98,6 +98,33 @@ export type MinionCommand =
   | { action: "close"; sessionId: string }
   | { action: "plan_action"; sessionId: string; planAction: PlanActionType }
 
+const VALID_ACTIONS = new Set<string>(["reply", "stop", "close", "plan_action"])
+const VALID_PLAN_ACTIONS = new Set<string>(["execute", "split", "stack", "dag"])
+
+function parseMinionCommand(data: unknown): MinionCommand | null {
+  if (typeof data !== "object" || data === null) return null
+  const obj = data as Record<string, unknown>
+  if (typeof obj.action !== "string" || !VALID_ACTIONS.has(obj.action)) return null
+  if (typeof obj.sessionId !== "string") return null
+
+  switch (obj.action) {
+    case "reply":
+      return typeof obj.message === "string"
+        ? { action: "reply", sessionId: obj.sessionId, message: obj.message }
+        : null
+    case "stop":
+      return { action: "stop", sessionId: obj.sessionId }
+    case "close":
+      return { action: "close", sessionId: obj.sessionId }
+    case "plan_action":
+      return typeof obj.planAction === "string" && VALID_PLAN_ACTIONS.has(obj.planAction)
+        ? { action: "plan_action", sessionId: obj.sessionId, planAction: obj.planAction as PlanActionType }
+        : null
+    default:
+      return null
+  }
+}
+
 export interface DispatcherApi {
   getSessions(): Map<number, ActiveSession>
   getTopicSessions(): Map<number, TopicSession>
@@ -447,7 +474,12 @@ async function handleApiRoute(
     // POST /api/commands
     if (pathname === "/api/commands" && req.method === "POST") {
       const body = await readBody(req)
-      const command = JSON.parse(body) as MinionCommand
+      const command = parseMinionCommand(JSON.parse(body) as unknown)
+      if (!command) {
+        res.writeHead(400, { "Content-Type": "application/json" })
+        res.end(JSON.stringify({ success: false, error: "Invalid command payload" }))
+        return
+      }
 
       // Find the thread ID from the session ID (slug)
       const topicSessions = dispatcher.getTopicSessions()
