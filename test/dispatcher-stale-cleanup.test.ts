@@ -155,6 +155,70 @@ describe("cleanupStaleSessions deletes replyQueues for stale parent sessions", (
     expect(d.topicSessions.has(threadId)).toBe(false)
   })
 
+  it("scrubs stale child ID from parent childThreadIds", async () => {
+    const telegram = makeMockTelegram()
+    const config = makeConfig()
+    const platform = new TelegramPlatform(telegram, config.telegram.chatId)
+    const observer = new Observer(platform, 123)
+    const dispatcher = new Dispatcher(platform, observer, config, new EventBus())
+
+    const d = dispatcher as unknown as {
+      topicSessions: Map<number, TopicSession>
+      cleanupStaleSessions: () => Promise<void>
+    }
+
+    const parentThreadId = 700
+    const childThreadId = 701
+    const otherChildThreadId = 702
+
+    const parentSession: TopicSession = {
+      threadId: parentThreadId,
+      repo: "test-repo",
+      cwd: "/tmp/nonexistent-parent",
+      slug: "parent-slug",
+      conversation: [],
+      pendingFeedback: [],
+      mode: "plan",
+      lastActivityAt: Date.now(),
+      childThreadIds: [childThreadId, otherChildThreadId],
+    }
+
+    const staleChild: TopicSession = {
+      threadId: childThreadId,
+      repo: "test-repo",
+      cwd: "/tmp/nonexistent-child",
+      slug: "stale-child",
+      conversation: [],
+      pendingFeedback: [],
+      mode: "task",
+      lastActivityAt: Date.now() - 200_000,
+      parentThreadId,
+    }
+
+    const activeChild: TopicSession = {
+      threadId: otherChildThreadId,
+      repo: "test-repo",
+      cwd: "/tmp/nonexistent-child-active",
+      slug: "active-child",
+      conversation: [],
+      pendingFeedback: [],
+      mode: "task",
+      lastActivityAt: Date.now(),
+      parentThreadId,
+    }
+
+    d.topicSessions.set(parentThreadId, parentSession)
+    d.topicSessions.set(childThreadId, staleChild)
+    d.topicSessions.set(otherChildThreadId, activeChild)
+
+    await d.cleanupStaleSessions()
+
+    expect(d.topicSessions.has(childThreadId)).toBe(false)
+    expect(d.topicSessions.has(parentThreadId)).toBe(true)
+    expect(d.topicSessions.has(otherChildThreadId)).toBe(true)
+    expect(parentSession.childThreadIds).toEqual([otherChildThreadId])
+  })
+
   it("does not remove replyQueue for non-stale sessions", async () => {
     const telegram = makeMockTelegram()
     const config = makeConfig()

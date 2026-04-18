@@ -839,6 +839,13 @@ export class Dispatcher {
       await this.platform.threads.deleteThread(String(threadId))
       await this.removeWorkspace(session)
       this.topicSessions.delete(threadId)
+      if (session.parentThreadId) {
+        const parent = this.topicSessions.get(session.parentThreadId)
+        if (parent?.childThreadIds) {
+          const idx = parent.childThreadIds.indexOf(threadId)
+          if (idx !== -1) parent.childThreadIds.splice(idx, 1)
+        }
+      }
       log.info({ slug: session.slug, threadId }, "cleaned up stale session")
     }
 
