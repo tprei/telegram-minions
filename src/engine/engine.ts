@@ -62,6 +62,7 @@ import { routeCommand } from "../commands/command-router.js"
 import { CommandHandler } from "../commands/command-handler.js"
 import { parseResetTime } from "../session/quota-detection.js"
 import type { EventBus } from "../events/event-bus.js"
+import { EngineEventBus } from "./events.js"
 import { LoopScheduler, type LoopSchedulerConfig } from "../loops/loop-scheduler.js"
 import type { LoopDefinition, LoopState } from "../loops/domain-types.js"
 import { LoopStore } from "../loops/loop-store.js"
@@ -144,6 +145,7 @@ export class MinionEngine {
   private readonly commandHandler: CommandHandler
   private readonly pinnedMessages: PinnedMessageManager
   private readonly eventBus: EventBus
+  private readonly engineEvents = new EngineEventBus()
   private readonly completionChain: CompletionHandlerChain
 
   constructor(
@@ -326,24 +328,33 @@ export class MinionEngine {
     }
   }
 
+  /** Read-only handle on the engine's channel-agnostic event bus. Connectors subscribe here. */
+  get events(): EngineEventBus {
+    return this.engineEvents
+  }
+
   private broadcastSession(session: TopicSession, eventType: "session_created" | "session_updated", sessionState?: SessionDoneState): void {
+    void this.engineEvents.emit({ type: eventType, session, sessionState })
     if (!this.broadcaster) return
     const apiSession = topicSessionToApi(session, this.config.telegram.chatId, session.activeSessionId, sessionState)
     this.broadcaster.broadcast({ type: eventType, session: apiSession })
   }
 
   private broadcastSessionDeleted(slug: string): void {
+    void this.engineEvents.emit({ type: "session_deleted", sessionId: slug })
     if (!this.broadcaster) return
     this.broadcaster.broadcast({ type: "session_deleted", sessionId: slug })
   }
 
   private broadcastDag(graph: DagGraph, eventType: "dag_created" | "dag_updated"): void {
+    void this.engineEvents.emit({ type: eventType, dag: graph })
     if (!this.broadcaster) return
     const apiDag = dagToApi(graph, this.topicSessions, this.sessions, this.config.telegram.chatId)
     this.broadcaster.broadcast({ type: eventType, dag: apiDag })
   }
 
   private broadcastDagDeleted(dagId: string): void {
+    void this.engineEvents.emit({ type: "dag_deleted", dagId })
     if (!this.broadcaster) return
     this.broadcaster.broadcast({ type: "dag_deleted", dagId })
   }

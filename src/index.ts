@@ -41,6 +41,8 @@ export { DEFAULT_PROMPTS, DEFAULT_TASK_PROMPT, DEFAULT_PLAN_PROMPT, DEFAULT_THIN
 export { TelegramClient } from "./telegram/telegram.js"
 export { Observer } from "./telegram/observer.js"
 export { MinionEngine } from "./engine/engine.js"
+export { EngineEventBus } from "./engine/events.js"
+export type { EngineEvent, EngineEventType, EngineEventHandler } from "./engine/events.js"
 export { SessionHandle } from "./session/session.js"
 export type { SessionConfig } from "./session/session.js"
 export type {
