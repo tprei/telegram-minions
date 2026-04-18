@@ -1,8 +1,13 @@
 # telegram-minions
 
-A Telegram-based orchestration layer for autonomous coding agents. This project wraps Goose and Claude Code inside a sandboxed Docker container, allowing you to trigger codebase modifications, architectural planning, and deep research directly from a Telegram chat. 
+An orchestration engine for autonomous coding agents. Wraps Goose and Claude Code inside a sandboxed Docker container, handles session state, streams output, and automatically monitors and fixes failing CI pipelines.
 
-It handles session state, streams agent output back to Telegram forum topics, and automatically monitors and fixes failing CI pipelines.
+The engine is **headless** with pluggable I/O connectors:
+
+- **TelegramConnector** — drive sessions from a Telegram chat, stream agent output to forum topics (the original interface).
+- **HttpConnector** — serve the bundled PWA + REST/SSE API so you can drive sessions from a browser (no Telegram account needed).
+
+Both connectors attach to the same engine; you can enable one, the other, or both. As of v2, **Telegram credentials are optional** — minions can boot with only the HTTP connector and be driven entirely from the PWA.
 
 Inspired by [Stripe's Minions](https://stripe.dev/blog/minions-stripes-one-shot-end-to-end-coding-agents) — one-shot, end-to-end coding agents.
 
@@ -10,7 +15,7 @@ Inspired by [Stripe's Minions](https://stripe.dev/blog/minions-stripes-one-shot-
 
 ## Features
 
-* **Telegram Interface**: Start, monitor, and interact with coding agents via Telegram commands and forum topics.
+* **Pluggable connectors**: Drive the engine from Telegram, from the bundled PWA over HTTP, or both at once.
 * **Multiple Operating Modes**:
   * **Task**: One-shot execution for standard coding tasks (via Goose).
   * **Plan**: Multi-turn, read-only exploration and planning phase. Once approved, the plan is executed (via Claude -> Goose).
@@ -27,7 +32,7 @@ Inspired by [Stripe's Minions](https://stripe.dev/blog/minions-stripes-one-shot-
 
 ## Usage
 
-Interact with the bot in your authorized Telegram chat using the following commands:
+The engine accepts the same commands regardless of channel — `/task`, `/plan`, `/reply`, `/stop`, etc. When the Telegram connector is registered, they arrive as Telegram messages; when the HTTP connector is registered, the PWA sends them over REST.
 
 ### Global Commands
 * `/task [repo] <description>` (or `/w`) - Starts a coding task in a new topic.
@@ -53,13 +58,27 @@ Interact with the bot in your authorized Telegram chat using the following comma
 
 ## Configuration
 
-The system is configured via environment variables.
+The system is configured via environment variables. Which vars are required depends on **which connectors** you enable.
 
-### Required
-* `TELEGRAM_BOT_TOKEN` - Your Telegram bot token.
-* `TELEGRAM_CHAT_ID` - The ID of the chat/forum the bot should listen to.
-* `ALLOWED_USER_IDS` - Comma-separated list of authorized Telegram user IDs.
-* `GITHUB_TOKEN` - GitHub PAT for cloning repositories and powering the GitHub MCP.
+### Always required
+* `GITHUB_TOKEN` — GitHub PAT for cloning repositories and powering the GitHub MCP.
+* `WORKSPACE_ROOT` — Absolute path to the workspace volume (default: `/workspace`).
+
+### Required by `TelegramConnector`
+Set **all three** of these to enable the Telegram channel:
+* `TELEGRAM_BOT_TOKEN` — Your Telegram bot token.
+* `TELEGRAM_CHAT_ID` — The ID of the chat/forum the bot should listen to.
+* `ALLOWED_USER_IDS` — Comma-separated list of authorized Telegram user IDs.
+
+If `TELEGRAM_BOT_TOKEN` is unset, the engine skips the Telegram connector entirely and runs with a local in-memory `ChatPlatform` instead. `ALLOWED_USER_IDS` becomes a no-op.
+
+### Required by `HttpConnector`
+Set **both** to enable the PWA + REST/SSE API:
+* `API_PORT` — Port to bind the HTTP server on (e.g. `8080`).
+* `MINION_API_TOKEN` — Bearer token required on every `/api/*` request.
+* `CORS_ALLOWED_ORIGINS` — Optional comma-separated allowlist for PWA origins served from a different host.
+
+The HTTP connector works with or without Telegram configured. When Telegram is absent, the `/validate` endpoint (Telegram WebApp login) returns `503`; the rest of the API behaves normally.
 
 ### Agent & Auth
 By default, the system uses `claude-acp` (Claude Code subscription) which requires no API key but requires a one-time interactive login.
@@ -79,17 +98,20 @@ By default, the system uses `claude-acp` (Claude Code subscription) which requir
 
 This project is designed to run continuously in a cloud environment like Fly.io with a persistent volume attached.
 
-1. **Set Secrets**:
+### Deployment A — Telegram + HTTP (the default)
+
+1. **Set secrets**:
    ```bash
    fly secrets set \
      TELEGRAM_BOT_TOKEN="your_token" \
      TELEGRAM_CHAT_ID="-100..." \
      ALLOWED_USER_IDS="123456789" \
-     GITHUB_TOKEN="ghp_..."
+     GITHUB_TOKEN="ghp_..." \
+     API_PORT="8080" \
+     MINION_API_TOKEN="$(openssl rand -hex 32)"
    ```
 
-2. **Create Persistent Volume**:
-   This stores cloned repositories and Claude authentication state across redeploys.
+2. **Create persistent volume**:
    ```bash
    fly volumes create workspace_data --size 10
    ```
@@ -99,13 +121,27 @@ This project is designed to run continuously in a cloud environment like Fly.io 
    fly deploy
    ```
 
-4. **Authenticate Claude (First deploy only)**:
+4. **Authenticate Claude (first deploy only)**:
    If using `claude-acp`, you must authenticate the container once.
    ```bash
    fly ssh console
    su - minion -c 'HOME=/workspace/home claude'
    ```
    Complete OAuth in your browser, then type `/exit` to leave Claude.
+
+### Deployment B — HTTP only (PWA-driven, no Telegram)
+
+Same as above but omit the Telegram secrets:
+
+```bash
+fly secrets set \
+  GITHUB_TOKEN="ghp_..." \
+  API_PORT="8080" \
+  MINION_API_TOKEN="$(openssl rand -hex 32)" \
+  CORS_ALLOWED_ORIGINS="https://my-pwa.example.com"
+```
+
+The minion boots without ever attempting to reach the Telegram API. Point the PWA at the Fly hostname, pass `MINION_API_TOKEN` as a `Bearer` header, and you can create / reply / stop / close sessions entirely from the browser.
 
 ## Local Development
 
@@ -174,6 +210,10 @@ Override defaults via environment variables:
 
 The core logic is published as a package and can be imported directly if you want to define custom system prompts, custom agent profiles, or repository aliases in code.
 
+### High-level API — `createMinion`
+
+`createMinion` composes the engine with the connectors that match your env. If `TELEGRAM_BOT_TOKEN` is set it wires up a `TelegramConnector`; if `API_PORT` is set it wires up an `HttpConnector`. Either, both, or neither is valid.
+
 ```typescript
 import { createMinion, configFromEnv } from "@tprei/telegram-minions"
 
@@ -182,10 +222,85 @@ const minion = createMinion({
   repos: {
     "scripts": "https://github.com/myorg/scripts",
     "webapp": "https://github.com/myorg/webapp",
-  }
+  },
 })
 
 await minion.start()
+```
+
+### Low-level API — `MinionEngine.use(connector)`
+
+For finer-grained control (custom connectors, running without Telegram, adding a future Slack connector, etc.), construct the engine directly and attach connectors via `engine.use`:
+
+```typescript
+import {
+  MinionEngine,
+  EngineEventBus,
+  Observer,
+  TelegramConnector,
+  HttpConnector,
+  EventBus,
+  GitHubTokenProvider,
+  configFromEnv,
+} from "@tprei/telegram-minions"
+
+const config = configFromEnv()
+const engineEvents = new EngineEventBus()
+
+// Telegram is optional — only create the connector if credentials are present.
+const telegramConnector = config.telegram.botToken
+  ? new TelegramConnector({
+      botToken: config.telegram.botToken,
+      chatId: config.telegram.chatId,
+      minSendIntervalMs: config.telegramQueue.minSendIntervalMs,
+    })
+  : null
+
+const platform = telegramConnector?.platform ?? /* LocalPlatform or your own */
+
+const observer = new Observer(platform, config.observer.activityThrottleMs, {
+  textFlushDebounceMs: config.observer.textFlushDebounceMs,
+  activityEditDebounceMs: config.observer.activityEditDebounceMs,
+  events: engineEvents,
+})
+
+const engine = new MinionEngine(
+  platform,
+  observer,
+  config,
+  new EventBus(),
+  new GitHubTokenProvider(config.githubApp),
+  engineEvents,
+)
+
+if (telegramConnector) engine.use(telegramConnector)
+if (config.api?.apiToken) {
+  engine.use(new HttpConnector({
+    port: 8080,
+    uiDistPath: /* path to PWA dist */,
+    apiToken: config.api.apiToken,
+    repos: config.repos,
+    // Telegram-optional fields — pass when you also have Telegram configured:
+    chatId: config.telegram.chatId || undefined,
+    botToken: config.telegram.botToken || undefined,
+  }))
+}
+
+await engine.start()
+```
+
+### Subscribing to engine events
+
+Any external observer (metrics, custom UI, alerting) can subscribe to the channel-agnostic event stream:
+
+```typescript
+engine.events.on("session_created", (e) => {
+  console.log("session", e.session.slug, "created in", e.session.repo)
+})
+engine.events.on("assistant_text", (e) => {
+  // Raw assistant output — already buffered and trimmed by the Observer.
+  console.log(`[${e.sessionId}]`, e.text)
+})
 ```
 
 ### Custom agent definitions
