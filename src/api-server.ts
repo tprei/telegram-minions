@@ -327,6 +327,7 @@ function requireAuth(req: http.IncomingMessage, res: http.ServerResponse, token?
   if (req.method === "OPTIONS") return true
   const url = new URL(req.url ?? "", "http://x")
   if (url.pathname === "/validate") return true
+  if (url.pathname === "/api/version" && req.method === "GET") return true
 
   const authHeader = req.headers["authorization"]
   const bearer = authHeader?.startsWith("Bearer ") ? authHeader.slice("Bearer ".length) : undefined

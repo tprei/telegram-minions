@@ -119,4 +119,22 @@ describe("auth middleware", () => {
 
     expect(res.status).toBe(204)
   })
+
+  it("GET /api/version never requires auth", async () => {
+    server = createApiServer(makeDispatcher(), {
+      port: 0,
+      uiDistPath: "/nonexistent",
+      chatId: "-1001234567890",
+      botToken: "test-bot-token",
+      broadcaster,
+      apiToken: "secret",
+    })
+    const port = await listen(server)
+
+    const res = await fetch(`http://localhost:${port}/api/version`)
+    const body = await res.json()
+
+    expect(res.status).toBe(200)
+    expect(body.data.apiVersion).toBe("1")
+  })
 })
