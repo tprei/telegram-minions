@@ -133,8 +133,8 @@ describe("checkCI", () => {
 describe("checkTests", () => {
   afterEach(() => vi.restoreAllMocks())
 
-  it("returns passed when all quality gates pass", () => {
-    mockRunQualityGates.mockReturnValue({
+  it("returns passed when all quality gates pass", async () => {
+    mockRunQualityGates.mockResolvedValue({
       allPassed: true,
       results: [
         { gate: "typecheck", passed: true, output: "ok" },
@@ -142,13 +142,13 @@ describe("checkTests", () => {
       ],
     })
 
-    const result = checkTests("/tmp/workspace")
+    const result = await checkTests("/tmp/workspace")
     expect(result.passed).toBe(true)
     expect(result.details).toContain("All quality gates passed")
   })
 
-  it("returns failed when quality gates fail", () => {
-    mockRunQualityGates.mockReturnValue({
+  it("returns failed when quality gates fail", async () => {
+    mockRunQualityGates.mockResolvedValue({
       allPassed: false,
       results: [
         { gate: "typecheck", passed: false, output: "error" },
@@ -156,7 +156,7 @@ describe("checkTests", () => {
       ],
     })
 
-    const result = checkTests("/tmp/workspace")
+    const result = await checkTests("/tmp/workspace")
     expect(result.passed).toBe(false)
     expect(result.details).toContain("typecheck")
   })

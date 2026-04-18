@@ -109,8 +109,8 @@ export async function checkCI(prUrl: string, cwd: string, ciConfig: CiConfig): P
 /**
  * Run local quality gates (tests, typecheck, lint) on a working directory.
  */
-export function checkTests(cwd: string): QualityGateResult {
-  const report = runQualityGates(cwd)
+export async function checkTests(cwd: string): Promise<QualityGateResult> {
+  const report = await runQualityGates(cwd)
 
   if (!report.allPassed) {
     const failed = report.results.filter((r) => !r.passed)

@@ -236,7 +236,7 @@ export class CIBabysitter {
       let localFixed = true
       if (localReport != null) {
         try {
-          localReport = runQualityGates(topicSession.cwd)
+          localReport = await runQualityGates(topicSession.cwd)
           localFixed = localReport.allPassed
           if (!localFixed) {
             log.warn({ prUrl, attempt }, "local quality gates still failing after fix attempt")

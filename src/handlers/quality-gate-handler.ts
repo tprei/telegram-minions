@@ -26,7 +26,7 @@ export class QualityGateHandler implements CompletionHandler {
     const { topicSession, sessionId } = ctx
 
     try {
-      const qualityReport = runQualityGates(topicSession.cwd)
+      const qualityReport = await runQualityGates(topicSession.cwd)
       ctx.qualityReport = qualityReport
 
       if (qualityReport.results.length > 0) {
