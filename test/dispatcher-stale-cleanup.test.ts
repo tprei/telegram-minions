@@ -9,6 +9,7 @@ import type { MinionConfig } from "../src/config/config-types.js"
 import type { TopicSession } from "../src/domain/session-types.js"
 import { ReplyQueue } from "../src/reply-queue.js"
 import { EventBus } from "../src/events/event-bus.js"
+import type { CIBabysitter } from "../src/ci/ci-babysitter.js"
 
 const WORKSPACE_ROOT = "/tmp/test-stale-cleanup"
 
@@ -113,6 +114,44 @@ describe("cleanupStaleSessions deletes replyQueues for stale parent sessions", (
     await d.cleanupStaleSessions()
 
     expect(d.replyQueues.has(threadId)).toBe(false)
+    expect(d.topicSessions.has(threadId)).toBe(false)
+  })
+
+  it("removes pendingBabysitPRs entry for a stale session", async () => {
+    const telegram = makeMockTelegram()
+    const config = makeConfig()
+    const platform = new TelegramPlatform(telegram, config.telegram.chatId)
+    const observer = new Observer(platform, 123)
+    const dispatcher = new Dispatcher(platform, observer, config, new EventBus())
+
+    const d = dispatcher as unknown as {
+      topicSessions: Map<number, TopicSession>
+      ciBabysitter: CIBabysitter
+      cleanupStaleSessions: () => Promise<void>
+    }
+
+    const threadId = 550
+    const staleSession: TopicSession = {
+      threadId,
+      repo: "test-repo",
+      cwd: "/tmp/nonexistent-stale-babysit",
+      slug: "stale-babysit",
+      conversation: [],
+      pendingFeedback: [],
+      mode: "task",
+      lastActivityAt: Date.now() - 200_000,
+    }
+
+    d.topicSessions.set(threadId, staleSession)
+    d.ciBabysitter.pendingBabysitPRs.set(threadId, [
+      { childSession: staleSession, prUrl: "https://github.com/test/pr/1" },
+    ])
+
+    expect(d.ciBabysitter.pendingBabysitPRs.has(threadId)).toBe(true)
+
+    await d.cleanupStaleSessions()
+
+    expect(d.ciBabysitter.pendingBabysitPRs.has(threadId)).toBe(false)
     expect(d.topicSessions.has(threadId)).toBe(false)
   })
 

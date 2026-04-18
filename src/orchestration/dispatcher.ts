@@ -793,6 +793,7 @@ export class Dispatcher {
         this.broadcastDagDeleted(session.dagId)
       }
       this.replyQueues.delete(threadId)
+      this.ciBabysitter.pendingBabysitPRs.delete(threadId)
       await this.closeChildSessions(session)
       await this.platform.threads.deleteThread(String(threadId))
       await this.removeWorkspace(session)

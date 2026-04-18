@@ -95,6 +95,18 @@ export class CompletionHandlerChain {
     topicSession.activeSessionId = undefined
     topicSession.lastActivityAt = Date.now()
     this.broadcaster.broadcastSession(topicSession, "session_updated", event.state)
+
+    // Bubble activity to parent so it isn't reaped while children are active
+    if (topicSession.parentThreadId != null) {
+      const parent = this.topicSessions.get(topicSession.parentThreadId)
+      if (parent) {
+        parent.lastActivityAt = Date.now()
+        log.info(
+          { parentThread: parent.threadId, childThread: topicSession.threadId },
+          "bubbled lastActivityAt to parent",
+        )
+      }
+    }
     this.pinnedSummary.updatePinnedSummary()
 
     const ctx: SessionCompletionContext = {
