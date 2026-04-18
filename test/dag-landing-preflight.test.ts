@@ -17,20 +17,23 @@ function writeFile(cwd: string, relPath: string, content: string): void {
 }
 
 /**
- * Set up a "remote" bare repository and a "local" non-bare clone with:
+ * Set up a "remote" bare repository and a "local" bare-clone + worktree layout
+ * matching production (where repos are cloned with `git clone --bare` and a
+ * custom fetch refspec `+refs/heads/*:refs/heads/*`). Under this layout,
+ * `origin/<branch>` refs do NOT exist — branches are stored directly as
+ * `refs/heads/*`.
+ *
  *   master ── m1 ── m2
  *             │
  *             minion/a ── a1 ── a2
  *             │
  *             minion/b ── b1  (either compatible or conflicting with a)
- *
- * The local clone is configured with origin pointing at the bare repo so
- * runPreflightStaging's `git fetch origin` and `origin/<branch>` refs work.
  */
 function setupFixture(conflicting: boolean): { localCwd: string; graph: DagGraph; nodes: DagNode[] } {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), "preflight-fixture-"))
   const remoteDir = path.join(base, "remote.git")
   const workDir = path.join(base, "work")
+  const bareDir = path.join(base, "bare.git")
   const localDir = path.join(base, "local")
 
   // Bare remote
@@ -71,8 +74,17 @@ function setupFixture(conflicting: boolean): { localCwd: string; graph: DagGraph
   const bBaseSha = git(workDir, ["rev-parse", "master"])
   git(workDir, ["push", "origin", "minion/b"])
 
-  // Second clone that runPreflightStaging will operate on
-  execFileSync("git", ["clone", remoteDir, localDir], { stdio: "pipe" })
+  // Bare clone + worktree layout matching production session setup.
+  // Production clones with `git clone --bare` and uses refspec
+  // `+refs/heads/*:refs/heads/*` so branches are stored as refs/heads/*
+  // (NOT refs/remotes/origin/*). The worktree is detached so that
+  // `git fetch origin master` doesn't fail with "refusing to fetch into
+  // branch checked out at ..." — in production the worktree is on a
+  // feature branch, not master.
+  execFileSync("git", ["clone", "--bare", remoteDir, bareDir], { stdio: "pipe" })
+  git(bareDir, ["config", "remote.origin.fetch", "+refs/heads/*:refs/heads/*"])
+  git(bareDir, ["fetch", "origin"])
+  execFileSync("git", ["worktree", "add", "--detach", localDir], { cwd: bareDir, stdio: "pipe" })
   git(localDir, ["config", "user.email", "preflight@example.com"])
   git(localDir, ["config", "user.name", "Preflight"])
 

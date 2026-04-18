@@ -77,7 +77,7 @@ export async function cherryPickRange(
 
 /**
  * Pre-flight: cherry-pick every PR node's logical diff onto a throwaway
- * worktree based on origin/<baseBranch> in topological order. If any node
+ * worktree based on <baseBranch> in topological order. If any node
  * conflicts, abort and return the failing node plus the unmerged file list.
  * The caller's working tree is never touched; all work happens in a fresh
  * detached worktree and is cleaned up on return.
@@ -119,7 +119,7 @@ export async function runPreflightStaging(
 
     try {
       await git(
-        ["worktree", "add", "--detach", stagingDir, `origin/${baseBranch}`],
+        ["worktree", "add", "--detach", stagingDir, baseBranch],
         hostCwd,
         30_000,
       )
@@ -142,17 +142,17 @@ export async function runPreflightStaging(
 
       let headSha: string
       try {
-        headSha = await git(["rev-parse", `origin/${node.branch}`], stagingDir, 20_000)
+        headSha = await git(["rev-parse", node.branch], stagingDir, 20_000)
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
-        return { ok: false, failedNode: node, error: `failed to resolve origin/${node.branch}: ${msg}` }
+        return { ok: false, failedNode: node, error: `failed to resolve ${node.branch}: ${msg}` }
       }
 
       let baseSha = node.baseSha ?? node.mergeBase
       if (!baseSha) {
         try {
           baseSha = await git(
-            ["merge-base", `origin/${node.branch}`, `origin/${baseBranch}`],
+            ["merge-base", node.branch, baseBranch],
             stagingDir,
             20_000,
           )

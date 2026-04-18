@@ -588,7 +588,7 @@ export class DagOrchestrator {
     if (!node.branch) return
     try {
       await execFile("git", ["fetch", "origin", node.branch], { cwd, encoding: "utf-8", timeout: 30_000 })
-      const { stdout } = await execFile("git", ["rev-parse", `origin/${node.branch}`], { cwd, encoding: "utf-8", timeout: 10_000 })
+      const { stdout } = await execFile("git", ["rev-parse", node.branch], { cwd, encoding: "utf-8", timeout: 10_000 })
       node.headSha = stdout.trim()
     } catch {
       try {
