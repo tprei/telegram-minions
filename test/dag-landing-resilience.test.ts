@@ -4,6 +4,9 @@ import {
   formatLandSkipped,
   formatLandSummary,
   formatLandConflictResolution,
+  formatLandRecovered,
+  formatLandFailedClosed,
+  formatLandPreRetarget,
 } from "../src/telegram/format.js"
 
 describe("formatLandSkipped", () => {
@@ -73,6 +76,55 @@ describe("formatLandSummary", () => {
     const result = formatLandSummary(2, 1, 0, 3, ["Task A"], "master")
     expect(result).toContain("merged to master")
     expect(result).not.toContain("merged to main")
+  })
+})
+
+describe("formatLandRecovered", () => {
+  it("marks the merge as recovered from closed state", () => {
+    const result = formatLandRecovered("Fix auth", "https://github.com/org/repo/pull/7", 1, 3)
+    expect(result).toContain("2/3")
+    expect(result).toContain("recovered from closed")
+    expect(result).toContain("Fix auth")
+    expect(result).toContain("https://github.com/org/repo/pull/7")
+  })
+})
+
+describe("formatLandFailedClosed", () => {
+  it("explains that retarget was rejected", () => {
+    const result = formatLandFailedClosed("Fix auth", "404 not found")
+    expect(result).toContain("Landing failed")
+    expect(result).toContain("Fix auth")
+    expect(result).toContain("retarget")
+    expect(result).toContain("404 not found")
+  })
+})
+
+describe("formatLandPreRetarget", () => {
+  it("names the base branch and pr count", () => {
+    const result = formatLandPreRetarget(6, "master")
+    expect(result).toContain("Retargeting 6 PRs")
+    expect(result).toContain("master")
+  })
+
+  it("uses singular form for a single PR", () => {
+    const result = formatLandPreRetarget(1, "main")
+    expect(result).toContain("Retargeting 1 PR ")
+    expect(result).not.toContain("1 PRs")
+  })
+})
+
+describe("formatLandSummary with recovered", () => {
+  it("reports the recovered count separately from merged and skipped", () => {
+    const result = formatLandSummary(5, 0, 0, 5, [], "master", 2)
+    expect(result).toContain("5/5 PRs merged")
+    expect(result).toContain("2 recovered from auto-close")
+    expect(result).not.toContain("skipped")
+    expect(result).not.toContain("failed")
+  })
+
+  it("omits the recovered line when recovered is zero", () => {
+    const result = formatLandSummary(5, 0, 0, 5, [], "master", 0)
+    expect(result).not.toContain("recovered")
   })
 })
 

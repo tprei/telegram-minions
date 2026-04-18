@@ -1135,8 +1135,21 @@ export function formatLandSkipped(title: string, state: string): string {
   return `⏭ <b>Skipped</b>: ${esc(title)} (already ${esc(state.toLowerCase())})`
 }
 
-export function formatLandSummary(succeeded: number, failed: number, skipped: number, total: number, failedTitles: string[], baseBranch = "main"): string {
+export function formatLandRecovered(title: string, prUrl: string, index: number, total: number): string {
+  return `🛬 <b>${index + 1}/${total}</b> Merged (recovered from closed): ${esc(title)} — <a href="${esc(prUrl)}">PR</a>`
+}
+
+export function formatLandFailedClosed(title: string, error: string): string {
+  return `❌ <b>Landing failed</b>: ${esc(title)} — PR was auto-closed and retarget was rejected.\n<code>${esc(error)}</code>`
+}
+
+export function formatLandPreRetarget(count: number, baseBranch: string): string {
+  return `🎯 Retargeting ${count} PR${count === 1 ? "" : "s"} to <code>${esc(baseBranch)}</code> so deletions don't cascade…`
+}
+
+export function formatLandSummary(succeeded: number, failed: number, skipped: number, total: number, failedTitles: string[], baseBranch = "main", recovered = 0): string {
   const parts = [`🛬 <b>Landing complete</b>: ${succeeded}/${total} PRs merged to ${esc(baseBranch)}`]
+  if (recovered > 0) parts.push(`♻️ ${recovered} recovered from auto-close`)
   if (skipped > 0) parts.push(`⏭ ${skipped} skipped (already merged/closed)`)
   if (failed > 0) {
     parts.push(`❌ ${failed} failed:`)

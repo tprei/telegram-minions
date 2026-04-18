@@ -20,6 +20,9 @@ import {
   formatLandPreflightStart,
   formatLandPreflightPassed,
   formatLandPreflightFailed,
+  formatLandRecovered,
+  formatLandFailedClosed,
+  formatLandPreRetarget,
 } from "../telegram/format.js"
 import { loggers } from "../logger.js"
 
@@ -141,6 +144,17 @@ export class LandingManager {
       topicSession.threadId,
     )
 
+    // Pre-flight retarget: point every PR at baseBranch BEFORE any merges. This
+    // prevents GitHub from auto-closing downstream PRs when we squash-merge with
+    // --delete-branch — a stacked PR loses its base when the upstream branch is
+    // deleted, and GitHub closes it. Retargeting first keeps every PR anchored
+    // to baseBranch so deletions never cascade.
+    await this.ctx.telegram.sendMessage(
+      formatLandPreRetarget(prNodes.length, baseBranch),
+      topicSession.threadId,
+    )
+    await this.preRetargetToBase(prNodes, baseBranch)
+
     // Clean up child worktrees so branch deletion doesn't hit a lock
     await this.pruneWorktrees(topicSession)
     await this.removeChildWorktrees(topicSession, graph)
@@ -152,6 +166,7 @@ export class LandingManager {
     )
 
     let succeeded = 0
+    let recovered = 0
     let skipped = 0
     const failedTitles: string[] = []
 
@@ -170,6 +185,7 @@ export class LandingManager {
         continue
       }
 
+      let wasRecovered = false
       try {
         const prState = await gh(["pr", "view", prNumber, ...repoFlag, "--json", "state", "--jq", ".state"])
         if (prState === "MERGED") {
@@ -185,11 +201,14 @@ export class LandingManager {
           try {
             await gh(["pr", "edit", prNumber, ...repoFlag, "--base", baseBranch])
             await gh(["pr", "reopen", prNumber, ...repoFlag])
+            wasRecovered = true
             log.info({ nodeId: node.id, prNumber }, "reopened auto-closed PR")
-          } catch {
-            skipped++
+          } catch (err) {
+            const errMsg = err instanceof Error ? err.message : String(err)
+            failedTitles.push(node.title)
+            log.error({ err, nodeId: node.id, prNumber }, "failed to reopen auto-closed PR")
             await this.ctx.telegram.sendMessage(
-              formatLandSkipped(node.title, prState),
+              formatLandFailedClosed(node.title, errMsg),
               topicSession.threadId,
             )
             continue
@@ -226,6 +245,7 @@ export class LandingManager {
 
         node.status = "landed"
         succeeded++
+        if (wasRecovered) recovered++
 
         if (node.branch) {
           const worktreePath = this.findWorktreePathForBranch(node)
@@ -236,7 +256,9 @@ export class LandingManager {
         }
 
         await this.ctx.telegram.sendMessage(
-          formatLandProgress(node.title, node.prUrl!, succeeded - 1, prNodes.length),
+          wasRecovered
+            ? formatLandRecovered(node.title, node.prUrl!, succeeded - 1, prNodes.length)
+            : formatLandProgress(node.title, node.prUrl!, succeeded - 1, prNodes.length),
           topicSession.threadId,
         )
 
@@ -270,9 +292,24 @@ export class LandingManager {
       await this.ctx.persistDags()
     } else {
       await this.ctx.telegram.sendMessage(
-        formatLandSummary(succeeded, failedTitles.length, skipped, prNodes.length, failedTitles, baseBranch),
+        formatLandSummary(succeeded, failedTitles.length, skipped, prNodes.length, failedTitles, baseBranch, recovered),
         topicSession.threadId,
       )
+    }
+  }
+
+  private async preRetargetToBase(prNodes: DagNode[], baseBranch: string): Promise<void> {
+    for (const node of prNodes) {
+      const prNumber = prNumberFromUrl(node.prUrl!)
+      if (!prNumber) continue
+      const nodeRepo = repoFromPrUrl(node.prUrl!)
+      const repoFlag = nodeRepo ? ["--repo", nodeRepo] : []
+      try {
+        await gh(["pr", "edit", prNumber, ...repoFlag, "--base", baseBranch])
+        log.info({ nodeId: node.id, prNumber, baseBranch }, "pre-retargeted PR to base")
+      } catch (err) {
+        log.warn({ err, nodeId: node.id, prNumber }, "pre-retarget to base failed — will retry inline")
+      }
     }
   }
 
