@@ -85,7 +85,7 @@ describe("CORS headers", () => {
     expect(res.headers.get("access-control-allow-origin")).toBe("*")
   })
 
-  it("Access-Control-Allow-Headers includes Authorization and Content-Type", async () => {
+  it("Access-Control-Allow-Headers includes Authorization, Content-Type, Cache-Control, Last-Event-ID", async () => {
     server = createApiServer(makeDispatcher(), {
       port: 0,
       uiDistPath: "/nonexistent",
@@ -100,6 +100,8 @@ describe("CORS headers", () => {
 
     expect(allowHeaders).toContain("Authorization")
     expect(allowHeaders).toContain("Content-Type")
+    expect(allowHeaders).toContain("Cache-Control")
+    expect(allowHeaders).toContain("Last-Event-ID")
   })
 
   it("Access-Control-Max-Age is 600", async () => {

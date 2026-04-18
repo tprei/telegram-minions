@@ -365,7 +365,7 @@ export function createApiServer(
       res.setHeader("Vary", "Origin")
     }
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-    res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type")
+    res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, Cache-Control, Last-Event-ID")
     res.setHeader("Access-Control-Max-Age", "600")
 
     if (req.method === "OPTIONS") {
