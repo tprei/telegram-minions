@@ -211,7 +211,7 @@ export class LandingManager {
 
       try {
         try {
-          await gh(["pr", "merge", prNumber, ...repoFlag, "--rebase", "--delete-branch"])
+          await gh(["pr", "merge", prNumber, ...repoFlag, "--squash", "--delete-branch"])
         } catch (mergeErr) {
           let actualState: string | undefined
           try {
