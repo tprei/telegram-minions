@@ -324,7 +324,12 @@ export class Observer {
   ): Promise<void> {
     if ("error" in block.toolCall) return
 
-    const { name, arguments: args } = block.toolCall
+    const { name: rawName, arguments: rawArgs } = block.toolCall
+    const name = typeof rawName === "string" && rawName.length > 0 ? rawName : "unknown"
+    const args: Record<string, unknown> = rawArgs && typeof rawArgs === "object" ? rawArgs as Record<string, unknown> : {}
+    if (name === "unknown") {
+      log.warn({ sessionId: meta.sessionId, toolCallId: block.id }, "toolRequest missing name — treating as 'unknown'")
+    }
     const now = Date.now()
     const state = this.sessions.get(meta.sessionId)
     if (!state) return

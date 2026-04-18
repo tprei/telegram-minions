@@ -514,6 +514,57 @@ describe("Observer", () => {
 
       expect(platform.chat.sendMessage).not.toHaveBeenCalled()
     })
+
+    it("does not throw when toolCall.name is undefined", async () => {
+      const platform = makeMockPlatform()
+      const observer = new Observer(platform, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
+      const meta = makeMeta()
+
+      await observer.onSessionStart(meta, "task")
+      ;(platform.chat.sendMessage as ReturnType<typeof vi.fn>).mockClear()
+
+      await expect(observer.onEvent(meta, {
+        type: "message",
+        message: {
+          role: "assistant",
+          created: 0,
+          content: [{
+            type: "toolRequest",
+            id: "t1",
+            // simulates a malformed payload where the provider drops the tool name
+            toolCall: { name: undefined as unknown as string, arguments: { command: "ls" } },
+          }],
+        },
+      })).resolves.not.toThrow()
+
+      expect(platform.chat.sendMessage).toHaveBeenCalledOnce()
+      const msg = (platform.chat.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0][0]
+      expect(msg).toContain("unknown")
+    })
+
+    it("does not throw when toolCall.arguments is missing", async () => {
+      const platform = makeMockPlatform()
+      const observer = new Observer(platform, 3000, { textFlushDebounceMs: 1500, activityEditDebounceMs: 2000 })
+      const meta = makeMeta()
+
+      await observer.onSessionStart(meta, "task")
+      ;(platform.chat.sendMessage as ReturnType<typeof vi.fn>).mockClear()
+
+      await expect(observer.onEvent(meta, {
+        type: "message",
+        message: {
+          role: "assistant",
+          created: 0,
+          content: [{
+            type: "toolRequest",
+            id: "t1",
+            toolCall: { name: "Bash", arguments: undefined as unknown as Record<string, unknown> },
+          }],
+        },
+      })).resolves.not.toThrow()
+
+      expect(platform.chat.sendMessage).toHaveBeenCalledOnce()
+    })
   })
 
   describe("onEvent — errors", () => {
