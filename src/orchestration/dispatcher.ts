@@ -2000,4 +2000,31 @@ export class Dispatcher {
 
     await this.handleCloseCommandInternal(topicSession)
   }
+
+  async handleIncomingText(text: string, sessionSlug?: string): Promise<void> {
+    const topicSession = sessionSlug
+      ? [...this.topicSessions.values()].find((s) => s.slug === sessionSlug)
+      : undefined
+
+    if (topicSession) {
+      await this.handleTopicFeedback(topicSession, text)
+      return
+    }
+
+    // No matching session — synthesize a message update through the normal poll path.
+    // /task ... sent via this route runs through SDKSessionHandle with mid-execution reply injection.
+    const userId = this.config.telegram.allowedUserIds[0]
+    if (!userId) return
+
+    const update: import("../provider/types.js").ChatUpdate = {
+      type: "message",
+      message: {
+        messageId: crypto.randomUUID(),
+        from: { id: String(userId), isBot: false },
+        text,
+        timestamp: Date.now(),
+      },
+    }
+    await this.handleChatUpdate(update)
+  }
 }
