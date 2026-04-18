@@ -90,11 +90,21 @@ export class CompletionHandlerChain {
 
     const durationMs = Date.now() - event.meta.startedAt
 
-    // Core bookkeeping (always runs before handlers)
-    this.sessions.delete(topicSession.threadId)
+    // Core bookkeeping (always runs before handlers). Each step is wrapped so a
+    // failure in one bookkeeping call doesn't prevent pending-feedback drain or
+    // other post-chain handlers from running.
+    try {
+      this.sessions.delete(topicSession.threadId)
+    } catch (err) {
+      log.error({ err, slug: topicSession.slug }, "sessions.delete threw during bookkeeping")
+    }
     topicSession.activeSessionId = undefined
     topicSession.lastActivityAt = Date.now()
-    this.broadcaster.broadcastSession(topicSession, "session_updated", event.state)
+    try {
+      this.broadcaster.broadcastSession(topicSession, "session_updated", event.state)
+    } catch (err) {
+      log.error({ err, slug: topicSession.slug }, "broadcastSession threw during bookkeeping")
+    }
 
     // Bubble activity to parent so it isn't reaped while children are active
     if (topicSession.parentThreadId != null) {
@@ -107,7 +117,11 @@ export class CompletionHandlerChain {
         )
       }
     }
-    this.pinnedSummary.updatePinnedSummary()
+    try {
+      this.pinnedSummary.updatePinnedSummary()
+    } catch (err) {
+      log.error({ err, slug: topicSession.slug }, "updatePinnedSummary threw during bookkeeping")
+    }
 
     const ctx: SessionCompletionContext = {
       topicSession,

@@ -1584,8 +1584,10 @@ export class Dispatcher {
         )
       } else {
         topicSession.pendingFeedback.push(fullFeedback)
+        const position = topicSession.pendingFeedback.length
+        const suffix = position === 1 ? "" : ` (#${position} in queue)`
         await this.platform.chat.sendMessage(
-          `📝 Reply queued — will be applied when the current iteration finishes.`,
+          `📝 Reply queued${suffix} — will be applied when the current iteration finishes.`,
           String(topicSession.threadId),
         )
       }

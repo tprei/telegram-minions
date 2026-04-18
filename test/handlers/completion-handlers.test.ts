@@ -825,4 +825,69 @@ describe("CompletionHandlerChain", () => {
 
     expect(queue.clearDelivered).toHaveBeenCalled()
   })
+
+  it("still runs post-chain handlers when broadcastSession throws", async () => {
+    const deps = makeChainDeps()
+    const ts = makeTopicSession()
+    deps.topicSessions.get.mockReturnValue(ts)
+    deps.broadcaster.broadcastSession.mockImplementation(() => {
+      throw new Error("broadcast failed")
+    })
+
+    const chain = new CompletionHandlerChain(
+      deps.topicSessions, deps.sessions, deps.broadcaster,
+      deps.pinnedSummary, deps.sessionPersister, deps.replyQueues,
+    )
+
+    const postChainRan = vi.fn()
+    chain.registerPostChain({
+      name: "post-chain",
+      handle: async () => { postChainRan() },
+    })
+
+    const bus = new EventBus()
+    chain.subscribe(bus)
+
+    await bus.emit({
+      type: "session.completed",
+      timestamp: Date.now(),
+      meta: makeMeta(),
+      state: "completed",
+    })
+
+    expect(postChainRan).toHaveBeenCalled()
+    expect(deps.sessionPersister.persistTopicSessions).toHaveBeenCalled()
+  })
+
+  it("still runs post-chain handlers when updatePinnedSummary throws", async () => {
+    const deps = makeChainDeps()
+    const ts = makeTopicSession()
+    deps.topicSessions.get.mockReturnValue(ts)
+    deps.pinnedSummary.updatePinnedSummary.mockImplementation(() => {
+      throw new Error("pin failed")
+    })
+
+    const chain = new CompletionHandlerChain(
+      deps.topicSessions, deps.sessions, deps.broadcaster,
+      deps.pinnedSummary, deps.sessionPersister, deps.replyQueues,
+    )
+
+    const postChainRan = vi.fn()
+    chain.registerPostChain({
+      name: "post-chain",
+      handle: async () => { postChainRan() },
+    })
+
+    const bus = new EventBus()
+    chain.subscribe(bus)
+
+    await bus.emit({
+      type: "session.completed",
+      timestamp: Date.now(),
+      meta: makeMeta(),
+      state: "completed",
+    })
+
+    expect(postChainRan).toHaveBeenCalled()
+  })
 })
