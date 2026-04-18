@@ -47,11 +47,15 @@ export interface TopicMessage {
   images?: string[]
 }
 
-export interface TopicSession {
+export interface WorkspaceRef {
+  cwd: string
+  repoUrl?: string
+  branch?: string
+}
+
+export interface TopicSession extends WorkspaceRef {
   threadId: number
   repo: string
-  repoUrl?: string
-  cwd: string
   slug: string
   topicHandle?: string
   conversation: TopicMessage[]
@@ -64,7 +68,6 @@ export interface TopicSession {
   childThreadIds?: number[]
   splitLabel?: string
   interruptedAt?: number
-  branch?: string
   prUrl?: string
   lastState?: "completed" | "errored" | "quota_exhausted"
   dagId?: string
