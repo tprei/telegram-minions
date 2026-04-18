@@ -66,6 +66,7 @@ import {
   formatLandSummary,
   formatLandConflictResolution,
   formatLandRestacking,
+  formatLandPreflightFailed,
 } from "../src/telegram/format.js"
 import type { ClaudeUsageResponse } from "../src/claude-usage.js"
 import type { AggregateStats, SessionRecord, ModeBreakdown } from "../src/stats.js"
@@ -1885,6 +1886,34 @@ describe("formatPinnedDagStatus", () => {
     it("uses custom base branch", () => {
       const result = formatLandSummary(1, 0, 0, 1, [], "develop")
       expect(result).toContain("develop")
+    })
+
+    it("includes /close hint when there are failures", () => {
+      const result = formatLandSummary(1, 1, 0, 2, ["Task A"])
+      expect(result).toContain("/close")
+    })
+
+    it("omits /close hint when there are only skips and no failures", () => {
+      const result = formatLandSummary(1, 0, 1, 2, [])
+      expect(result).not.toContain("clean up sessions")
+    })
+  })
+
+  describe("formatLandPreflightFailed", () => {
+    it("includes /close hint for cleanup", () => {
+      const result = formatLandPreflightFailed("Task A", ["file.ts"])
+      expect(result).toContain("/close")
+    })
+
+    it("includes conflict files", () => {
+      const result = formatLandPreflightFailed("Task A", ["a.ts", "b.ts"])
+      expect(result).toContain("a.ts")
+      expect(result).toContain("b.ts")
+    })
+
+    it("shows error message when no conflict files", () => {
+      const result = formatLandPreflightFailed("Task A", [], "rebase failed")
+      expect(result).toContain("rebase failed")
     })
   })
 
