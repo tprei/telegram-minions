@@ -91,6 +91,7 @@ export function createMinion(config: MinionConfig, options?: MinionOptions): Min
         apiToken: config.api?.apiToken,
         corsAllowedOrigins: config.api?.corsAllowedOrigins,
         repos: config.repos,
+        workspaceRoot: config.workspace.root,
       })
     : null
   if (httpConnector) engine.use(httpConnector)

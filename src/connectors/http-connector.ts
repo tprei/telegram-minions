@@ -8,6 +8,9 @@ import {
   dagToApi,
   type DispatcherApi,
 } from "../api-server.js"
+import { PushSubscriptionStore } from "../push/push-subscriptions.js"
+import { loadOrCreateVapidKeys, type VapidKeys } from "../push/vapid-keys.js"
+import { PushNotifier } from "../push/push-notifier.js"
 
 export interface HttpConnectorOptions {
   port: number
@@ -22,6 +25,9 @@ export interface HttpConnectorOptions {
   apiToken?: string
   corsAllowedOrigins?: string[]
   repos?: Record<string, string>
+  /** Workspace root. Required to enable Web Push (VAPID keys + subscription
+   *  store are persisted under `${workspaceRoot}/.push/`). */
+  workspaceRoot?: string
 }
 
 /**
@@ -32,6 +38,14 @@ export interface HttpConnectorOptions {
  * pattern where MinionEngine pushed SSE frames directly through a
  * StateBroadcaster handed in at construction time.
  *
+ * When `workspaceRoot` is supplied, also initializes Web Push:
+ *   - loads (or generates on first boot) VAPID keys from
+ *     `${workspaceRoot}/.push/vapid.json`
+ *   - loads the subscription store from
+ *     `${workspaceRoot}/.push/subscriptions.json`
+ *   - attaches a PushNotifier that fans `session_needs_attention` events
+ *     out to subscribed PWA clients
+ *
  * The connector owns the broadcaster + http.Server. `start()` binds the
  * port (done separately from attach() so orchestration can control when
  * the port opens relative to engine warm-up).
@@ -41,12 +55,21 @@ export class HttpConnector implements Connector {
   readonly broadcaster: StateBroadcaster
   private server: http.Server | null = null
   private subscriptions: Array<() => void> = []
+  private pushSubscriptions: PushSubscriptionStore | null = null
+  private vapidKeys: VapidKeys | null = null
+  private pushNotifier: PushNotifier | null = null
+  private attachPromise: Promise<void> = Promise.resolve()
 
   constructor(private readonly opts: HttpConnectorOptions) {
     this.broadcaster = new StateBroadcaster()
   }
 
-  attach(engine: MinionEngine): void {
+  attach(engine: MinionEngine): Promise<void> {
+    this.attachPromise = this.doAttach(engine)
+    return this.attachPromise
+  }
+
+  private async doAttach(engine: MinionEngine): Promise<void> {
     const chatId = this.opts.chatId
     const topicSessions = engine.getTopicSessions()
     const activeSessions = engine.getSessions()
@@ -76,6 +99,15 @@ export class HttpConnector implements Connector {
       }),
     )
 
+    // Web Push initialization — skipped when no workspace is provided.
+    if (this.opts.workspaceRoot) {
+      this.vapidKeys = await loadOrCreateVapidKeys(this.opts.workspaceRoot)
+      this.pushSubscriptions = new PushSubscriptionStore(this.opts.workspaceRoot)
+      await this.pushSubscriptions.load()
+      this.pushNotifier = new PushNotifier(engine.events, this.pushSubscriptions, this.vapidKeys)
+      this.pushNotifier.attach()
+    }
+
     const dispatcherApi: DispatcherApi = {
       getSessions: () => engine.getSessions(),
       getTopicSessions: () => engine.getTopicSessions(),
@@ -98,11 +130,15 @@ export class HttpConnector implements Connector {
       apiToken: this.opts.apiToken,
       corsAllowedOrigins: this.opts.corsAllowedOrigins,
       repos: this.opts.repos,
+      pushSubscriptions: this.pushSubscriptions ?? undefined,
+      vapidKeys: this.vapidKeys ?? undefined,
     })
   }
 
-  /** Bind the HTTP server to its port. Must be called after attach(). */
+  /** Bind the HTTP server to its port. Awaits attach() internally so it is
+   *  safe to call right after `engine.use(connector)` without a manual await. */
   async start(): Promise<void> {
+    await this.attachPromise
     if (!this.server) throw new Error("HttpConnector.start() called before attach()")
     const server = this.server
     const port = this.opts.port
@@ -114,6 +150,8 @@ export class HttpConnector implements Connector {
   detach(): void {
     for (const unsub of this.subscriptions) unsub()
     this.subscriptions = []
+    this.pushNotifier?.detach()
+    this.pushNotifier = null
     if (this.server) {
       this.server.close()
       this.server = null

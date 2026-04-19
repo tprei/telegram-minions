@@ -10,6 +10,8 @@ import { loggers } from "./logger.js"
 import { computeWorkspaceDiff } from "./session/workspace-diff.js"
 import { listSessionScreenshots, resolveScreenshotPath } from "./session/workspace-screenshots.js"
 import { fetchPrPreview } from "./github/pr-preview.js"
+import type { PushSubscriptionStore } from "./push/push-subscriptions.js"
+import type { VapidKeys } from "./push/vapid-keys.js"
 import pkg from "../package.json" with { type: "json" }
 
 const log = loggers.apiServer
@@ -334,6 +336,9 @@ export interface ApiServerOptions {
   apiToken?: string
   corsAllowedOrigins?: string[]
   repos?: Record<string, string>
+  /** Web Push store + keys. When absent, push endpoints return 503. */
+  pushSubscriptions?: PushSubscriptionStore
+  vapidKeys?: VapidKeys
 }
 
 function resolveOrigin(req: http.IncomingMessage, allowed?: string[]): string | null {
@@ -365,7 +370,7 @@ export function createApiServer(
   dispatcher: DispatcherApi,
   options: ApiServerOptions,
 ): http.Server {
-  const { port, uiDistPath, chatId, botToken, broadcaster, apiToken, corsAllowedOrigins, repos } = options
+  const { port, uiDistPath, chatId, botToken, broadcaster, apiToken, corsAllowedOrigins, repos, pushSubscriptions, vapidKeys } = options
   const sseClients = new Set<http.ServerResponse>()
 
   broadcaster.on("event", (event: SseEvent) => {
@@ -397,7 +402,7 @@ export function createApiServer(
 
     if (url.pathname.startsWith("/api/")) {
       if (!requireAuth(req, res, apiToken)) return
-      await handleApiRoute(req, res, url, dispatcher, chatId, sseClients, repos)
+      await handleApiRoute(req, res, url, dispatcher, chatId, sseClients, repos, pushSubscriptions, vapidKeys)
       return
     }
 
@@ -425,6 +430,8 @@ async function handleApiRoute(
   chatId: string | undefined,
   sseClients: Set<http.ServerResponse>,
   repos?: Record<string, string>,
+  pushSubscriptions?: PushSubscriptionStore,
+  vapidKeys?: VapidKeys,
 ): Promise<void> {
   const pathname = url.pathname
 
@@ -684,6 +691,76 @@ async function handleApiRoute(
       return
     }
 
+    // GET /api/push/vapid-public-key
+    if (pathname === "/api/push/vapid-public-key" && req.method === "GET") {
+      if (!vapidKeys) {
+        res.writeHead(503, { "Content-Type": "application/json" })
+        res.end(JSON.stringify({ data: null, error: "Web Push is not configured on this minion" }))
+        return
+      }
+      res.writeHead(200, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ data: { publicKey: vapidKeys.publicKey } }))
+      return
+    }
+
+    // POST /api/push-subscribe
+    if (pathname === "/api/push-subscribe" && req.method === "POST") {
+      if (!pushSubscriptions) {
+        res.writeHead(503, { "Content-Type": "application/json" })
+        res.end(JSON.stringify({ data: null, error: "Web Push is not configured on this minion" }))
+        return
+      }
+      const body = await readBody(req)
+      let parsed: { endpoint?: unknown; keys?: { p256dh?: unknown; auth?: unknown } }
+      try {
+        parsed = JSON.parse(body) as typeof parsed
+      } catch {
+        res.writeHead(400, { "Content-Type": "application/json" })
+        res.end(JSON.stringify({ data: null, error: "invalid JSON body" }))
+        return
+      }
+      const endpoint = typeof parsed.endpoint === "string" ? parsed.endpoint : ""
+      const p256dh = typeof parsed.keys?.p256dh === "string" ? parsed.keys.p256dh : ""
+      const auth = typeof parsed.keys?.auth === "string" ? parsed.keys.auth : ""
+      if (!endpoint || !p256dh || !auth) {
+        res.writeHead(400, { "Content-Type": "application/json" })
+        res.end(JSON.stringify({ data: null, error: "endpoint + keys.p256dh + keys.auth are required" }))
+        return
+      }
+      await pushSubscriptions.add({ endpoint, keys: { p256dh, auth } })
+      res.writeHead(201, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ data: { subscribed: true } }))
+      return
+    }
+
+    // DELETE /api/push-subscribe
+    if (pathname === "/api/push-subscribe" && req.method === "DELETE") {
+      if (!pushSubscriptions) {
+        res.writeHead(503, { "Content-Type": "application/json" })
+        res.end(JSON.stringify({ data: null, error: "Web Push is not configured on this minion" }))
+        return
+      }
+      const body = await readBody(req)
+      let parsed: { endpoint?: unknown }
+      try {
+        parsed = JSON.parse(body) as typeof parsed
+      } catch {
+        res.writeHead(400, { "Content-Type": "application/json" })
+        res.end(JSON.stringify({ data: null, error: "invalid JSON body" }))
+        return
+      }
+      const endpoint = typeof parsed.endpoint === "string" ? parsed.endpoint : ""
+      if (!endpoint) {
+        res.writeHead(400, { "Content-Type": "application/json" })
+        res.end(JSON.stringify({ data: null, error: "endpoint is required" }))
+        return
+      }
+      const removed = await pushSubscriptions.remove(endpoint)
+      res.writeHead(200, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ data: { removed } }))
+      return
+    }
+
     // POST /api/sessions/variants — spawn N parallel variants of one prompt.
     if (pathname === "/api/sessions/variants" && req.method === "POST") {
       const body = await readBody(req)
@@ -822,6 +899,7 @@ async function handleApiRoute(
             "screenshots-http",
             "pr-preview",
             "parallel-variants",
+            ...(vapidKeys ? ["web-push"] : []),
           ],
           repos: repoList,
         },

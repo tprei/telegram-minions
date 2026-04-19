@@ -335,11 +335,19 @@ export class MinionEngine {
    * Register a connector. Calls `connector.attach(this)` immediately and
    * remembers the connector so `stop()` can detach it.
    *
-   * Returns `this` to allow chaining (`engine.use(a).use(b)`).
+   * Returns `this` to allow chaining (`engine.use(a).use(b)`). If the
+   * connector's attach() is async and rejects, the rejection is logged
+   * rather than left as an unhandled promise; callers that need to await
+   * attach completion should call `connector.attach(engine)` directly.
    */
   use(connector: Connector): this {
     this.connectors.push(connector)
-    void connector.attach(this)
+    const result = connector.attach(this)
+    if (result instanceof Promise) {
+      result.catch((err) => {
+        log.error({ err, connector: connector.name }, "connector attach rejected")
+      })
+    }
     return this
   }
 
