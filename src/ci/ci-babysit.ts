@@ -5,10 +5,12 @@ import { loggers } from "../logger.js"
 
 const log = loggers.ciBabysit
 
+export type CICheckBucket = "pass" | "fail" | "pending"
+
 export interface CICheckResult {
   name: string
-  state: "success" | "failure" | "pending" | "queued" | "cancelled" | string
-  bucket: string
+  state: string
+  bucket: CICheckBucket
 }
 
 export interface CIWaitResult {
@@ -38,6 +40,25 @@ class TerminalGhError extends Error {
     super(message)
     this.name = "TerminalGhError"
   }
+}
+
+const VALID_BUCKETS = new Set<string>(["pass", "fail", "pending"])
+
+function isCICheckResult(item: unknown): item is CICheckResult {
+  if (typeof item !== "object" || item === null) return false
+  const obj = item as Record<string, unknown>
+  return (
+    typeof obj.name === "string" &&
+    typeof obj.state === "string" &&
+    typeof obj.bucket === "string" &&
+    VALID_BUCKETS.has(obj.bucket)
+  )
+}
+
+function parseCIChecks(json: string): CICheckResult[] {
+  const parsed: unknown = JSON.parse(json)
+  if (!Array.isArray(parsed)) return []
+  return parsed.filter(isCICheckResult)
 }
 
 function isTerminalError(stderr: string): boolean {
@@ -152,7 +173,7 @@ async function getCheckStatus(prUrl: string, cwd: string): Promise<CheckStatusRe
       log.debug({ prUrl }, "gh pr checks returned empty")
       return { checks: [], terminal: false }
     }
-    const checks = JSON.parse(output) as CICheckResult[]
+    const checks = parseCIChecks(output)
     log.debug({ prUrl, checkCount: checks.length }, "gh pr checks returned")
     return { checks, terminal: false }
   } catch (err) {
