@@ -24,7 +24,6 @@ type HandlerEntry = {
  */
 export class EventBus {
   private handlers: HandlerEntry[] = []
-  private emitting = false
 
   /**
    * Subscribe to a specific event type.
@@ -85,27 +84,22 @@ export class EventBus {
    * the pipeline).
    */
   async emit<T extends DomainEventType>(event: DomainEventMap[T]): Promise<void> {
-    this.emitting = true
-    try {
-      const toRemove: HandlerEntry[] = []
+    const toRemove: HandlerEntry[] = []
 
-      for (const entry of [...this.handlers]) {
-        if (entry.type !== event.type && entry.type !== "*") continue
-        try {
-          await entry.handler(event)
-        } catch (err) {
-          log.error({ err, eventType: event.type }, "event handler threw")
-        }
-        if (entry.once) {
-          toRemove.push(entry)
-        }
+    for (const entry of [...this.handlers]) {
+      if (entry.type !== event.type && entry.type !== "*") continue
+      try {
+        await entry.handler(event)
+      } catch (err) {
+        log.error({ err, eventType: event.type }, "event handler threw")
       }
+      if (entry.once) {
+        toRemove.push(entry)
+      }
+    }
 
-      for (const entry of toRemove) {
-        this.off(entry)
-      }
-    } finally {
-      this.emitting = false
+    for (const entry of toRemove) {
+      this.off(entry)
     }
   }
 
