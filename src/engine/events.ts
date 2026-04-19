@@ -1,5 +1,6 @@
 import type { TopicSession, SessionDoneState } from "../domain/session-types.js"
 import type { DagGraph } from "../dag/dag.js"
+import type { TranscriptEvent } from "../transcript/types.js"
 import { createLogger } from "../logger.js"
 
 const log = createLogger({ component: "engine-events" })
@@ -28,6 +29,7 @@ export type EngineEvent =
   | { type: "assistant_activity"; sessionId: string; activity: string; timestamp: number }
   | { type: "screenshot_captured"; sessionId: string; path: string; timestamp: number }
   | { type: "session_needs_attention"; sessionId: string; reason: string }
+  | { type: "transcript_event"; sessionId: string; event: TranscriptEvent }
 
 export type EngineEventType = EngineEvent["type"]
 
