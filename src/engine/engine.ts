@@ -62,6 +62,7 @@ import { parseResetTime } from "../session/quota-detection.js"
 import type { EventBus } from "../events/event-bus.js"
 import { EngineEventBus } from "./events.js"
 import type { Connector } from "../connectors/connector.js"
+import { computeAttentionReasons } from "../api-server.js"
 import { LoopScheduler, type LoopSchedulerConfig } from "../loops/loop-scheduler.js"
 import type { LoopDefinition, LoopState } from "../loops/domain-types.js"
 import { LoopStore } from "../loops/loop-store.js"
@@ -145,6 +146,7 @@ export class MinionEngine {
   private readonly eventBus: EventBus
   private readonly engineEvents: EngineEventBus
   private readonly connectors: Connector[] = []
+  private readonly attentionSnapshots = new Map<string, string>()
   private readonly completionChain: CompletionHandlerChain
 
   constructor(
@@ -353,10 +355,31 @@ export class MinionEngine {
 
   private broadcastSession(session: TopicSession, eventType: "session_created" | "session_updated", sessionState?: SessionDoneState): void {
     void this.engineEvents.emit({ type: eventType, session, sessionState })
+
+    const status: import("./../api-server.js").ApiSession["status"] = sessionState === "completed"
+      ? "completed"
+      : sessionState === "errored" || sessionState === "quota_exhausted"
+        ? "failed"
+        : session.activeSessionId
+          ? "running"
+          : "pending"
+    const reasons = computeAttentionReasons(session, status)
+    const previous = this.attentionSnapshots.get(session.slug) ?? ""
+    const current = reasons.join(",")
+    if (current && current !== previous) {
+      const newReason = reasons.find((r) => !previous.includes(r)) ?? reasons[0]
+      void this.engineEvents.emit({
+        type: "session_needs_attention",
+        sessionId: session.slug,
+        reason: newReason,
+      })
+    }
+    this.attentionSnapshots.set(session.slug, current)
   }
 
   private broadcastSessionDeleted(slug: string): void {
     void this.engineEvents.emit({ type: "session_deleted", sessionId: slug })
+    this.attentionSnapshots.delete(slug)
   }
 
   private broadcastDag(graph: DagGraph, eventType: "dag_created" | "dag_updated"): void {
