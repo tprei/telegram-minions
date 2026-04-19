@@ -17,6 +17,7 @@ export interface GooseTextContent {
 export interface GooseToolRequestContent {
   type: "toolRequest"
   id: string
+  parentToolUseId?: string | null
   toolCall:
     | { name: string; arguments: Record<string, unknown> }
     | { error: string }
@@ -25,6 +26,7 @@ export interface GooseToolRequestContent {
 export interface GooseToolResponseContent {
   type: "toolResponse"
   id: string
+  parentToolUseId?: string | null
   toolResult: unknown
 }
 
@@ -65,6 +67,7 @@ export interface GooseMessage {
   id?: string | null
   role: "user" | "assistant"
   created: number
+  stopReason?: string | null
   content: GooseContentType[]
 }
 

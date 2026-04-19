@@ -97,6 +97,9 @@ export class HttpConnector implements Connector {
       engine.events.on("dag_deleted", (e) => {
         this.broadcaster.broadcast({ type: "dag_deleted", dagId: e.dagId })
       }),
+      engine.events.on("transcript_event", (e) => {
+        this.broadcaster.broadcast({ type: "transcript_event", sessionId: e.sessionId, event: e.event })
+      }),
     )
 
     // Web Push initialization — skipped when no workspace is provided.

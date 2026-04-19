@@ -12,6 +12,7 @@ import { listSessionScreenshots, resolveScreenshotPath } from "./session/workspa
 import { fetchPrPreview } from "./github/pr-preview.js"
 import type { PushSubscriptionStore } from "./push/push-subscriptions.js"
 import type { VapidKeys } from "./push/vapid-keys.js"
+import type { TranscriptEvent } from "./transcript/types.js"
 import pkg from "../package.json" with { type: "json" }
 
 const log = loggers.apiServer
@@ -97,6 +98,7 @@ export type SseEvent =
   | { type: "dag_created"; dag: ApiDagGraph }
   | { type: "dag_updated"; dag: ApiDagGraph }
   | { type: "dag_deleted"; dagId: string }
+  | { type: "transcript_event"; sessionId: string; event: TranscriptEvent }
 
 export type MinionCommand =
   | { action: "reply"; sessionId: string; message: string }

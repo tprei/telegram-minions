@@ -63,6 +63,9 @@ import { parseResetTime } from "../session/quota-detection.js"
 import type { EventBus } from "../events/event-bus.js"
 import { EngineEventBus } from "./events.js"
 import type { Connector } from "../connectors/connector.js"
+import { TranscriptBuilder } from "../transcript/transcript-builder.js"
+import { TranscriptStore } from "../transcript/transcript-store.js"
+import type { TranscriptEvent } from "../transcript/types.js"
 import { computeAttentionReasons } from "../api-server.js"
 import { LoopScheduler, type LoopSchedulerConfig } from "../loops/loop-scheduler.js"
 import type { LoopDefinition, LoopState } from "../loops/domain-types.js"
@@ -149,6 +152,8 @@ export class MinionEngine {
   private readonly connectors: Connector[] = []
   private readonly attentionSnapshots = new Map<string, string>()
   private readonly completionChain: CompletionHandlerChain
+  private readonly transcripts: TranscriptStore
+  private readonly transcriptBuilders = new Map<string, TranscriptBuilder>()
 
   constructor(
     private readonly platform: ChatPlatform,
@@ -165,6 +170,7 @@ export class MinionEngine {
     this.loopStore = new LoopStore(this.config.workspace.root)
     this.profileStore = new ProfileStore(this.config.workspace.root)
     this.stats = new StatsTracker(this.config.workspace.root)
+    this.transcripts = new TranscriptStore(this.config.workspace.root)
 
     // Create backward-compat shim for downstream modules that still expect TelegramClient.
     // This wraps ChatPlatform calls with numeric↔string ID conversion.
@@ -329,6 +335,12 @@ export class MinionEngine {
       session.conversation = conversation
       log.info({ slug: session.slug, truncatedCount }, "truncated conversation")
     }
+
+    if (message.role === "user") {
+      const builder = this.getOrCreateTranscriptBuilder(session.slug)
+      const events = builder.userMessage(message.text, message.images)
+      this.emitTranscriptEvents(session.slug, events)
+    }
   }
 
   private async postStatus(
@@ -362,6 +374,27 @@ export class MinionEngine {
   /** Read-only handle on the engine's channel-agnostic event bus. Connectors subscribe here. */
   get events(): EngineEventBus {
     return this.engineEvents
+  }
+
+  /** Read-only handle on the transcript store. Connectors read buffered events for REST/SSE replay. */
+  get transcriptStore(): TranscriptStore {
+    return this.transcripts
+  }
+
+  private getOrCreateTranscriptBuilder(sessionId: string): TranscriptBuilder {
+    const existing = this.transcriptBuilders.get(sessionId)
+    if (existing) return existing
+    const builder = new TranscriptBuilder({ sessionId })
+    this.transcriptBuilders.set(sessionId, builder)
+    return builder
+  }
+
+  private emitTranscriptEvents(sessionId: string, events: TranscriptEvent[]): void {
+    if (events.length === 0) return
+    for (const event of events) {
+      void this.transcripts.append(sessionId, event)
+      void this.engineEvents.emit({ type: "transcript_event", sessionId, event })
+    }
   }
 
   /**
@@ -411,6 +444,8 @@ export class MinionEngine {
   private broadcastSessionDeleted(slug: string): void {
     void this.engineEvents.emit({ type: "session_deleted", sessionId: slug })
     this.attentionSnapshots.delete(slug)
+    this.transcriptBuilders.delete(slug)
+    void this.transcripts.archive(slug).catch(() => {})
   }
 
   private broadcastDag(graph: DagGraph, eventType: "dag_created" | "dag_updated"): void {
@@ -844,7 +879,7 @@ export class MinionEngine {
       cwd,
       slug,
       topicHandle,
-      conversation: [{ role: "user", text: def.prompt }],
+      conversation: [],
       pendingFeedback: [],
       mode: "task",
       lastActivityAt: Date.now(),
@@ -853,6 +888,7 @@ export class MinionEngine {
     }
 
     this.topicSessions.set(threadId, topicSession)
+    this.pushToConversation(topicSession, { role: "user", text: def.prompt })
     this.broadcastSession(topicSession, "session_created")
     this.pinnedMessages.updatePinnedSummary()
 
@@ -1326,7 +1362,7 @@ export class MinionEngine {
       cwd,
       slug,
       topicHandle,
-      conversation: [{ role: "user", text: fullTask, images: imagePaths.length > 0 ? imagePaths : undefined }],
+      conversation: [],
       pendingFeedback: [],
       mode,
       lastActivityAt: Date.now(),
@@ -1336,6 +1372,11 @@ export class MinionEngine {
     }
 
     this.topicSessions.set(threadId, topicSession)
+    this.pushToConversation(topicSession, {
+      role: "user",
+      text: fullTask,
+      images: imagePaths.length > 0 ? imagePaths : undefined,
+    })
     this.broadcastSession(topicSession, "session_created")
     this.pinnedMessages.updatePinnedSummary()
 
@@ -1398,10 +1439,14 @@ export class MinionEngine {
     }
 
     const useSDK = SDK_MODES.has(topicSession.mode) && !systemPromptOverride
+    const transcriptBuilder = this.getOrCreateTranscriptBuilder(topicSession.slug)
     const onEvent = (event: GooseStreamEvent) => {
       this.observer.onEvent(meta, event).catch((err) => {
         loggers.observer.error({ err, sessionId }, "onEvent error")
       })
+
+      const transcriptEvents = transcriptBuilder.handleEvent(event)
+      this.emitTranscriptEvents(topicSession.slug, transcriptEvents)
 
       if (event.type === "quota_exhausted") {
         this.quotaEvents.set(topicSession.threadId, { resetAt: event.resetAt, rawMessage: event.rawMessage })
@@ -1754,7 +1799,7 @@ export class MinionEngine {
       cwd,
       slug,
       topicHandle,
-      conversation: [{ role: "user", text: task }],
+      conversation: [],
       pendingFeedback: [],
       mode: "task",
       lastActivityAt: Date.now(),
@@ -1765,6 +1810,7 @@ export class MinionEngine {
     }
 
     this.topicSessions.set(threadId, childSession)
+    this.pushToConversation(childSession, { role: "user", text: task })
     this.broadcastSession(childSession, "session_created")
 
     await this.spawnTopicAgent(childSession, task, { browserEnabled: false })
