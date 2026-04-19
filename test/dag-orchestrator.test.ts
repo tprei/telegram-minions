@@ -507,8 +507,9 @@ describe("DagOrchestrator", () => {
       expect(graph.nodes[0].status).toBe("done")
     })
 
-    it("closes children and updates title when DAG fully complete", async () => {
-      const { child, graph } = setupDag()
+    it("prompts for /land and preserves state when DAG fully complete", async () => {
+      const { parent, child, graph } = setupDag()
+      parent.childThreadIds = [200]
       // Only one node, no dependents — make it complete
       graph.nodes = [graph.nodes[0]]
       vi.mocked(ctx.extractPRFromConversation).mockReturnValue("https://github.com/org/repo/pull/42")
@@ -516,9 +517,16 @@ describe("DagOrchestrator", () => {
       await orchestrator.onDagChildComplete(child, "completed")
 
       expect(ctx.updateTopicTitle).toHaveBeenCalledWith(expect.any(Object), "✅")
-      expect(ctx.closeChildSessions).toHaveBeenCalled()
-      expect(ctx.dags.has("dag-test")).toBe(false)
-      expect(ctx.broadcastDagDeleted).toHaveBeenCalledWith("dag-test")
+      expect(ctx.closeChildSessions).not.toHaveBeenCalled()
+      expect(ctx.dags.has("dag-test")).toBe(true)
+      expect(ctx.broadcastDagDeleted).not.toHaveBeenCalled()
+      expect(parent.childThreadIds).toEqual([200])
+
+      const sendMsg = vi.mocked(ctx.telegram.sendMessage)
+      const landPrompt = sendMsg.mock.calls.find(
+        c => typeof c[0] === "string" && c[0].includes("/land") && c[0].includes("/close"),
+      )
+      expect(landPrompt).toBeDefined()
     })
 
     it("advances ship pipeline when DAG complete in ship mode", async () => {

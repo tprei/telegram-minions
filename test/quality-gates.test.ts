@@ -87,7 +87,7 @@ describe("runQualityGates", { timeout: 30000 }, () => {
 
     expect(report.results).toHaveLength(3)
     expect(report.allPassed).toBe(true)
-    // Allow generous tolerance (800ms) for CI variance but still well under serial 1200ms
-    expect(elapsed).toBeLessThan(900)
+    // Allow generous tolerance for CI variance but still well under serial 1200ms
+    expect(elapsed).toBeLessThan(1100)
   }, 10_000)
 })

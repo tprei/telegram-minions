@@ -81,3 +81,48 @@ export type { EventHandler, DomainEvent, DomainEventMap, DomainEventType, AnyDom
 export { LoopStore, LoopScheduler } from "./loops/index.js"
 export type { LoopDefinition, LoopState, LoopOutcome, LoopOutcomeResult, LoopSchedulerConfig, LoopSchedulerCallbacks } from "./loops/index.js"
 export type { LoopConfig } from "./config/config-types.js"
+export {
+  TRANSCRIPT_TRUNCATION_BUDGET,
+  isTranscriptEventOfType,
+} from "./transcript/types.js"
+export type {
+  AssistantTextEvent,
+  StatusEvent,
+  StatusSeverity,
+  ThinkingEvent,
+  ToolCallEvent,
+  ToolCallSummary,
+  ToolKind,
+  ToolResultEvent,
+  ToolResultFormat,
+  ToolResultPayload,
+  ToolResultStatus,
+  TranscriptEvent,
+  TranscriptEventBase,
+  TranscriptEventType,
+  TranscriptSessionInfo,
+  TranscriptSnapshot,
+  TranscriptTruncationBudget,
+  TurnCompletedEvent,
+  TurnStartedEvent,
+  TurnTrigger,
+  UserMessageEvent,
+} from "./transcript/types.js"
+export {
+  buildToolCallSummary,
+  buildToolResultPayload,
+  classifyTool,
+  parseMcpName,
+} from "./transcript/tool-classifier.js"
+export type {
+  BuildToolCallSummaryOptions,
+  BuildToolResultOptions,
+  ClassifiedTool,
+} from "./transcript/tool-classifier.js"
+export { TranscriptBuilder } from "./transcript/transcript-builder.js"
+export type {
+  CompleteTurnOptions,
+  StatusOptions,
+  TranscriptBuilderOptions,
+} from "./transcript/transcript-builder.js"
+export { TranscriptStore } from "./transcript/transcript-store.js"

@@ -289,7 +289,7 @@ export class DagOrchestrator {
       repoUrl: parent.repoUrl,
       cwd,
       slug,
-      conversation: [{ role: "user", text: task }],
+      conversation: [],
       pendingFeedback: [],
       mode: "task",
       lastActivityAt: Date.now(),
@@ -302,6 +302,7 @@ export class DagOrchestrator {
     }
 
     this.ctx.topicSessions.set(threadId, childSession)
+    this.ctx.pushToConversation(childSession, { role: "user", text: task })
     this.ctx.broadcastSession(childSession, "session_created")
 
     await this.ctx.postStatus(
@@ -508,9 +509,10 @@ export class DagOrchestrator {
           await this.ctx.postStatus(parent, `Send <code>/retry</code> to retry failed nodes, <code>/force node-id</code> to advance past CI failures, or <code>/close</code> to finish.`)
         } else {
           await this.ctx.updateTopicTitle(parent, "✅")
-          await this.ctx.closeChildSessions(parent)
-          this.ctx.dags.delete(graph.id)
-          this.ctx.broadcastDagDeleted(graph.id)
+          await this.ctx.postStatus(
+            parent,
+            `Send <code>/land</code> to merge PRs, or <code>/close</code> to finish.`,
+          )
         }
       } catch (err) {
         log.error({ err, dagId: graph.id }, "DAG completion handling failed")
@@ -844,7 +846,7 @@ export class DagOrchestrator {
       repoUrl: parent.repoUrl,
       cwd,
       slug,
-      conversation: [{ role: "user", text: task }],
+      conversation: [],
       pendingFeedback: [],
       mode: "dag-review",
       lastActivityAt: Date.now(),
@@ -856,6 +858,7 @@ export class DagOrchestrator {
     }
 
     this.ctx.topicSessions.set(threadId, childSession)
+    this.ctx.pushToConversation(childSession, { role: "user", text: task })
     this.ctx.broadcastSession(childSession, "session_created")
 
     await this.ctx.postStatus(parent, formatDagReviewChildStarting(slug, node.title, prNumber ? parseInt(prNumber, 10) : 0))

@@ -1,7 +1,20 @@
-import type { GooseStreamEvent } from "../domain/goose-types.js"
+import type { GooseStreamEvent, GooseContentType } from "../domain/goose-types.js"
+
+interface ClaudeContentBlock {
+  type: string
+  text?: string
+  thinking?: string
+  signature?: string
+  id?: string
+  name?: string
+  input?: Record<string, unknown>
+  content?: unknown
+}
+
 interface ClaudeStreamEvent {
   type: string
   subtype?: string
+  parent_tool_use_id?: string | null
   event?: {
     type: string
     index?: number
@@ -10,14 +23,8 @@ interface ClaudeStreamEvent {
   }
   message?: {
     role: string
-    content: Array<{
-      type: string
-      text?: string
-      id?: string
-      name?: string
-      input?: Record<string, unknown>
-      content?: unknown
-    }>
+    stop_reason?: string | null
+    content: ClaudeContentBlock[]
   }
   result?: string
   is_error?: boolean
@@ -25,6 +32,30 @@ interface ClaudeStreamEvent {
   num_turns?: number
   usage?: { output_tokens?: number; input_tokens?: number }
   session_id?: string
+}
+
+function buildAssistantContent(
+  blocks: ClaudeContentBlock[],
+  parentToolUseId: string | null | undefined,
+): GooseContentType[] {
+  const content: GooseContentType[] = []
+  for (const block of blocks) {
+    if (block.type === "thinking") {
+      content.push({
+        type: "thinking",
+        thinking: block.thinking ?? "",
+        signature: block.signature ?? "",
+      })
+    } else if (block.type === "tool_use") {
+      content.push({
+        type: "toolRequest",
+        id: block.id ?? "",
+        parentToolUseId: parentToolUseId ?? null,
+        toolCall: { name: block.name ?? "unknown", arguments: block.input ?? {} },
+      })
+    }
+  }
+  return content
 }
 
 export function translateClaudeEvent(raw: ClaudeStreamEvent): GooseStreamEvent | null {
@@ -51,26 +82,19 @@ export function translateClaudeEvent(raw: ClaudeStreamEvent): GooseStreamEvent |
       const msg = raw.message
       if (!msg || msg.role !== "assistant") return null
 
-      const toolBlocks = msg.content.filter((b) => b.type === "tool_use")
-      if (toolBlocks.length === 0) return null
+      const content = buildAssistantContent(msg.content, raw.parent_tool_use_id)
+      const stopReason = msg.stop_reason ?? null
+      if (content.length === 0 && !stopReason) return null
 
-      // Return one event per tool_use block so parallel calls are all visible
-      const events: GooseStreamEvent[] = toolBlocks.map((block) => ({
-        type: "message" as const,
+      return {
+        type: "message",
         message: {
-          role: "assistant" as const,
+          role: "assistant",
           created: Math.floor(Date.now() / 1000),
-          content: [
-            {
-              type: "toolRequest" as const,
-              id: block.id ?? "",
-              toolCall: { name: block.name ?? "unknown", arguments: block.input ?? {} },
-            },
-          ],
+          stopReason,
+          content,
         },
-      }))
-
-      return events[0]
+      }
     }
 
     case "result": {
@@ -100,27 +124,72 @@ export function translateClaudeEvents(raw: ClaudeStreamEvent): GooseStreamEvent[
     const msg = raw.message
     if (!msg || msg.role !== "assistant") return []
 
+    const parentToolUseId = raw.parent_tool_use_id ?? null
+    const stopReason = msg.stop_reason ?? null
+
+    const thinkingBlocks = msg.content.filter((b) => b.type === "thinking")
     const toolBlocks = msg.content.filter((b) => b.type === "tool_use")
-    return toolBlocks.map((block) => ({
-      type: "message" as const,
-      message: {
-        role: "assistant" as const,
-        created: Math.floor(Date.now() / 1000),
-        content: [
-          {
-            type: "toolRequest" as const,
-            id: block.id ?? "",
-            toolCall: { name: block.name ?? "unknown", arguments: block.input ?? {} },
-          },
-        ],
-      },
-    }))
+
+    const events: GooseStreamEvent[] = []
+
+    for (const block of thinkingBlocks) {
+      events.push({
+        type: "message",
+        message: {
+          role: "assistant",
+          created: Math.floor(Date.now() / 1000),
+          content: [
+            {
+              type: "thinking",
+              thinking: block.thinking ?? "",
+              signature: block.signature ?? "",
+            },
+          ],
+        },
+      })
+    }
+
+    for (let i = 0; i < toolBlocks.length; i++) {
+      const block = toolBlocks[i]
+      const isLast = i === toolBlocks.length - 1
+      events.push({
+        type: "message",
+        message: {
+          role: "assistant",
+          created: Math.floor(Date.now() / 1000),
+          stopReason: isLast ? stopReason : null,
+          content: [
+            {
+              type: "toolRequest",
+              id: block.id ?? "",
+              parentToolUseId,
+              toolCall: { name: block.name ?? "unknown", arguments: block.input ?? {} },
+            },
+          ],
+        },
+      })
+    }
+
+    if (events.length === 0 && stopReason) {
+      events.push({
+        type: "message",
+        message: {
+          role: "assistant",
+          created: Math.floor(Date.now() / 1000),
+          stopReason,
+          content: [],
+        },
+      })
+    }
+
+    return events
   }
 
   if (raw.type === "user") {
     const msg = raw.message
     if (!msg || msg.role !== "user") return []
 
+    const parentToolUseId = raw.parent_tool_use_id ?? null
     const toolResultBlocks = msg.content.filter((b) => b.type === "tool_result")
     if (toolResultBlocks.length === 0) return []
 
@@ -133,6 +202,7 @@ export function translateClaudeEvents(raw: ClaudeStreamEvent): GooseStreamEvent[
           {
             type: "toolResponse" as const,
             id: block.id ?? "",
+            parentToolUseId,
             toolResult: block.content ?? block.input ?? null,
           },
         ],
