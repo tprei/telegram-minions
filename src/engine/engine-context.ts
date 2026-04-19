@@ -73,6 +73,12 @@ export interface EngineContext {
     onComplete: () => void,
   ): Promise<void>
 
+  /** Cleanup callback for when Observer discovers a Telegram thread is gone
+   *  mid-session. Marks the session interrupted, interrupts the running agent,
+   *  and keeps the topic in the map so CompletionHandlerChain can advance the
+   *  DAG / parent state machines when the agent's onDone fires. */
+  handleDeadThread(topicSession: TopicSession, threadId: number): void
+
   // ── Workspace management ───────────────────────────────────────────
 
   /** Prepare a workspace directory for a session (clone repo, checkout branch). */

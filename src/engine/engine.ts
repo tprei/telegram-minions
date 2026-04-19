@@ -195,6 +195,7 @@ export class MinionEngine {
       refreshGitToken: () => this.refreshGitToken(),
       spawnTopicAgent: (ts, task, mcp, sp) => this.spawnTopicAgent(ts, task, mcp, sp),
       spawnCIFixAgent: (ts, task, cb) => this.spawnCIFixAgent(ts, task, cb),
+      handleDeadThread: (ts, threadId) => this.handleDeadThread(ts, threadId),
       prepareWorkspace: (slug, repo, branch) => this.prepareWorkspace(slug, repo, branch),
       removeWorkspace: (ts) => this.removeWorkspace(ts),
       cleanBuildArtifacts: (cwd) => this.cleanBuildArtifacts(cwd),
@@ -1412,11 +1413,7 @@ export class MinionEngine {
 
     await this.pinnedMessages.updateTopicTitle(topicSession, "⚡")
     this.pinnedMessages.updatePinnedSummary()
-    const onDeadThread = () => {
-      log.warn({ threadId: meta.threadId, slug: topicSession.slug }, "thread not found, removing session from store")
-      this.topicSessions.delete(meta.threadId)
-      this.persistTopicSessions().catch(() => {})
-    }
+    const onDeadThread = () => this.handleDeadThread(topicSession, meta.threadId)
     await this.observer.onSessionStart(meta, task, onTextCapture, onDeadThread, onActivityCapture)
     const systemPrompt = systemPromptOverride ?? (topicSession.mode === "task" ? prompts.task : undefined)
     handle.start(task, systemPrompt)
@@ -1611,11 +1608,7 @@ export class MinionEngine {
 
     this.sessions.set(topicSession.threadId, { handle, meta, task })
 
-    const onDeadThread = () => {
-      log.warn({ threadId: meta.threadId, slug: topicSession.slug }, "thread not found, removing session from store")
-      this.topicSessions.delete(meta.threadId)
-      this.persistTopicSessions().catch(() => {})
-    }
+    const onDeadThread = () => this.handleDeadThread(topicSession, meta.threadId)
     this.rebootstrapDependencies(topicSession.cwd)
     await this.observer.onSessionStart(meta, task, undefined, onDeadThread)
     handle.start(task, DEFAULT_CI_FIX_PROMPT)
@@ -2066,6 +2059,33 @@ export class MinionEngine {
     if (session) {
       session.handle.interrupt()
     }
+  }
+
+  /**
+   * Common cleanup when Observer discovers the Telegram thread no longer
+   * exists for an in-flight session (user deleted the topic, Telegram reaped
+   * it, etc.).
+   *
+   * Contract:
+   *   - Marks the topic interrupted so attention reasons surface.
+   *   - Interrupts the running agent so its onDone eventually fires
+   *     `session.completed` through CompletionHandlerChain — that is what
+   *     advances the DAG / parent session / CI babysit state machines.
+   *   - Keeps topicSession in the map so the completion chain can resolve it.
+   *     (The earlier behavior of deleting immediately caused orphaned
+   *     'session.completed for unknown topic' warns and stalled DAGs.)
+   *   - Idempotent: repeated dead-thread signals don't spam broadcasts.
+   */
+  private handleDeadThread(topicSession: TopicSession, threadId: number): void {
+    const already = topicSession.interruptedAt != null
+    if (!already) {
+      log.warn({ threadId, slug: topicSession.slug }, "thread not found, marking session interrupted")
+      topicSession.interruptedAt = Date.now()
+      topicSession.activeSessionId = undefined
+      this.broadcastSession(topicSession, "session_updated")
+    }
+    this.sessions.get(threadId)?.handle.interrupt()
+    this.persistTopicSessions().catch(() => {})
   }
 
   async apiCloseSession(threadId: number): Promise<void> {

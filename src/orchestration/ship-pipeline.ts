@@ -281,10 +281,7 @@ export class ShipPipeline {
         )
 
         this.ctx.sessions.set(childSession.threadId, { handle, meta, task: verifyTask })
-        const onDeadThread = () => {
-          this.ctx.topicSessions.delete(meta.threadId)
-          this.ctx.persistTopicSessions().catch(() => {})
-        }
+        const onDeadThread = () => this.ctx.handleDeadThread(childSession, meta.threadId)
         this.ctx.observer.onSessionStart(meta, verifyTask, onTextCapture, onDeadThread)
           .then(() => handle.start(verifyTask))
           .catch((err) => {
