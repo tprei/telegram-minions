@@ -178,12 +178,14 @@ describe("runPreflightStaging", () => {
     }
   })
 
-  it("identifies the owning node when a branch is missing on origin", async () => {
+  it("identifies the owning node when a branch is missing locally", async () => {
     const { localCwd, graph, nodes } = setupFixture(false)
     fixtures.push(localCwd)
 
-    // Delete minion/b from the remote so preflight's fetch fails on it
-    execFileSync("git", ["push", "origin", "--delete", "minion/b"], { cwd: localCwd, stdio: "pipe" })
+    // Delete the local ref for minion/b so preflight's rev-parse fails on it.
+    // This mirrors the real failure mode where a child session errors before
+    // ever creating its worktree (and therefore its branch) in the host repo.
+    execFileSync("git", ["branch", "-D", "minion/b"], { cwd: localCwd, stdio: "pipe" })
 
     const result = await runPreflightStaging(graph, nodes, "master", localCwd)
 
@@ -191,7 +193,7 @@ describe("runPreflightStaging", () => {
     if (!result.ok) {
       expect(result.failedNode?.id).toBe("b")
       expect(result.error).toContain("minion/b")
-      expect(result.error).toContain("does not exist on origin")
+      expect(result.error).toContain("not found locally")
     }
   })
 

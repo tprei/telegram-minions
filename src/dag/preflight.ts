@@ -98,28 +98,47 @@ export async function runPreflightStaging(
       new Set(prNodes.map((n) => n.branch).filter((b): b is string => !!b)),
     )
 
+    // Fetch only the base branch into the host repo. Child DAG branches are
+    // already present as local refs because each child's worktree has that
+    // branch checked out (the worktree creates the branch in the host repo).
+    // Including them in `git fetch` would fail with "refusing to fetch into
+    // branch X checked out at Y" because fetch would update a local ref that
+    // another worktree is sitting on.
+    //
+    // We write the base into its remote-tracking ref with an explicit
+    // refspec so the caller's currently-checked-out main/master (if any)
+    // doesn't get rejected either.
     try {
-      await git(["fetch", "origin", baseBranch, ...branches], hostCwd, FETCH_TIMEOUT)
+      await git(
+        ["fetch", "origin", `+${baseBranch}:refs/remotes/origin/${baseBranch}`],
+        hostCwd,
+        FETCH_TIMEOUT,
+      )
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
-      const missingMatch = msg.match(/couldn't find remote ref (\S+)/)
-      if (missingMatch) {
-        const missingBranch = missingMatch[1].trim()
-        const failedNode = prNodes.find((n) => n.branch === missingBranch)
+      return { ok: false, error: `fetch failed: ${msg}` }
+    }
+
+    // Verify every DAG branch exists locally. If a child never pushed, its
+    // branch won't have a local ref either — flag that as the failed node.
+    for (const branch of branches) {
+      try {
+        await git(["rev-parse", "--verify", branch], hostCwd, 10_000)
+      } catch {
+        const failedNode = prNodes.find((n) => n.branch === branch)
         return {
           ok: false,
           failedNode,
           error: failedNode
-            ? `Branch ${missingBranch} does not exist on origin — node "${failedNode.id}" never pushed (its child session likely errored before pushing)`
-            : `Branch ${missingBranch} does not exist on origin`,
+            ? `Branch ${branch} not found locally — node "${failedNode.id}" never pushed (its child session likely errored before pushing)`
+            : `Branch ${branch} not found locally`,
         }
       }
-      return { ok: false, error: `fetch failed: ${msg}` }
     }
 
     try {
       await git(
-        ["worktree", "add", "--detach", stagingDir, baseBranch],
+        ["worktree", "add", "--detach", stagingDir, `origin/${baseBranch}`],
         hostCwd,
         30_000,
       )
@@ -152,7 +171,7 @@ export async function runPreflightStaging(
       if (!baseSha) {
         try {
           baseSha = await git(
-            ["merge-base", node.branch, baseBranch],
+            ["merge-base", node.branch, `origin/${baseBranch}`],
             stagingDir,
             20_000,
           )
