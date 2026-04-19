@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest"
 import { EngineEventBus, type EngineEvent } from "../src/engine/events.js"
 import type { TopicSession } from "../src/domain/session-types.js"
+import type { TranscriptEvent } from "../src/transcript/types.js"
 
 function makeTopicSession(slug = "happy-otter"): TopicSession {
   return {
@@ -70,5 +71,27 @@ describe("EngineEventBus", () => {
     unsubscribe()
     await bus.emit({ type: "dag_created", dag: { dagId: "d1", nodes: [] } as never })
     expect(seen).toEqual([])
+  })
+
+  it("dispatches transcript_event envelopes with the inner TranscriptEvent", async () => {
+    const bus = new EngineEventBus()
+    const seen: Array<Extract<EngineEvent, { type: "transcript_event" }>> = []
+    bus.on("transcript_event", (e) => { seen.push(e) })
+    const inner: TranscriptEvent = {
+      seq: 0,
+      id: "evt_1",
+      sessionId: "happy-otter",
+      turn: 0,
+      timestamp: 1_700_000_000_000,
+      type: "assistant_text",
+      blockId: "b",
+      text: "hi",
+      final: true,
+    }
+    await bus.emit({ type: "transcript_event", sessionId: "happy-otter", event: inner })
+    expect(seen).toHaveLength(1)
+    expect(seen[0]?.sessionId).toBe("happy-otter")
+    expect(seen[0]?.event.type).toBe("assistant_text")
+    expect(seen[0]?.event.seq).toBe(0)
   })
 })
