@@ -61,10 +61,26 @@ export function createMinion(config: MinionConfig, options?: MinionOptions): Min
   const platform: ChatPlatform = telegramConnector?.platform
     ?? new LocalPlatform(config.telegram?.chatId || "local")
 
+  // When Telegram isn't in the loop, the debounce/throttle defaults exist
+  // purely to stay under Telegram's ~30 msg/sec rate limit. Drop them to
+  // near-zero for HTTP-only deployments so the PWA gets assistant text
+  // streamed as fast as Goose produces it. Env vars still override.
+  const observerCfg = telegramEnabled
+    ? {
+        throttleMs: config.observer.activityThrottleMs,
+        textFlushDebounceMs: config.observer.textFlushDebounceMs,
+        activityEditDebounceMs: config.observer.activityEditDebounceMs,
+      }
+    : {
+        throttleMs: process.env["ACTIVITY_THROTTLE_MS"] ? config.observer.activityThrottleMs : 200,
+        textFlushDebounceMs: process.env["TEXT_FLUSH_DEBOUNCE_MS"] ? config.observer.textFlushDebounceMs : 200,
+        activityEditDebounceMs: process.env["ACTIVITY_EDIT_DEBOUNCE_MS"] ? config.observer.activityEditDebounceMs : 200,
+      }
+
   const engineEvents = new EngineEventBus()
-  const observer = new Observer(platform, config.observer.activityThrottleMs, {
-    textFlushDebounceMs: config.observer.textFlushDebounceMs,
-    activityEditDebounceMs: config.observer.activityEditDebounceMs,
+  const observer = new Observer(platform, observerCfg.throttleMs, {
+    textFlushDebounceMs: observerCfg.textFlushDebounceMs,
+    activityEditDebounceMs: observerCfg.activityEditDebounceMs,
     events: engineEvents,
   })
 
