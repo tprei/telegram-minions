@@ -63,6 +63,7 @@ export const loggers = {
   replyQueue: createLogger({ component: "reply-queue" }),
   loopStore: createLogger({ component: "loop-store" }),
   loopScheduler: createLogger({ component: "loop-scheduler" }),
+  transcriptStore: createLogger({ component: "transcript-store" }),
 } as const
 
 /**
