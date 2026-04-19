@@ -95,18 +95,15 @@ export class CIBabysitter {
       ? initialQualityReport
       : undefined
 
-    const watchMsg = await this.ctx.telegram.sendMessage(
-      formatCIWatching(topicSession.slug, prUrl),
-      topicSession.threadId,
-    )
+    const watchMsg = await this.ctx.postStatus(topicSession, formatCIWatching(topicSession.slug, prUrl))
     const watchMsgId = watchMsg.messageId
 
     const updateWatching = (checks: CICheckResult[]) => {
       if (watchMsgId == null) return
-      this.ctx.telegram.editMessage(
+      this.ctx.platform.chat.editMessage(
         watchMsgId,
         formatCIWatching(topicSession.slug, prUrl, checks),
-        topicSession.threadId,
+        String(topicSession.threadId),
       )
     }
 
@@ -122,10 +119,7 @@ export class CIBabysitter {
     // Auto-resolve merge conflicts if detected
     for (let conflictAttempt = 1; conflictAttempt <= maxRetries && mergeState === "CONFLICTING"; conflictAttempt++) {
       if (signal.aborted) return
-      await this.ctx.telegram.sendMessage(
-        formatCIResolvingConflicts(topicSession.slug, prUrl, conflictAttempt, maxRetries),
-        topicSession.threadId,
-      )
+      await this.ctx.postStatus(topicSession, formatCIResolvingConflicts(topicSession.slug, prUrl, conflictAttempt, maxRetries))
 
       log.info({ prUrl, conflictAttempt, maxRetries }, "spawning merge conflict resolution session")
 
@@ -150,10 +144,7 @@ export class CIBabysitter {
         if (conflictAttempt < maxRetries) {
           log.warn({ prUrl, conflictAttempt }, "PR still has merge conflicts, retrying")
         } else {
-          await this.ctx.telegram.sendMessage(
-            formatCIConflicts(topicSession.slug, prUrl),
-            topicSession.threadId,
-          )
+          await this.ctx.postStatus(topicSession, formatCIConflicts(topicSession.slug, prUrl))
           log.warn({ prUrl, maxRetries }, "PR still has merge conflicts after max attempts, aborting")
           topicSession.mode = "task"
           return
@@ -170,19 +161,13 @@ export class CIBabysitter {
     if (signal.aborted) return
 
     if (result.passed && localReport == null) {
-      await this.ctx.telegram.sendMessage(
-        formatCIPassed(topicSession.slug, prUrl, result.checks),
-        topicSession.threadId,
-      )
+      await this.ctx.postStatus(topicSession, formatCIPassed(topicSession.slug, prUrl, result.checks))
       log.info({ prUrl }, "CI passed")
       return
     }
 
     if (result.timedOut && result.checks.length === 0 && localReport == null) {
-      await this.ctx.telegram.sendMessage(
-        formatCINoChecks(topicSession.slug, prUrl),
-        topicSession.threadId,
-      )
+      await this.ctx.postStatus(topicSession, formatCINoChecks(topicSession.slug, prUrl))
       log.info({ prUrl }, "no CI checks found, skipping babysit")
       return
     }
@@ -200,10 +185,7 @@ export class CIBabysitter {
         : []
       const allChecks = [...lastChecks, ...localFailedChecks]
 
-      await this.ctx.telegram.sendMessage(
-        formatCIFailed(topicSession.slug, allChecks, attempt, maxRetries),
-        topicSession.threadId,
-      )
+      await this.ctx.postStatus(topicSession, formatCIFailed(topicSession.slug, allChecks, attempt, maxRetries))
 
       let fixPrompt: string
       if (hasRemoteFailures) {
@@ -216,10 +198,7 @@ export class CIBabysitter {
         fixPrompt = buildQualityGateFixPrompt(prUrl, localReport!, attempt, maxRetries)
       }
 
-      await this.ctx.telegram.sendMessage(
-        formatCIFixing(topicSession.slug, attempt, maxRetries),
-        topicSession.threadId,
-      )
+      await this.ctx.postStatus(topicSession, formatCIFixing(topicSession.slug, attempt, maxRetries))
 
       log.info({ prUrl, attempt, maxRetries }, "spawning CI fix session")
 
@@ -251,10 +230,7 @@ export class CIBabysitter {
       // Re-check for merge conflicts before polling CI again
       const retryMergeState = await checkPRMergeability(prUrl, topicSession.cwd)
       if (retryMergeState === "CONFLICTING") {
-        await this.ctx.telegram.sendMessage(
-          formatCIConflicts(topicSession.slug, prUrl),
-          topicSession.threadId,
-        )
+        await this.ctx.postStatus(topicSession, formatCIConflicts(topicSession.slug, prUrl))
         log.warn({ prUrl, attempt }, "PR has merge conflicts after fix attempt, aborting")
         topicSession.mode = "task"
         return
@@ -267,10 +243,7 @@ export class CIBabysitter {
       lastChecks = recheck.checks
 
       if (recheck.passed && localFixed) {
-        await this.ctx.telegram.sendMessage(
-          formatCIPassed(topicSession.slug, prUrl, recheck.checks),
-          topicSession.threadId,
-        )
+        await this.ctx.postStatus(topicSession, formatCIPassed(topicSession.slug, prUrl, recheck.checks))
         log.info({ prUrl, attempt }, "CI passed after fix attempt")
         topicSession.mode = "task"
         return
@@ -283,10 +256,7 @@ export class CIBabysitter {
       }
     }
 
-    await this.ctx.telegram.sendMessage(
-      formatCIGaveUp(topicSession.slug, maxRetries, lastChecks),
-      topicSession.threadId,
-    )
+    await this.ctx.postStatus(topicSession, formatCIGaveUp(topicSession.slug, maxRetries, lastChecks))
     topicSession.mode = "task"
   }
 
@@ -306,18 +276,15 @@ export class CIBabysitter {
   private async _babysitDagChildCI(childSession: TopicSession, prUrl: string, signal: AbortSignal): Promise<boolean> {
     await this.ctx.refreshGitToken()
 
-    const watchMsg = await this.ctx.telegram.sendMessage(
-      formatCIWatching(childSession.slug, prUrl),
-      childSession.threadId,
-    )
+    const watchMsg = await this.ctx.postStatus(childSession, formatCIWatching(childSession.slug, prUrl))
     const watchMsgId = watchMsg.messageId
 
     const updateWatching = (checks: CICheckResult[]) => {
       if (watchMsgId == null) return
-      this.ctx.telegram.editMessage(
+      this.ctx.platform.chat.editMessage(
         watchMsgId,
         formatCIWatching(childSession.slug, prUrl, checks),
-        childSession.threadId,
+        String(childSession.threadId),
       )
     }
 
@@ -325,18 +292,12 @@ export class CIBabysitter {
     if (signal.aborted) return false
 
     if (result.passed) {
-      await this.ctx.telegram.sendMessage(
-        formatCIPassed(childSession.slug, prUrl, result.checks),
-        childSession.threadId,
-      )
+      await this.ctx.postStatus(childSession, formatCIPassed(childSession.slug, prUrl, result.checks))
       return true
     }
 
     if (result.timedOut && result.checks.length === 0) {
-      await this.ctx.telegram.sendMessage(
-        formatCINoChecks(childSession.slug, prUrl),
-        childSession.threadId,
-      )
+      await this.ctx.postStatus(childSession, formatCINoChecks(childSession.slug, prUrl))
       return true // No checks = treat as passed
     }
 
@@ -348,18 +309,12 @@ export class CIBabysitter {
     let lastChecks: CICheckResult[] = result.checks
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       if (signal.aborted) return false
-      await this.ctx.telegram.sendMessage(
-        formatCIFailed(childSession.slug, lastChecks, attempt, maxRetries),
-        childSession.threadId,
-      )
+      await this.ctx.postStatus(childSession, formatCIFailed(childSession.slug, lastChecks, attempt, maxRetries))
 
       const failureDetails = await getFailedCheckLogs(prUrl, childSession.cwd)
       const fixPrompt = buildCIFixPrompt(prUrl, failedChecks, failureDetails, attempt, maxRetries)
 
-      await this.ctx.telegram.sendMessage(
-        formatCIFixing(childSession.slug, attempt, maxRetries),
-        childSession.threadId,
-      )
+      await this.ctx.postStatus(childSession, formatCIFixing(childSession.slug, attempt, maxRetries))
 
       childSession.mode = "ci-fix"
       this.ctx.pushToConversation(childSession, { role: "user", text: fixPrompt })
@@ -373,19 +328,13 @@ export class CIBabysitter {
       if (signal.aborted) return false
       lastChecks = recheck.checks
       if (recheck.passed) {
-        await this.ctx.telegram.sendMessage(
-          formatCIPassed(childSession.slug, prUrl, recheck.checks),
-          childSession.threadId,
-        )
+        await this.ctx.postStatus(childSession, formatCIPassed(childSession.slug, prUrl, recheck.checks))
         childSession.mode = "task"
         return true
       }
     }
 
-    await this.ctx.telegram.sendMessage(
-      formatCIGaveUp(childSession.slug, maxRetries, lastChecks),
-      childSession.threadId,
-    )
+    await this.ctx.postStatus(childSession, formatCIGaveUp(childSession.slug, maxRetries, lastChecks))
     childSession.mode = "task"
     return false
   }

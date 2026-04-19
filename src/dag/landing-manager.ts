@@ -82,10 +82,7 @@ export class LandingManager {
     await this.ctx.refreshGitToken()
     if (!topicSession.dagId) {
       if (!topicSession.childThreadIds || topicSession.childThreadIds.length === 0) {
-        await this.ctx.telegram.sendMessage(
-          `⚠️ No DAG or stack found for this session. Use <code>/stack</code> or <code>/dag</code> first.`,
-          topicSession.threadId,
-        )
+        await this.ctx.postStatus(topicSession, `⚠️ No DAG or stack found for this session. Use <code>/stack</code> or <code>/dag</code> first.`)
         return
       }
     }
@@ -106,10 +103,7 @@ export class LandingManager {
       .filter((n) => n.status === "done" && n.prUrl)
 
     if (prNodes.length === 0) {
-      await this.ctx.telegram.sendMessage(
-        `⚠️ No completed PRs to land.`,
-        topicSession.threadId,
-      )
+      await this.ctx.postStatus(topicSession, `⚠️ No completed PRs to land.`)
       return
     }
 
@@ -117,10 +111,7 @@ export class LandingManager {
     const baseBranch = await this.detectBaseBranch(repo, topicSession, graph)
 
     // Pre-flight: cherry-pick all nodes onto a throwaway branch off origin/<base>
-    await this.ctx.telegram.sendMessage(
-      formatLandPreflightStart(topicSession.slug, prNodes.length),
-      topicSession.threadId,
-    )
+    await this.ctx.postStatus(topicSession, formatLandPreflightStart(topicSession.slug, prNodes.length))
 
     const hostCwd = this.findValidCwd(topicSession, graph)
     const preflight = hostCwd
@@ -129,30 +120,21 @@ export class LandingManager {
 
     if (!preflight.ok) {
       const title = preflight.failedNode?.title ?? "unknown node"
-      await this.ctx.telegram.sendMessage(
-        formatLandPreflightFailed(title, preflight.conflictFiles ?? [], preflight.error),
-        topicSession.threadId,
-      )
+      await this.ctx.postStatus(topicSession, formatLandPreflightFailed(title, preflight.conflictFiles ?? [], preflight.error))
       if (preflight.error) {
         log.warn({ dagId: graph.id, nodeId: preflight.failedNode?.id, error: preflight.error }, "preflight failed with error")
       }
       return
     }
 
-    await this.ctx.telegram.sendMessage(
-      formatLandPreflightPassed(prNodes.length),
-      topicSession.threadId,
-    )
+    await this.ctx.postStatus(topicSession, formatLandPreflightPassed(prNodes.length))
 
     // Pre-flight retarget: point every PR at baseBranch BEFORE any merges. This
     // prevents GitHub from auto-closing downstream PRs when we squash-merge with
     // --delete-branch — a stacked PR loses its base when the upstream branch is
     // deleted, and GitHub closes it. Retargeting first keeps every PR anchored
     // to baseBranch so deletions never cascade.
-    await this.ctx.telegram.sendMessage(
-      formatLandPreRetarget(prNodes.length, baseBranch),
-      topicSession.threadId,
-    )
+    await this.ctx.postStatus(topicSession, formatLandPreRetarget(prNodes.length, baseBranch))
     await this.preRetargetToBase(prNodes, baseBranch)
 
     // Clean up child worktrees so branch deletion doesn't hit a lock
@@ -160,10 +142,7 @@ export class LandingManager {
     await this.removeChildWorktrees(topicSession, graph)
     await this.pruneWorktrees(topicSession)
 
-    await this.ctx.telegram.sendMessage(
-      formatLandStart(topicSession.slug, prNodes.length),
-      topicSession.threadId,
-    )
+    await this.ctx.postStatus(topicSession, formatLandStart(topicSession.slug, prNodes.length))
 
     let succeeded = 0
     let recovered = 0
@@ -178,10 +157,7 @@ export class LandingManager {
 
       if (!prNumber) {
         failedTitles.push(node.title)
-        await this.ctx.telegram.sendMessage(
-          formatLandError(node.title, "could not parse PR number from URL"),
-          topicSession.threadId,
-        )
+        await this.ctx.postStatus(topicSession, formatLandError(node.title, "could not parse PR number from URL"))
         continue
       }
 
@@ -191,10 +167,7 @@ export class LandingManager {
         if (prState === "MERGED") {
           node.status = "landed"
           skipped++
-          await this.ctx.telegram.sendMessage(
-            formatLandSkipped(node.title, prState),
-            topicSession.threadId,
-          )
+          await this.ctx.postStatus(topicSession, formatLandSkipped(node.title, prState))
           continue
         }
         if (prState === "CLOSED") {
@@ -207,10 +180,7 @@ export class LandingManager {
             const errMsg = err instanceof Error ? err.message : String(err)
             failedTitles.push(node.title)
             log.error({ err, nodeId: node.id, prNumber }, "failed to reopen auto-closed PR")
-            await this.ctx.telegram.sendMessage(
-              formatLandFailedClosed(node.title, errMsg),
-              topicSession.threadId,
-            )
+            await this.ctx.postStatus(topicSession, formatLandFailedClosed(node.title, errMsg))
             continue
           }
         }
@@ -255,12 +225,9 @@ export class LandingManager {
           }
         }
 
-        await this.ctx.telegram.sendMessage(
-          wasRecovered
+        await this.ctx.postStatus(topicSession, wasRecovered
             ? formatLandRecovered(node.title, node.prUrl!, succeeded - 1, prNodes.length)
-            : formatLandProgress(node.title, node.prUrl!, succeeded - 1, prNodes.length),
-          topicSession.threadId,
-        )
+            : formatLandProgress(node.title, node.prUrl!, succeeded - 1, prNodes.length))
 
         // Update stack comments on remaining PRs so reviewers see the new state.
         try { await updateAllStackComments(graph) } catch { /* non-critical */ }
@@ -270,10 +237,7 @@ export class LandingManager {
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err)
         failedTitles.push(node.title)
-        await this.ctx.telegram.sendMessage(
-          formatLandError(node.title, errMsg),
-          topicSession.threadId,
-        )
+        await this.ctx.postStatus(topicSession, formatLandError(node.title, errMsg))
         continue
       }
     }
@@ -281,20 +245,14 @@ export class LandingManager {
     try { await updateAllStackComments(graph) } catch { /* non-critical */ }
 
     if (failedTitles.length === 0 && skipped === 0) {
-      await this.ctx.telegram.sendMessage(
-        formatLandComplete(succeeded, prNodes.length, baseBranch),
-        topicSession.threadId,
-      )
+      await this.ctx.postStatus(topicSession, formatLandComplete(succeeded, prNodes.length, baseBranch))
       // All PRs landed — clean up DAG and child sessions to free memory
       this.ctx.dags.delete(graph.id)
       this.ctx.broadcastDagDeleted(graph.id)
       await this.ctx.closeChildSessions(topicSession)
       await this.ctx.persistDags()
     } else {
-      await this.ctx.telegram.sendMessage(
-        formatLandSummary(succeeded, failedTitles.length, skipped, prNodes.length, failedTitles, baseBranch, recovered),
-        topicSession.threadId,
-      )
+      await this.ctx.postStatus(topicSession, formatLandSummary(succeeded, failedTitles.length, skipped, prNodes.length, failedTitles, baseBranch, recovered))
     }
   }
 
@@ -458,17 +416,11 @@ export class LandingManager {
     }
 
     if (prUrls.length === 0) {
-      await this.ctx.telegram.sendMessage(
-        `⚠️ No PRs found among child sessions.`,
-        topicSession.threadId,
-      )
+      await this.ctx.postStatus(topicSession, `⚠️ No PRs found among child sessions.`)
       return
     }
 
-    await this.ctx.telegram.sendMessage(
-      formatLandStart(topicSession.slug, prUrls.length),
-      topicSession.threadId,
-    )
+    await this.ctx.postStatus(topicSession, formatLandStart(topicSession.slug, prUrls.length))
 
     let succeeded = 0
     let skipped = 0
@@ -482,10 +434,7 @@ export class LandingManager {
 
       if (!prNumber) {
         failedTitles.push(title)
-        await this.ctx.telegram.sendMessage(
-          formatLandError(title, "could not parse PR number from URL"),
-          topicSession.threadId,
-        )
+        await this.ctx.postStatus(topicSession, formatLandError(title, "could not parse PR number from URL"))
         continue
       }
 
@@ -494,19 +443,13 @@ export class LandingManager {
 
         if (prState === "MERGED") {
           skipped++
-          await this.ctx.telegram.sendMessage(
-            formatLandSkipped(title, prState),
-            topicSession.threadId,
-          )
+          await this.ctx.postStatus(topicSession, formatLandSkipped(title, prState))
           continue
         }
 
         if (prState === "CLOSED") {
           skipped++
-          await this.ctx.telegram.sendMessage(
-            formatLandSkipped(title, prState),
-            topicSession.threadId,
-          )
+          await this.ctx.postStatus(topicSession, formatLandSkipped(title, prState))
           continue
         }
       } catch (err) {
@@ -517,35 +460,23 @@ export class LandingManager {
         await gh(["pr", "merge", prNumber, ...repoFlag, "--squash", "--delete-branch"])
         succeeded++
 
-        await this.ctx.telegram.sendMessage(
-          formatLandProgress(title, prUrl, succeeded - 1, prUrls.length),
-          topicSession.threadId,
-        )
+        await this.ctx.postStatus(topicSession, formatLandProgress(title, prUrl, succeeded - 1, prUrls.length))
 
         await new Promise((resolve) => setTimeout(resolve, LAND_STEP_DELAY_MS))
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err)
         failedTitles.push(title)
-        await this.ctx.telegram.sendMessage(
-          formatLandError(title, errMsg),
-          topicSession.threadId,
-        )
+        await this.ctx.postStatus(topicSession, formatLandError(title, errMsg))
         continue
       }
     }
 
     if (failedTitles.length === 0 && skipped === 0) {
-      await this.ctx.telegram.sendMessage(
-        formatLandComplete(succeeded, prUrls.length),
-        topicSession.threadId,
-      )
+      await this.ctx.postStatus(topicSession, formatLandComplete(succeeded, prUrls.length))
       // All PRs landed — clean up child sessions to free memory
       await this.ctx.closeChildSessions(topicSession)
     } else {
-      await this.ctx.telegram.sendMessage(
-        formatLandSummary(succeeded, failedTitles.length, skipped, prUrls.length, failedTitles),
-        topicSession.threadId,
-      )
+      await this.ctx.postStatus(topicSession, formatLandSummary(succeeded, failedTitles.length, skipped, prUrls.length, failedTitles))
     }
   }
 }

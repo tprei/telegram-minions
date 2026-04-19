@@ -381,9 +381,9 @@ export class CommandHandler {
 
   async handleExecuteCommand(topicSession: TopicSession, directive?: string): Promise<void> {
     if (topicSession.pipelineAdvancing) {
-      await this.ctx.telegram.sendMessage(
+      await this.ctx.postStatus(
+        topicSession,
         `⏳ Pipeline is advancing to the next phase. Wait for it to finish, or use <code>/close</code> to cancel.`,
-        topicSession.threadId,
       )
       return
     }
@@ -398,10 +398,7 @@ export class CommandHandler {
 
     const executionTask = buildExecutionPrompt(topicSession, directive)
 
-    await this.ctx.telegram.sendMessage(
-      formatPlanExecuting(topicSession.slug, "starting…"),
-      topicSession.threadId,
-    )
+    await this.ctx.postStatus(topicSession, formatPlanExecuting(topicSession.slug, "starting…"))
 
     topicSession.mode = "task"
     topicSession.activeSessionId = undefined
@@ -413,10 +410,7 @@ export class CommandHandler {
 
   async handleDagCommand(topicSession: TopicSession, directive?: string): Promise<void> {
     if (topicSession.pipelineAdvancing) {
-      await this.ctx.telegram.sendMessage(
-        `⏳ Pipeline is advancing to the next phase. Wait for it to finish, or use <code>/close</code> to cancel.`,
-        topicSession.threadId,
-      )
+      await this.ctx.postStatus(topicSession, `⏳ Pipeline is advancing to the next phase. Wait for it to finish, or use <code>/close</code> to cancel.`)
       return
     }
 
@@ -427,10 +421,7 @@ export class CommandHandler {
       topicSession.activeSessionId = undefined
     }
 
-    await this.ctx.telegram.sendMessage(
-      formatDagAnalyzing(topicSession.slug),
-      topicSession.threadId,
-    )
+    await this.ctx.postStatus(topicSession, formatDagAnalyzing(topicSession.slug))
 
     const GRACE_PERIOD_MS = 2000
     await new Promise((resolve) => setTimeout(resolve, GRACE_PERIOD_MS))
@@ -439,27 +430,18 @@ export class CommandHandler {
     const result = await extractDagItems(topicSession.conversation, directive, profile)
 
     if (result.error === "system") {
-      await this.ctx.telegram.sendMessage(
-        `⚠️ <b>System error</b> during extraction: <code>${result.errorMessage ?? "Unknown error"}</code>\n\n` +
-        `Try <code>/dag</code> again, or use <code>/split</code> for parallel tasks.`,
-        topicSession.threadId,
-      )
+      await this.ctx.postStatus(topicSession, `⚠️ <b>System error</b> during extraction: <code>${result.errorMessage ?? "Unknown error"}</code>\n\n` +
+        `Try <code>/dag</code> again, or use <code>/split</code> for parallel tasks.`)
       return
     }
 
     if (result.items.length === 0) {
-      await this.ctx.telegram.sendMessage(
-        `⚠️ Could not extract work items with dependencies. Try <code>/split</code> or <code>/execute</code> instead.`,
-        topicSession.threadId,
-      )
+      await this.ctx.postStatus(topicSession, `⚠️ Could not extract work items with dependencies. Try <code>/split</code> or <code>/execute</code> instead.`)
       return
     }
 
     if (result.items.length === 1) {
-      await this.ctx.telegram.sendMessage(
-        `Only 1 item found — using <code>/execute</code> instead.`,
-        topicSession.threadId,
-      )
+      await this.ctx.postStatus(topicSession, `Only 1 item found — using <code>/execute</code> instead.`)
       await this.handleExecuteCommand(topicSession, result.items[0].description)
       return
     }
@@ -476,10 +458,7 @@ export class CommandHandler {
       topicSession.activeSessionId = undefined
     }
 
-    await this.ctx.telegram.sendMessage(
-      formatDoctorAnalyzing(topicSession.slug),
-      topicSession.threadId,
-    )
+    await this.ctx.postStatus(topicSession, formatDoctorAnalyzing(topicSession.slug))
 
     const evidence = gatherDiagnosticEvidence({
       currentSession: topicSession,
@@ -508,19 +487,16 @@ export class CommandHandler {
     const threadId = topicSession.threadId
 
     if (topicSession.parentThreadId || topicSession.dagNodeId) {
-      await this.ctx.telegram.sendMessage(
+      await this.ctx.postStatus(
+        topicSession,
         `⚠️ <code>/done</code> is not available on child sessions. Use <code>/done</code> or <code>/land</code> from the parent thread.`,
-        threadId,
       )
       return
     }
 
     const prUrl = topicSession.prUrl ?? this.ctx.extractPRFromConversation(topicSession)
     if (!prUrl) {
-      await this.ctx.telegram.sendMessage(
-        `⚠️ No PR found for this session. Nothing to merge.`,
-        threadId,
-      )
+      await this.ctx.postStatus(topicSession, `⚠️ No PR found for this session. Nothing to merge.`)
       return
     }
 
@@ -530,10 +506,7 @@ export class CommandHandler {
     const prNumber = prNumberMatch?.[1]
 
     if (!repo || !prNumber) {
-      await this.ctx.telegram.sendMessage(
-        `⚠️ Could not parse PR URL: <code>${escapeHtml(prUrl)}</code>`,
-        threadId,
-      )
+      await this.ctx.postStatus(topicSession, `⚠️ Could not parse PR URL: <code>${escapeHtml(prUrl)}</code>`)
       return
     }
 
@@ -552,29 +525,20 @@ export class CommandHandler {
         const checks = JSON.parse(checksJson.trim()) as { name: string; state: string; bucket: string }[]
         const pending = checks.filter((c) => c.bucket === "pending")
         if (pending.length > 0) {
-          await this.ctx.telegram.sendMessage(
-            `⚠️ CI checks still running (${pending.length} pending). Wait for CI to finish before using <code>/done</code>.`,
-            threadId,
-          )
+          await this.ctx.postStatus(topicSession, `⚠️ CI checks still running (${pending.length} pending). Wait for CI to finish before using <code>/done</code>.`)
           return
         }
         const failed = checks.filter((c) => c.bucket === "fail")
         if (failed.length > 0) {
           const names = failed.map((c) => `<code>${escapeHtml(c.name)}</code>`).join(", ")
-          await this.ctx.telegram.sendMessage(
-            `⚠️ CI is not green — ${failed.length} failed check(s): ${names}. Fix CI before using <code>/done</code>.`,
-            threadId,
-          )
+          await this.ctx.postStatus(topicSession, `⚠️ CI is not green — ${failed.length} failed check(s): ${names}. Fix CI before using <code>/done</code>.`)
           return
         }
       }
     } catch (err) {
       const errMsg = String((err as Error).message ?? "")
       if (!errMsg.includes("no checks reported")) {
-        await this.ctx.telegram.sendMessage(
-          `⚠️ Could not verify CI status: <code>${escapeHtml(errMsg.slice(0, 200))}</code>`,
-          threadId,
-        )
+        await this.ctx.postStatus(topicSession, `⚠️ Could not verify CI status: <code>${escapeHtml(errMsg.slice(0, 200))}</code>`)
         return
       }
     }
@@ -586,14 +550,11 @@ export class CommandHandler {
       })
     } catch (err) {
       const errMsg = String((err as Error).message ?? "")
-      await this.ctx.telegram.sendMessage(
-        `⚠️ Failed to merge PR: <code>${escapeHtml(errMsg.slice(0, 300))}</code>`,
-        threadId,
-      )
+      await this.ctx.postStatus(topicSession, `⚠️ Failed to merge PR: <code>${escapeHtml(errMsg.slice(0, 300))}</code>`)
       return
     }
 
-    await this.ctx.telegram.sendMessage(`✅ Merged and closed: ${prUrl}`, threadId)
+    await this.ctx.postStatus(topicSession, `✅ Merged and closed: ${prUrl}`)
     log.info({ slug: topicSession.slug, threadId, prUrl }, "/done — merged PR")
 
     await this.ctx.closeChildSessions(topicSession)
