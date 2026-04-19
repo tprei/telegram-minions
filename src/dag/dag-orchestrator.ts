@@ -289,7 +289,7 @@ export class DagOrchestrator {
       repoUrl: parent.repoUrl,
       cwd,
       slug,
-      conversation: [{ role: "user", text: task }],
+      conversation: [],
       pendingFeedback: [],
       mode: "task",
       lastActivityAt: Date.now(),
@@ -302,6 +302,7 @@ export class DagOrchestrator {
     }
 
     this.ctx.topicSessions.set(threadId, childSession)
+    this.ctx.pushToConversation(childSession, { role: "user", text: task })
     this.ctx.broadcastSession(childSession, "session_created")
 
     await this.ctx.postStatus(
@@ -845,7 +846,7 @@ export class DagOrchestrator {
       repoUrl: parent.repoUrl,
       cwd,
       slug,
-      conversation: [{ role: "user", text: task }],
+      conversation: [],
       pendingFeedback: [],
       mode: "dag-review",
       lastActivityAt: Date.now(),
@@ -857,6 +858,7 @@ export class DagOrchestrator {
     }
 
     this.ctx.topicSessions.set(threadId, childSession)
+    this.ctx.pushToConversation(childSession, { role: "user", text: task })
     this.ctx.broadcastSession(childSession, "session_created")
 
     await this.ctx.postStatus(parent, formatDagReviewChildStarting(slug, node.title, prNumber ? parseInt(prNumber, 10) : 0))
