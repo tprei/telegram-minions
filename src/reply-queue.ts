@@ -2,6 +2,7 @@ import fs from "node:fs/promises"
 import path from "node:path"
 import { loggers } from "./logger.js"
 import { captureException } from "./sentry.js"
+import { isErrnoException } from "./errors.js"
 
 const QUEUE_DIR = ".minion/reply-queue"
 const log = loggers.replyQueue
@@ -35,7 +36,7 @@ export class ReplyQueue {
       try {
         entries = await fs.readdir(this.queueDir)
       } catch (err) {
-        if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+        if (isErrnoException(err) && err.code === "ENOENT") {
           entries = []
         } else {
           throw err
@@ -79,7 +80,7 @@ export class ReplyQueue {
     try {
       entries = await fs.readdir(this.queueDir)
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === "ENOENT") return []
+      if (isErrnoException(err) && err.code === "ENOENT") return []
       throw err
     }
 
@@ -121,7 +122,7 @@ export class ReplyQueue {
       await fs.rename(tmp, filePath)
       log.debug({ id }, "reply marked delivered")
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      if (isErrnoException(err) && err.code === "ENOENT") {
         log.warn({ id }, "reply file not found for markDelivered")
         return
       }
@@ -134,7 +135,7 @@ export class ReplyQueue {
     try {
       entries = await fs.readdir(this.queueDir)
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === "ENOENT") return 0
+      if (isErrnoException(err) && err.code === "ENOENT") return 0
       throw err
     }
 
@@ -144,7 +145,7 @@ export class ReplyQueue {
         await fs.unlink(path.join(this.queueDir, file))
         removed++
       } catch (err) {
-        if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+        if (!isErrnoException(err) || err.code !== "ENOENT") {
           log.warn({ err, file }, "failed to remove reply file")
         }
       }
@@ -162,7 +163,7 @@ export class ReplyQueue {
           await fs.unlink(path.join(this.queueDir, `${reply.id}.json`))
           removed++
         } catch (err) {
-          if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+          if (!isErrnoException(err) || err.code !== "ENOENT") {
             log.warn({ err, id: reply.id }, "failed to remove delivered reply")
           }
         }
