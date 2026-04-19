@@ -222,3 +222,8 @@ export function isThreadNotFoundError(error: unknown): error is TelegramHttpErro
     error.responseText.includes("message thread not found")
   )
 }
+
+/** Check if an error is a Node.js errno exception (has optional code/errno/path/syscall). */
+export function isErrnoException(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && "code" in error
+}
