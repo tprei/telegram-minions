@@ -408,7 +408,7 @@ export class LandingManager {
     for (const childId of topicSession.childThreadIds) {
       const child = this.ctx.topicSessions.get(childId)
       if (child) {
-        const prUrl = this.ctx.extractPRFromConversation(child)
+        const prUrl = child.prUrl ?? this.ctx.extractPRFromConversation(child)
         if (prUrl) {
           prUrls.push({ title: child.splitLabel ?? child.slug, prUrl })
         }

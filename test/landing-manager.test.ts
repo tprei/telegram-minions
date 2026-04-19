@@ -207,6 +207,28 @@ describe("LandingManager", () => {
       )
     })
 
+    it("uses stored child.prUrl when conversation lacks a URL", async () => {
+      const ctx = createMockContext({
+        extractPRFromConversation: () => null,
+      })
+      const child = makeTopicSession({
+        threadId: 201,
+        slug: "child-1",
+        prUrl: "https://github.com/org/repo/pull/7",
+      })
+      ctx.topicSessions.set(201, child)
+
+      const manager = new LandingManager(ctx)
+      const session = makeTopicSession({ childThreadIds: [201] })
+
+      await manager.handleLandCommand(session)
+
+      expect(ctx.telegram.sendMessage).toHaveBeenCalledWith(
+        expect.stringContaining("Landing"),
+        100,
+      )
+    })
+
     it("skips children not found in topicSessions", async () => {
       const ctx = createMockContext()
 
