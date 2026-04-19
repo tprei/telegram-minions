@@ -8,6 +8,7 @@ import {
   validateSentryConfig,
   validateApiServerConfig,
   validateProviderProfile,
+  validateTelegramQueueConfig,
   validateConfigOrThrow,
 } from "../../src/config/config-validator.js"
 
@@ -139,6 +140,66 @@ describe("validateProviderProfile", () => {
     const r = validateProviderProfile({ id: "p1", name: "P", baseUrl: "ftp://host" })
     expect(r.valid).toBe(false)
     expect(r.errors[0].message).toContain("http://")
+  })
+})
+
+describe("validateTelegramQueueConfig", () => {
+  it("accepts valid config with zero interval", () => {
+    expect(validateTelegramQueueConfig({ minSendIntervalMs: 0 }).valid).toBe(true)
+  })
+
+  it("accepts valid config with positive interval", () => {
+    expect(validateTelegramQueueConfig({ minSendIntervalMs: 1500 }).valid).toBe(true)
+  })
+
+  it("rejects null config", () => {
+    const r = validateTelegramQueueConfig(null)
+    expect(r.valid).toBe(false)
+    expect(r.errors[0].path).toBe("telegramQueue")
+    expect(r.errors[0].message).toContain("expected object")
+  })
+
+  it("rejects non-object config", () => {
+    const r = validateTelegramQueueConfig("not an object")
+    expect(r.valid).toBe(false)
+    expect(r.errors[0].path).toBe("telegramQueue")
+  })
+
+  it("rejects missing minSendIntervalMs", () => {
+    const r = validateTelegramQueueConfig({})
+    expect(r.valid).toBe(false)
+    expect(r.errors[0].path).toBe("telegramQueue.minSendIntervalMs")
+  })
+
+  it("rejects non-number minSendIntervalMs", () => {
+    const r = validateTelegramQueueConfig({ minSendIntervalMs: "1000" })
+    expect(r.valid).toBe(false)
+    expect(r.errors[0].path).toBe("telegramQueue.minSendIntervalMs")
+    expect(r.errors[0].message).toContain("expected number")
+  })
+
+  it("rejects negative minSendIntervalMs", () => {
+    const r = validateTelegramQueueConfig({ minSendIntervalMs: -1 })
+    expect(r.valid).toBe(false)
+    expect(r.errors[0].path).toBe("telegramQueue.minSendIntervalMs")
+    expect(r.errors[0].message).toContain(">= 0")
+  })
+
+  it("rejects NaN minSendIntervalMs", () => {
+    const r = validateTelegramQueueConfig({ minSendIntervalMs: NaN })
+    expect(r.valid).toBe(false)
+    expect(r.errors[0].path).toBe("telegramQueue.minSendIntervalMs")
+  })
+
+  it("uses custom path prefix in error messages", () => {
+    const r = validateTelegramQueueConfig({ minSendIntervalMs: -5 }, "custom.queue")
+    expect(r.valid).toBe(false)
+    expect(r.errors[0].path).toBe("custom.queue.minSendIntervalMs")
+  })
+
+  it("returns empty errors array when valid", () => {
+    const r = validateTelegramQueueConfig({ minSendIntervalMs: 2000 })
+    expect(r.errors).toEqual([])
   })
 })
 
