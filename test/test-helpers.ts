@@ -269,7 +269,6 @@ export function createMockContext(overrides: Partial<EngineContext> = {}): Engin
     observer: makeMockObserver(),
     stats: makeMockStats(),
     profileStore: makeMockProfileStore(),
-    broadcaster: undefined,
     sessions: new Map(),
     topicSessions: new Map(),
     dags: new Map(),
@@ -294,6 +293,8 @@ export function createMockContext(overrides: Partial<EngineContext> = {}): Engin
     mergeUpstreamBranches: vi.fn((): MergeResult => ({ ok: true, conflictFiles: [] })),
     downloadPhotos: vi.fn(async () => []),
     pushToConversation: vi.fn(),
+    postStatus: vi.fn(async () => ({ ok: true, messageId: null })),
+    handleDeadThread: vi.fn(),
     extractPRFromConversation: vi.fn(() => null),
     persistTopicSessions: vi.fn(async () => {}),
     persistDags: vi.fn(async () => {}),
@@ -323,6 +324,15 @@ export function createMockContext(overrides: Partial<EngineContext> = {}): Engin
     spawnDagChild: vi.fn(async () => null),
     ...overrides,
   }
+  // Mirror real engine semantics: postStatus forwards HTML to whichever
+  // telegram mock ended up on ctx (after overrides are applied) so existing
+  // test assertions on `ctx.telegram.sendMessage` keep working for
+  // orchestrator code that has been migrated to postStatus.
+  const originalPostStatus = ctx.postStatus
+  ctx.postStatus = vi.fn(async (topicSession, html, opts) => {
+    await ctx.telegram.sendMessage(html, topicSession.threadId)
+    return originalPostStatus(topicSession, html, opts)
+  })
   return ctx
 }
 

@@ -52,10 +52,7 @@ export class ShipPipeline {
   }
 
   private async shipAdvanceToPlanning(topicSession: TopicSession): Promise<void> {
-    await this.ctx.telegram.sendMessage(
-      formatShipPhaseAdvance(topicSession.slug, "think", "plan"),
-      topicSession.threadId,
-    )
+    await this.ctx.postStatus(topicSession, formatShipPhaseAdvance(topicSession.slug, "think", "plan"))
 
     const DAG_ASSISTANT_CHARS = 8000
     const researchText = buildConversationText(topicSession.conversation, undefined, DAG_ASSISTANT_CHARS)
@@ -83,35 +80,23 @@ export class ShipPipeline {
   private async shipTryJudge(topicSession: TopicSession): Promise<void> {
     topicSession.autoAdvance!.phase = "judge"
 
-    await this.ctx.telegram.sendMessage(
-      formatShipPhaseAdvance(topicSession.slug, "plan", "judge"),
-      topicSession.threadId,
-    )
+    await this.ctx.postStatus(topicSession, formatShipPhaseAdvance(topicSession.slug, "plan", "judge"))
 
     try {
       const ran = await this.judgeOrchestrator.tryJudgeArena(topicSession)
       if (!ran) {
-        await this.ctx.telegram.sendMessage(
-          `No competing design options detected — skipping judge arena.`,
-          topicSession.threadId,
-        )
+        await this.ctx.postStatus(topicSession, `No competing design options detected — skipping judge arena.`)
       }
     } catch (err) {
       log.warn({ err, slug: topicSession.slug }, "judge arena failed, continuing to DAG")
-      await this.ctx.telegram.sendMessage(
-        `Judge arena encountered an error — skipping to DAG.`,
-        topicSession.threadId,
-      )
+      await this.ctx.postStatus(topicSession, `Judge arena encountered an error — skipping to DAG.`)
     }
 
     await this.shipAdvanceToDag(topicSession)
   }
 
   async shipAdvanceToDag(topicSession: TopicSession): Promise<void> {
-    await this.ctx.telegram.sendMessage(
-      formatShipPhaseAdvance(topicSession.slug, "judge", "dag"),
-      topicSession.threadId,
-    )
+    await this.ctx.postStatus(topicSession, formatShipPhaseAdvance(topicSession.slug, "judge", "dag"))
 
     topicSession.autoAdvance!.phase = "dag"
 
@@ -133,20 +118,14 @@ export class ShipPipeline {
 
     if (result.error === "system") {
       topicSession.autoAdvance!.phase = "plan"
-      await this.ctx.telegram.sendMessage(
-        `⚠️ DAG extraction failed — <code>${result.errorMessage ?? "Unknown error"}</code>\n\nYou can retry with <code>/dag</code>, or fall back to <code>/execute</code> or <code>/split</code>.`,
-        topicSession.threadId,
-      )
+      await this.ctx.postStatus(topicSession, `⚠️ DAG extraction failed — <code>${result.errorMessage ?? "Unknown error"}</code>\n\nYou can retry with <code>/dag</code>, or fall back to <code>/execute</code> or <code>/split</code>.`)
       await this.ctx.updateTopicTitle(topicSession, "⚠️")
       return
     }
 
     if (result.items.length === 0) {
       log.warn({ slug: topicSession.slug }, "DAG extraction yielded 0 items, retrying with enriched prompt")
-      await this.ctx.telegram.sendMessage(
-        `⚠️ No work items extracted — retrying with enriched prompt…`,
-        topicSession.threadId,
-      )
+      await this.ctx.postStatus(topicSession, `⚠️ No work items extracted — retrying with enriched prompt…`)
 
       const retryDirective = [
         "The previous extraction returned zero items. Re-read the conversation carefully.",
@@ -161,10 +140,7 @@ export class ShipPipeline {
       if (retryResult.items.length === 0) {
         log.warn({ slug: topicSession.slug }, "DAG extraction retry also yielded 0 items")
         topicSession.autoAdvance!.phase = "plan"
-        await this.ctx.telegram.sendMessage(
-          `⚠️ Still no work items after retry.\n\nYou can:\n• <code>/dag</code> — try again\n• <code>/execute</code> — run as a single task\n• <code>/split</code> — extract parallel items\n• <code>/close</code> — cancel`,
-          topicSession.threadId,
-        )
+        await this.ctx.postStatus(topicSession, `⚠️ Still no work items after retry.\n\nYou can:\n• <code>/dag</code> — try again\n• <code>/execute</code> — run as a single task\n• <code>/split</code> — extract parallel items\n• <code>/close</code> — cancel`)
         return
       }
 
@@ -178,10 +154,7 @@ export class ShipPipeline {
   }
 
   async shipAdvanceToVerification(topicSession: TopicSession, graph: DagGraph): Promise<void> {
-    await this.ctx.telegram.sendMessage(
-      formatShipPhaseAdvance(topicSession.slug, "dag", "verify"),
-      topicSession.threadId,
-    )
+    await this.ctx.postStatus(topicSession, formatShipPhaseAdvance(topicSession.slug, "dag", "verify"))
 
     topicSession.autoAdvance!.phase = "verify"
 
@@ -268,10 +241,7 @@ export class ShipPipeline {
               nodeResults.set(node.id, false)
             }
 
-            this.ctx.telegram.sendMessage(
-              `${result.passed ? "✅" : "❌"} Verification ${result.passed ? "passed" : "failed"}: <b>${esc(node.title)}</b>`,
-              topicSession.threadId,
-            ).catch(() => {})
+            this.ctx.postStatus(topicSession, `${result.passed ? "✅" : "❌"} Verification ${result.passed ? "passed" : "failed"}: <b>${esc(node.title)}</b>`).catch(() => {})
 
             resolve()
           },
@@ -326,18 +296,12 @@ export class ShipPipeline {
     const failed = vs ? vs.rounds.flatMap((r) => r.checks).filter((c) => c.status === "failed").length : 0
     const total = passed + failed
 
-    await this.ctx.telegram.sendMessage(
-      formatShipComplete(topicSession.slug, passed, failed, total),
-      topicSession.threadId,
-    )
+    await this.ctx.postStatus(topicSession, formatShipComplete(topicSession.slug, passed, failed, total))
 
     if (topicSession.autoAdvance!.autoLand && failed === 0 && topicSession.dagId) {
       await this.ctx.handleLandCommand(topicSession)
     } else if (failed === 0 && topicSession.dagId) {
-      await this.ctx.telegram.sendMessage(
-        `Use <code>/land</code> to merge PRs, or <code>/close</code> to clean up.`,
-        topicSession.threadId,
-      )
+      await this.ctx.postStatus(topicSession, `Use <code>/land</code> to merge PRs, or <code>/close</code> to clean up.`)
     }
 
     await this.ctx.updateTopicTitle(topicSession, failed === 0 ? "✅" : "⚠️")

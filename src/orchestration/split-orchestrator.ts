@@ -20,10 +20,7 @@ export class SplitOrchestrator {
 
   async handleSplitCommand(topicSession: TopicSession, directive?: string): Promise<void> {
     if (topicSession.pipelineAdvancing) {
-      await this.ctx.telegram.sendMessage(
-        `⏳ Pipeline is advancing to the next phase. Wait for it to finish, or use <code>/close</code> to cancel.`,
-        topicSession.threadId,
-      )
+      await this.ctx.postStatus(topicSession, `⏳ Pipeline is advancing to the next phase. Wait for it to finish, or use <code>/close</code> to cancel.`)
       return
     }
 
@@ -34,10 +31,7 @@ export class SplitOrchestrator {
       topicSession.activeSessionId = undefined
     }
 
-    await this.ctx.telegram.sendMessage(
-      formatSplitAnalyzing(topicSession.slug),
-      topicSession.threadId,
-    )
+    await this.ctx.postStatus(topicSession, formatSplitAnalyzing(topicSession.slug))
 
     const GRACE_PERIOD_MS = 2000
     await new Promise((resolve) => setTimeout(resolve, GRACE_PERIOD_MS))
@@ -45,30 +39,21 @@ export class SplitOrchestrator {
     const result = await extractSplitItems(topicSession.conversation, directive)
 
     if (result.error === "system") {
-      await this.ctx.telegram.sendMessage(
-        `⚠️ <b>System error</b> during extraction: <code>${result.errorMessage ?? "Unknown error"}</code>\n\n` +
+      await this.ctx.postStatus(topicSession, `⚠️ <b>System error</b> during extraction: <code>${result.errorMessage ?? "Unknown error"}</code>\n\n` +
         `This is likely a transient resource issue. Try <code>/split</code> again in a few seconds, ` +
-        `or use <code>/execute</code> to proceed with a single task.`,
-        topicSession.threadId,
-      )
+        `or use <code>/execute</code> to proceed with a single task.`)
       return
     }
 
     if (result.items.length === 0) {
-      await this.ctx.telegram.sendMessage(
-        `⚠️ Could not extract discrete work items from the conversation. Try <code>/execute</code> instead.`,
-        topicSession.threadId,
-      )
+      await this.ctx.postStatus(topicSession, `⚠️ Could not extract discrete work items from the conversation. Try <code>/execute</code> instead.`)
       return
     }
 
     const items = result.items
 
     if (items.length === 1) {
-      await this.ctx.telegram.sendMessage(
-        `Only 1 item found — using <code>/execute</code> instead of splitting.`,
-        topicSession.threadId,
-      )
+      await this.ctx.postStatus(topicSession, `Only 1 item found — using <code>/execute</code> instead of splitting.`)
       await this.ctx.handleExecuteCommand(topicSession, items[0].description)
       return
     }
@@ -106,23 +91,14 @@ export class SplitOrchestrator {
     }
 
     if (childSummaries.length === 0) {
-      await this.ctx.telegram.sendMessage(
-        `❌ Failed to spawn any sub-tasks. Try <code>/execute</code> instead.`,
-        topicSession.threadId,
-      )
+      await this.ctx.postStatus(topicSession, `❌ Failed to spawn any sub-tasks. Try <code>/execute</code> instead.`)
       return
     }
     if (toQueue.length > 0) {
-      await this.ctx.telegram.sendMessage(
-        `⏳ Spawned ${childSummaries.length}/${items.length} items — ${toQueue.length} queued, will start as slots free up.`,
-        topicSession.threadId,
-      )
+      await this.ctx.postStatus(topicSession, `⏳ Spawned ${childSummaries.length}/${items.length} items — ${toQueue.length} queued, will start as slots free up.`)
     }
 
-    await this.ctx.telegram.sendMessage(
-      formatSplitStart(topicSession.slug, childSummaries),
-      topicSession.threadId,
-    )
+    await this.ctx.postStatus(topicSession, formatSplitStart(topicSession.slug, childSummaries))
 
     await this.ctx.updateTopicTitle(topicSession, "🔀")
     await this.ctx.persistTopicSessions()
@@ -130,10 +106,7 @@ export class SplitOrchestrator {
 
   async handleStackCommand(topicSession: TopicSession, directive?: string): Promise<void> {
     if (topicSession.pipelineAdvancing) {
-      await this.ctx.telegram.sendMessage(
-        `⏳ Pipeline is advancing to the next phase. Wait for it to finish, or use <code>/close</code> to cancel.`,
-        topicSession.threadId,
-      )
+      await this.ctx.postStatus(topicSession, `⏳ Pipeline is advancing to the next phase. Wait for it to finish, or use <code>/close</code> to cancel.`)
       return
     }
 
@@ -144,10 +117,7 @@ export class SplitOrchestrator {
       topicSession.activeSessionId = undefined
     }
 
-    await this.ctx.telegram.sendMessage(
-      formatStackAnalyzing(topicSession.slug),
-      topicSession.threadId,
-    )
+    await this.ctx.postStatus(topicSession, formatStackAnalyzing(topicSession.slug))
 
     const GRACE_PERIOD_MS = 2000
     await new Promise((resolve) => setTimeout(resolve, GRACE_PERIOD_MS))
@@ -156,27 +126,18 @@ export class SplitOrchestrator {
     const result = await extractStackItems(topicSession.conversation, directive, profile)
 
     if (result.error === "system") {
-      await this.ctx.telegram.sendMessage(
-        `⚠️ <b>System error</b> during extraction: <code>${result.errorMessage ?? "Unknown error"}</code>\n\n` +
-        `Try <code>/stack</code> again, or use <code>/execute</code> for a single task.`,
-        topicSession.threadId,
-      )
+      await this.ctx.postStatus(topicSession, `⚠️ <b>System error</b> during extraction: <code>${result.errorMessage ?? "Unknown error"}</code>\n\n` +
+        `Try <code>/stack</code> again, or use <code>/execute</code> for a single task.`)
       return
     }
 
     if (result.items.length === 0) {
-      await this.ctx.telegram.sendMessage(
-        `⚠️ Could not extract sequential work items. Try <code>/execute</code> instead.`,
-        topicSession.threadId,
-      )
+      await this.ctx.postStatus(topicSession, `⚠️ Could not extract sequential work items. Try <code>/execute</code> instead.`)
       return
     }
 
     if (result.items.length === 1) {
-      await this.ctx.telegram.sendMessage(
-        `Only 1 item found — using <code>/execute</code> instead.`,
-        topicSession.threadId,
-      )
+      await this.ctx.postStatus(topicSession, `Only 1 item found — using <code>/execute</code> instead.`)
       await this.ctx.handleExecuteCommand(topicSession, result.items[0].description)
       return
     }
@@ -202,10 +163,7 @@ export class SplitOrchestrator {
 
     childSession.conversation = []
 
-    await this.ctx.telegram.sendMessage(
-      formatSplitChildComplete(childSession.slug, state, label, prUrl, childSession.threadId, this.ctx.config.telegram.chatId),
-      parent.threadId,
-    )
+    await this.ctx.postStatus(parent, formatSplitChildComplete(childSession.slug, state, label, prUrl, childSession.threadId, this.ctx.config.telegram.chatId))
 
     await this.ctx.updatePinnedSplitStatus(parent)
 
@@ -244,10 +202,7 @@ export class SplitOrchestrator {
         }
       }
 
-      await this.ctx.telegram.sendMessage(
-        formatSplitAllDone(succeeded, parent.childThreadIds.length),
-        parent.threadId,
-      )
+      await this.ctx.postStatus(parent, formatSplitAllDone(succeeded, parent.childThreadIds.length))
       await this.ctx.updateTopicTitle(parent, succeeded === parent.childThreadIds.length ? "✅" : "⚠️")
 
       await this.ctx.runDeferredBabysit(parent.threadId)

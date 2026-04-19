@@ -229,19 +229,25 @@ describe("JudgeOrchestrator.handleJudgeCommand", () => {
   }
 
   function createMockContext(): EngineContext {
+    const telegram = {
+      sendMessage: vi.fn().mockResolvedValue({ ok: true, messageId: null }),
+    }
     return {
       config: {
         workspace: { maxSplitItems: 10, maxConcurrentSessions: 5 },
       },
-      telegram: {
-        sendMessage: vi.fn().mockResolvedValue(undefined),
-      },
+      telegram,
       sessions: new Map(),
       topicSessions: new Map(),
       dags: new Map(),
-    abortControllers: new Map(),
+      abortControllers: new Map(),
       profileStore: { get: vi.fn().mockReturnValue(undefined) },
       pushToConversation: vi.fn(),
+      postStatus: vi.fn(async (topicSession, html) => {
+        await telegram.sendMessage(html, topicSession.threadId)
+        return { ok: true, messageId: null }
+      }),
+      handleDeadThread: vi.fn(),
     } as unknown as EngineContext
   }
 

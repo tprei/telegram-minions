@@ -107,6 +107,22 @@ export interface EngineContext {
   /** Push a message to a topic session's conversation with auto-truncation. */
   pushToConversation(session: TopicSession, message: TopicMessage): void
 
+  /**
+   * Post a status message to a session — sends HTML to the registered chat
+   * platform (Telegram when configured), pushes a plain-text version into
+   * `TopicSession.conversation` so HTTP/PWA clients see the same narration,
+   * and broadcasts `session_updated` so SSE subscribers refresh.
+   *
+   * Use this everywhere orchestrator / DAG / ship / CI code was previously
+   * calling `ctx.telegram.sendMessage(...)` or `ctx.platform.chat.sendMessage(...)`
+   * directly — those sends were Telegram-only and invisible to the PWA.
+   */
+  postStatus(
+    topicSession: TopicSession,
+    html: string,
+    opts?: { plain?: string; replyToMessageId?: import("../provider/types.js").MessageId },
+  ): Promise<{ ok: boolean; messageId: import("../provider/types.js").MessageId | null }>
+
   /** Extract a PR URL from a session's conversation history. */
   extractPRFromConversation(topicSession: TopicSession): string | null
 

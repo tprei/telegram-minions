@@ -33,7 +33,8 @@ import { StatsTracker } from "../stats.js"
 import { truncateConversation } from "../conversation-limits.js"
 import { DEFAULT_CI_FIX_PROMPT } from "../config/prompts.js"
 import { loggers } from "../logger.js"
-import { SessionNotFoundError } from "../errors.js"
+import { SessionNotFoundError, isThreadNotFoundError } from "../errors.js"
+import { stripHtml } from "../telegram/strip-html.js"
 import {
   parseTaskArgs, buildReviewAllTask,
   buildRepoKeyboard, buildProfileKeyboard,
@@ -204,6 +205,7 @@ export class MinionEngine {
       mergeUpstreamBranches: (dir, branches) => this.mergeUpstreamBranches(dir, branches),
       downloadPhotos: (photos, cwd) => this.downloadPhotos(photos, cwd),
       pushToConversation: (s, m) => this.pushToConversation(s, m),
+      postStatus: (s, html, opts) => this.postStatus(s, html, opts),
       extractPRFromConversation: (ts) => this.extractPRFromConversation(ts),
       persistTopicSessions: (mark) => this.persistTopicSessions(mark),
       persistDags: () => this.persistDags(),
@@ -329,6 +331,34 @@ export class MinionEngine {
     }
   }
 
+  private async postStatus(
+    topicSession: TopicSession,
+    html: string,
+    opts?: { plain?: string; replyToMessageId?: import("../provider/types.js").MessageId },
+  ): Promise<{ ok: boolean; messageId: import("../provider/types.js").MessageId | null }> {
+    const plain = opts?.plain ?? stripHtml(html)
+    if (plain) {
+      this.pushToConversation(topicSession, { role: "assistant", text: plain })
+      this.broadcastSession(topicSession, "session_updated")
+      void this.engineEvents.emit({
+        type: "assistant_text",
+        sessionId: topicSession.slug,
+        text: plain,
+        timestamp: Date.now(),
+      })
+    }
+    try {
+      return await this.platform.chat.sendMessage(html, String(topicSession.threadId), opts?.replyToMessageId)
+    } catch (err) {
+      if (isThreadNotFoundError(err)) {
+        log.warn({ threadId: topicSession.threadId, slug: topicSession.slug }, "postStatus: thread not found")
+        this.handleDeadThread(topicSession, topicSession.threadId)
+        return { ok: false, messageId: null }
+      }
+      throw err
+    }
+  }
+
   /** Read-only handle on the engine's channel-agnostic event bus. Connectors subscribe here. */
   get events(): EngineEventBus {
     return this.engineEvents
@@ -416,9 +446,9 @@ export class MinionEngine {
 
       if (session.interruptedAt) {
         log.info({ slug: session.slug, threadId }, "session was interrupted, notifying")
-        this.platform.chat.sendMessage(
+        this.postStatus(
+          session,
           `⚡ This session was interrupted by a deploy. Send <b>/reply</b> to continue.`,
-          String(threadId),
         ).catch((err) => {
           log.warn({ err, slug: session.slug }, "failed to notify interrupted session")
         })
@@ -465,9 +495,9 @@ export class MinionEngine {
       await queue.markDelivered(reply.id)
     }
 
-    this.platform.chat.sendMessage(
+    this.postStatus(
+      topicSession,
       `🔄 Recovered ${pending.length} undelivered ${pending.length === 1 ? "reply" : "replies"} from before the restart.`,
-      String(topicSession.threadId),
     ).catch(() => {})
   }
 
@@ -499,9 +529,9 @@ export class MinionEngine {
 
         const parent = this.topicSessions.get(graph.parentThreadId)
         if (parent) {
-          this.platform.chat.sendMessage(
+          this.postStatus(
+            parent,
             `⚡ DAG recovered after restart — some nodes were transitioned. Use <code>/retry</code> to re-run failed nodes.\n\n${renderDagStatus(graph)}`,
-            String(graph.parentThreadId),
           ).catch((err) => {
             log.warn({ err, dagId }, "failed to send DAG recovery notification")
           })
@@ -1325,9 +1355,9 @@ export class MinionEngine {
     this.rebootstrapDependencies(topicSession.cwd)
     await this.tokenProvider?.refreshEnv()
     if (this.sessions.size >= this.config.workspace.maxConcurrentSessions) {
-      await this.platform.chat.sendMessage(
+      await this.postStatus(
+        topicSession,
         `⚠️ Max concurrent sessions reached. Try again later.`,
-        String(topicSession.threadId),
       )
       return false
     }
@@ -1382,10 +1412,7 @@ export class MinionEngine {
 
       if (event.type === "complete" && meta.totalTokens != null && meta.totalTokens > this.config.workspace.sessionTokenBudget) {
         log.warn({ sessionId, totalTokens: meta.totalTokens, budget: this.config.workspace.sessionTokenBudget }, "session exceeded token budget")
-        this.platform.chat.sendMessage(
-          formatBudgetWarning(topicSession.slug, meta.totalTokens, this.config.workspace.sessionTokenBudget),
-          String(topicSession.threadId),
-        ).catch(() => {})
+        this.postStatus(topicSession, formatBudgetWarning(topicSession.slug, meta.totalTokens, this.config.workspace.sessionTokenBudget)).catch(() => {})
         handle.interrupt()
       }
     }
@@ -1447,10 +1474,7 @@ export class MinionEngine {
       topicSession.lastState = "quota_exhausted"
       topicSession.quotaRetryCount = retryCount
       this.pinnedMessages.updateTopicTitle(topicSession, "💤").catch(() => {})
-      this.platform.chat.sendMessage(
-        formatQuotaExhausted(topicSession.slug, retryMax),
-        String(topicSession.threadId),
-      ).catch(() => {})
+      this.postStatus(topicSession, formatQuotaExhausted(topicSession.slug, retryMax)).catch(() => {})
       this.persistTopicSessions().catch(() => {})
       this.cleanBuildArtifacts(topicSession.cwd)
       return
@@ -1467,10 +1491,7 @@ export class MinionEngine {
     )
 
     this.pinnedMessages.updateTopicTitle(topicSession, "💤").catch(() => {})
-    this.platform.chat.sendMessage(
-      formatQuotaSleep(topicSession.slug, sleepMs, retryCount, retryMax),
-      String(topicSession.threadId),
-    ).catch(() => {})
+    this.postStatus(topicSession, formatQuotaSleep(topicSession.slug, sleepMs, retryCount, retryMax)).catch(() => {})
     this.persistTopicSessions().catch(() => {})
 
     this.scheduleQuotaResume(topicSession, sleepMs)
@@ -1516,10 +1537,7 @@ export class MinionEngine {
 
     log.info({ slug: topicSession.slug, retryCount }, "resuming after quota sleep")
 
-    await this.platform.chat.sendMessage(
-      formatQuotaResume(topicSession.slug, retryCount),
-      String(topicSession.threadId),
-    )
+    await this.postStatus(topicSession, formatQuotaResume(topicSession.slug, retryCount))
 
     // Re-spawn using the last conversation context
     const lastUserMsg = [...topicSession.conversation].reverse().find((m) => m.role === "user")
@@ -1647,18 +1665,12 @@ export class MinionEngine {
           text: fullFeedback,
           images: imagePaths.length > 0 ? imagePaths : undefined,
         })
-        await this.platform.chat.sendMessage(
-          `💬 Reply injected — agent will see it before its next action.`,
-          String(topicSession.threadId),
-        )
+        await this.postStatus(topicSession, `💬 Reply injected — agent will see it before its next action.`)
       } else {
         topicSession.pendingFeedback.push(fullFeedback)
         const position = topicSession.pendingFeedback.length
         const suffix = position === 1 ? "" : ` (#${position} in queue)`
-        await this.platform.chat.sendMessage(
-          `📝 Reply queued${suffix} — will be applied when the current iteration finishes.`,
-          String(topicSession.threadId),
-        )
+        await this.postStatus(topicSession, `📝 Reply queued${suffix} — will be applied when the current iteration finishes.`)
       }
       return
     }
@@ -1672,13 +1684,13 @@ export class MinionEngine {
     const iteration = Math.floor(topicSession.conversation.filter((m) => m.role === "user").length)
 
     if (topicSession.mode === "think") {
-      await this.platform.chat.sendMessage(formatThinkIteration(topicSession.slug, iteration), String(topicSession.threadId))
+      await this.postStatus(topicSession, formatThinkIteration(topicSession.slug, iteration))
     } else if (topicSession.mode === "review") {
-      await this.platform.chat.sendMessage(formatReviewIteration(topicSession.slug, iteration), String(topicSession.threadId))
+      await this.postStatus(topicSession, formatReviewIteration(topicSession.slug, iteration))
     } else if (topicSession.mode === "plan") {
-      await this.platform.chat.sendMessage(formatPlanIteration(topicSession.slug, iteration), String(topicSession.threadId))
+      await this.postStatus(topicSession, formatPlanIteration(topicSession.slug, iteration))
     } else {
-      await this.platform.chat.sendMessage(formatFollowUpIteration(topicSession.slug, iteration), String(topicSession.threadId))
+      await this.postStatus(topicSession, formatFollowUpIteration(topicSession.slug, iteration))
     }
 
     const contextTask = buildContextPrompt(topicSession)

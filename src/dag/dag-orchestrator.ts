@@ -126,10 +126,7 @@ export class DagOrchestrator {
     try {
       graph = buildDag(dagId, items, topicSession.threadId, topicSession.repo, topicSession.repoUrl)
     } catch (err) {
-      await this.ctx.telegram.sendMessage(
-        `❌ <b>Invalid DAG</b>: <code>${err instanceof Error ? err.message : String(err)}</code>`,
-        topicSession.threadId,
-      )
+      await this.ctx.postStatus(topicSession, `❌ <b>Invalid DAG</b>: <code>${err instanceof Error ? err.message : String(err)}</code>`)
       return
     }
 
@@ -147,14 +144,8 @@ export class DagOrchestrator {
       dependsOn: n.dependsOn,
     }))
 
-    await this.ctx.telegram.sendMessage(
-      formatDagStart(topicSession.slug, childSummaries, isStack),
-      topicSession.threadId,
-    )
-    await this.ctx.telegram.sendMessage(
-      renderDagStatus(graph, isStack),
-      topicSession.threadId,
-    )
+    await this.ctx.postStatus(topicSession, formatDagStart(topicSession.slug, childSummaries, isStack))
+    await this.ctx.postStatus(topicSession, renderDagStatus(graph, isStack))
     await this.ctx.updateTopicTitle(topicSession, isStack ? "📚" : "🔗")
 
     await this.scheduleDagNodes(topicSession, graph, isStack)
@@ -188,18 +179,12 @@ export class DagOrchestrator {
         const skipped = failNode(graph, node.id)
         node.error = "Failed to spawn child session"
 
-        await this.ctx.telegram.sendMessage(
-          formatDagNodeSkipped(node.title, "Failed to spawn session"),
-          topicSession.threadId,
-        )
+        await this.ctx.postStatus(topicSession, formatDagNodeSkipped(node.title, "Failed to spawn session"))
 
         if (skipped.length > 0) {
           for (const skippedId of skipped) {
             const skippedNode = graph.nodes.find((n) => n.id === skippedId)!
-            await this.ctx.telegram.sendMessage(
-              formatDagNodeSkipped(skippedNode.title, `upstream "${node.id}" failed`),
-              topicSession.threadId,
-            )
+            await this.ctx.postStatus(topicSession, formatDagNodeSkipped(skippedNode.title, `upstream "${node.id}" failed`))
           }
         }
       }
@@ -236,9 +221,9 @@ export class DagOrchestrator {
     } else if (upstreamBranches.length > 1) {
       const fanInBranch = await this.ctx.prepareFanInBranch(slug, parent.repoUrl!, upstreamBranches)
       if (!fanInBranch) {
-        await this.ctx.telegram.sendMessage(
+        await this.ctx.postStatus(
+          parent,
           `❌ Merge conflict detected when combining upstream branches for <b>${node.title}</b>.`,
-          threadId,
         )
         await this.ctx.telegram.deleteForumTopic(threadId)
         return null
@@ -259,9 +244,9 @@ export class DagOrchestrator {
       if (additionalBranches.length > 0) {
         const mergeResult = this.ctx.mergeUpstreamBranches(cwd, additionalBranches)
         if (!mergeResult.ok && mergeResult.conflictFiles.length === 0) {
-          await this.ctx.telegram.sendMessage(
+          await this.ctx.postStatus(
+            parent,
             `❌ Failed to merge upstream branches for <b>${node.title}</b>.`,
-            threadId,
           )
           await this.ctx.telegram.deleteForumTopic(threadId)
           await this.ctx.removeWorkspace({ cwd, repoUrl: parent.repoUrl }).catch(() => {})
@@ -269,9 +254,9 @@ export class DagOrchestrator {
         }
         conflictFiles = mergeResult.conflictFiles
         if (conflictFiles.length > 0) {
-          await this.ctx.telegram.sendMessage(
+          await this.ctx.postStatus(
+            parent,
             `⚠️ Merge conflicts in ${conflictFiles.length} file(s) for <b>${esc(node.title)}</b> — agent will resolve.`,
-            threadId,
           )
         }
       }
@@ -319,9 +304,9 @@ export class DagOrchestrator {
     this.ctx.topicSessions.set(threadId, childSession)
     this.ctx.broadcastSession(childSession, "session_created")
 
-    await this.ctx.telegram.sendMessage(
+    await this.ctx.postStatus(
+      childSession,
       formatDagNodeStarting(node.title, node.id, slug, threadId, this.ctx.config.telegram.chatId),
-      parent.threadId,
     )
 
     await this.ctx.spawnTopicAgent(childSession, task, { browserEnabled: false })
@@ -360,21 +345,15 @@ export class DagOrchestrator {
         node.error = "Session errored"
 
         const progress = dagProgress(graph)
-        await this.ctx.telegram.sendMessage(
-          formatDagNodeComplete(childSession.slug, state, node.title, prUrl, {
+        await this.ctx.postStatus(parent, formatDagNodeComplete(childSession.slug, state, node.title, prUrl, {
             done: progress.done,
             total: progress.total,
             running: progress.running,
-          }, childSession.threadId, this.ctx.config.telegram.chatId),
-          parent.threadId,
-        )
+          }, childSession.threadId, this.ctx.config.telegram.chatId))
 
         for (const skippedId of skipped) {
           const skippedNode = graph.nodes.find((n) => n.id === skippedId)!
-          await this.ctx.telegram.sendMessage(
-            formatDagNodeSkipped(skippedNode.title, `upstream "${node.id}" failed`),
-            parent.threadId,
-          )
+          await this.ctx.postStatus(parent, formatDagNodeSkipped(skippedNode.title, `upstream "${node.id}" failed`))
         }
       } else {
         let resolvedPrUrl = prUrl
@@ -385,10 +364,7 @@ export class DagOrchestrator {
         if (!resolvedPrUrl && !node.recoveryAttempted) {
           node.recoveryAttempted = true
 
-          await this.ctx.telegram.sendMessage(
-            `⚠️ <b>${esc(childSession.slug)}</b> completed without a PR — spawning recovery session…`,
-            parent.threadId,
-          )
+          await this.ctx.postStatus(parent, `⚠️ <b>${esc(childSession.slug)}</b> completed without a PR — spawning recovery session…`)
 
           const recoveryTask = [
             `## Recovery task`,
@@ -402,16 +378,10 @@ export class DagOrchestrator {
           if (!spawned) {
             const skipped = failNode(graph, node.id)
             node.error = "Recovery blocked: max sessions reached"
-            await this.ctx.telegram.sendMessage(
-              `❌ Recovery for <b>${esc(childSession.slug)}</b> blocked — max sessions reached.`,
-              parent.threadId,
-            )
+            await this.ctx.postStatus(parent, `❌ Recovery for <b>${esc(childSession.slug)}</b> blocked — max sessions reached.`)
             for (const skippedId of skipped) {
               const skippedNode = graph.nodes.find((n) => n.id === skippedId)!
-              await this.ctx.telegram.sendMessage(
-                formatDagNodeSkipped(skippedNode.title, `upstream "${node.id}" recovery blocked`),
-                parent.threadId,
-              )
+              await this.ctx.postStatus(parent, formatDagNodeSkipped(skippedNode.title, `upstream "${node.id}" recovery blocked`))
             }
           } else {
             await this.ctx.persistTopicSessions()
@@ -426,21 +396,15 @@ export class DagOrchestrator {
           node.error = "Completed without opening a PR"
 
           const progress = dagProgress(graph)
-          await this.ctx.telegram.sendMessage(
-            formatDagNodeComplete(childSession.slug, "failed", node.title, undefined, {
+          await this.ctx.postStatus(parent, formatDagNodeComplete(childSession.slug, "failed", node.title, undefined, {
               done: progress.done,
               total: progress.total,
               running: progress.running,
-            }, childSession.threadId, this.ctx.config.telegram.chatId),
-            parent.threadId,
-          )
+            }, childSession.threadId, this.ctx.config.telegram.chatId))
 
           for (const skippedId of skipped) {
             const skippedNode = graph.nodes.find((n) => n.id === skippedId)!
-            await this.ctx.telegram.sendMessage(
-              formatDagNodeSkipped(skippedNode.title, `upstream "${node.id}" completed without PR`),
-              parent.threadId,
-            )
+            await this.ctx.postStatus(parent, formatDagNodeSkipped(skippedNode.title, `upstream "${node.id}" completed without PR`))
           }
         } else {
           node.prUrl = resolvedPrUrl
@@ -452,19 +416,13 @@ export class DagOrchestrator {
             await this.ctx.persistDags()
 
             const progress = dagProgress(graph)
-            await this.ctx.telegram.sendMessage(
-              formatDagNodeComplete(childSession.slug, state, node.title, resolvedPrUrl, {
+            await this.ctx.postStatus(parent, formatDagNodeComplete(childSession.slug, state, node.title, resolvedPrUrl, {
                 done: progress.done,
                 total: progress.total,
                 running: progress.running,
-              }, childSession.threadId, this.ctx.config.telegram.chatId),
-              parent.threadId,
-            )
+              }, childSession.threadId, this.ctx.config.telegram.chatId))
 
-            await this.ctx.telegram.sendMessage(
-              formatDagCIWaiting(childSession.slug, node.title, resolvedPrUrl),
-              parent.threadId,
-            )
+            await this.ctx.postStatus(parent, formatDagCIWaiting(childSession.slug, node.title, resolvedPrUrl))
 
             const ciBabysitResult = await this.ctx.babysitDagChildCI(childSession, resolvedPrUrl)
 
@@ -474,32 +432,23 @@ export class DagOrchestrator {
             } else if (ciPolicy === "warn") {
               node.status = "done"
               await this.ctx.persistDags()
-              await this.ctx.telegram.sendMessage(
-                formatDagCIFailed(childSession.slug, node.title, resolvedPrUrl, ciPolicy),
-                parent.threadId,
-              )
+              await this.ctx.postStatus(parent, formatDagCIFailed(childSession.slug, node.title, resolvedPrUrl, ciPolicy))
             } else {
               node.status = "ci-failed"
               node.error = "CI checks failed"
               await this.ctx.persistDags()
-              await this.ctx.telegram.sendMessage(
-                formatDagCIFailed(childSession.slug, node.title, resolvedPrUrl, ciPolicy),
-                parent.threadId,
-              )
+              await this.ctx.postStatus(parent, formatDagCIFailed(childSession.slug, node.title, resolvedPrUrl, ciPolicy))
             }
           } else {
             node.status = "done"
             await this.ctx.persistDags()
 
             const progress = dagProgress(graph)
-            await this.ctx.telegram.sendMessage(
-              formatDagNodeComplete(childSession.slug, state, node.title, resolvedPrUrl, {
+            await this.ctx.postStatus(parent, formatDagNodeComplete(childSession.slug, state, node.title, resolvedPrUrl, {
                 done: progress.done,
                 total: progress.total,
                 running: progress.running,
-              }, childSession.threadId, this.ctx.config.telegram.chatId),
-              parent.threadId,
-            )
+              }, childSession.threadId, this.ctx.config.telegram.chatId))
           }
         }
       }
@@ -542,10 +491,7 @@ export class DagOrchestrator {
       try {
         const progress = dagProgress(graph)
         const totalFailed = progress.failed + progress.ciFailed
-        await this.ctx.telegram.sendMessage(
-          formatDagAllDone(progress.done, progress.total, totalFailed),
-          parent.threadId,
-        )
+        await this.ctx.postStatus(parent, formatDagAllDone(progress.done, progress.total, totalFailed))
 
         await this.ctx.runDeferredBabysit(parent.threadId)
 
@@ -553,19 +499,13 @@ export class DagOrchestrator {
           if (totalFailed > 0) {
             parent.autoAdvance.phase = "dag"
             await this.ctx.updateTopicTitle(parent, "⚠️")
-            await this.ctx.telegram.sendMessage(
-              `🚢 Ship pipeline halted: ${totalFailed} DAG node(s) failed. Use <code>/retry</code> to fix failed nodes.`,
-              parent.threadId,
-            )
+            await this.ctx.postStatus(parent, `🚢 Ship pipeline halted: ${totalFailed} DAG node(s) failed. Use <code>/retry</code> to fix failed nodes.`)
           } else {
             await this.ctx.shipAdvanceToVerification(parent, graph)
           }
         } else if (totalFailed > 0) {
           await this.ctx.updateTopicTitle(parent, "⚠️")
-          await this.ctx.telegram.sendMessage(
-            `Send <code>/retry</code> to retry failed nodes, <code>/force node-id</code> to advance past CI failures, or <code>/close</code> to finish.`,
-            parent.threadId,
-          )
+          await this.ctx.postStatus(parent, `Send <code>/retry</code> to retry failed nodes, <code>/force node-id</code> to advance past CI failures, or <code>/close</code> to finish.`)
         } else {
           await this.ctx.updateTopicTitle(parent, "✅")
           await this.ctx.closeChildSessions(parent)
@@ -646,39 +586,27 @@ export class DagOrchestrator {
     if (!topicSession.dagId && topicSession.autoAdvance) {
       const phase = topicSession.autoAdvance.phase
       if (phase === "think" || phase === "plan") {
-        await this.ctx.telegram.sendMessage(
-          `🔄 Retrying ship <b>${phase}</b> phase…`,
-          topicSession.threadId,
-        )
+        await this.ctx.postStatus(topicSession, `🔄 Retrying ship <b>${phase}</b> phase…`)
         const lastUserMessage = [...topicSession.conversation].reverse().find((m) => m.role === "user")
         const retryTask = lastUserMessage?.text ?? topicSession.autoAdvance.featureDescription
         await this.ctx.spawnTopicAgent(topicSession, retryTask)
         return
       }
       if (phase === "dag") {
-        await this.ctx.telegram.sendMessage(
-          `🔄 Retrying DAG extraction…`,
-          topicSession.threadId,
-        )
+        await this.ctx.postStatus(topicSession, `🔄 Retrying DAG extraction…`)
         await this.ctx.shipAdvanceToDag(topicSession)
         return
       }
     }
 
     if (!topicSession.dagId) {
-      await this.ctx.telegram.sendMessage(
-        "⚠️ /retry requires a ship pipeline or DAG parent thread.",
-        topicSession.threadId,
-      )
+      await this.ctx.postStatus(topicSession, "⚠️ /retry requires a ship pipeline or DAG parent thread.")
       return
     }
 
     const graph = this.ctx.dags.get(topicSession.dagId)
     if (!graph) {
-      await this.ctx.telegram.sendMessage(
-        "❌ DAG not found — it may have been lost. Use <code>/close</code> and re-create.",
-        topicSession.threadId,
-      )
+      await this.ctx.postStatus(topicSession, "❌ DAG not found — it may have been lost. Use <code>/close</code> and re-create.")
       return
     }
 
@@ -687,7 +615,7 @@ export class DagOrchestrator {
       : graph.nodes.filter((n) => n.status === "failed" || n.status === "ci-failed")
 
     if (failedNodes.length === 0) {
-      await this.ctx.telegram.sendMessage("No failed nodes to retry.", topicSession.threadId)
+      await this.ctx.postStatus(topicSession, "No failed nodes to retry.")
       return
     }
 
@@ -728,10 +656,7 @@ export class DagOrchestrator {
           continue
         }
 
-        await this.ctx.telegram.sendMessage(
-          `🔄 Retrying <b>${esc(node.title)}</b> (<code>${esc(node.id)}</code>)`,
-          topicSession.threadId,
-        )
+        await this.ctx.postStatus(topicSession, `🔄 Retrying <b>${esc(node.title)}</b> (<code>${esc(node.id)}</code>)`)
       } else {
         const isStack = !graph.nodes.some((n) => n.dependsOn.length > 1) &&
           graph.nodes.every((n, i) => i === 0 || n.dependsOn.length === 1)
@@ -740,10 +665,7 @@ export class DagOrchestrator {
     }
 
     if (deferred > 0) {
-      await this.ctx.telegram.sendMessage(
-        `⏳ ${deferred} node(s) deferred — will start when a session slot opens.`,
-        topicSession.threadId,
-      )
+      await this.ctx.postStatus(topicSession, `⏳ ${deferred} node(s) deferred — will start when a session slot opens.`)
     }
 
     await this.updateDagPRDescriptions(graph, topicSession.cwd)
@@ -753,16 +675,13 @@ export class DagOrchestrator {
 
   async handleForceCommand(topicSession: TopicSession, nodeId?: string): Promise<void> {
     if (!topicSession.dagId) {
-      await this.ctx.telegram.sendMessage("⚠️ /force only works in DAG parent threads.", topicSession.threadId)
+      await this.ctx.postStatus(topicSession, "⚠️ /force only works in DAG parent threads.")
       return
     }
 
     const graph = this.ctx.dags.get(topicSession.dagId)
     if (!graph) {
-      await this.ctx.telegram.sendMessage(
-        "❌ DAG not found — it may have been lost. Use <code>/close</code> and re-create.",
-        topicSession.threadId,
-      )
+      await this.ctx.postStatus(topicSession, "❌ DAG not found — it may have been lost. Use <code>/close</code> and re-create.")
       return
     }
 
@@ -771,7 +690,7 @@ export class DagOrchestrator {
       : graph.nodes.filter((n) => n.status === "ci-failed")
 
     if (ciFailedNodes.length === 0) {
-      await this.ctx.telegram.sendMessage("No CI-failed nodes to force-advance.", topicSession.threadId)
+      await this.ctx.postStatus(topicSession, "No CI-failed nodes to force-advance.")
       return
     }
 
@@ -779,10 +698,7 @@ export class DagOrchestrator {
       node.status = "done"
       node.error = undefined
 
-      await this.ctx.telegram.sendMessage(
-        formatDagForceAdvance(node.title, node.id),
-        topicSession.threadId,
-      )
+      await this.ctx.postStatus(topicSession, formatDagForceAdvance(node.title, node.id))
 
       advanceDag(graph)
       if (readyNodes(graph).length > 0) {
@@ -803,19 +719,13 @@ export class DagOrchestrator {
 
   async handleReviewCommand(topicSession: TopicSession, directive?: string): Promise<void> {
     if (!topicSession.dagId) {
-      await this.ctx.telegram.sendMessage(
-        "⚠️ /review in a DAG thread requires an active DAG.",
-        topicSession.threadId,
-      )
+      await this.ctx.postStatus(topicSession, "⚠️ /review in a DAG thread requires an active DAG.")
       return
     }
 
     const graph = this.ctx.dags.get(topicSession.dagId)
     if (!graph) {
-      await this.ctx.telegram.sendMessage(
-        "❌ DAG not found — it may have been lost.",
-        topicSession.threadId,
-      )
+      await this.ctx.postStatus(topicSession, "❌ DAG not found — it may have been lost.")
       return
     }
 
@@ -830,7 +740,7 @@ export class DagOrchestrator {
       const parts: string[] = ["No PRs available to review."]
       if (running > 0) parts.push(`${running} node(s) still running.`)
       if (pending > 0) parts.push(`${pending} node(s) pending.`)
-      await this.ctx.telegram.sendMessage(parts.join(" "), topicSession.threadId)
+      await this.ctx.postStatus(topicSession, parts.join(" "))
       return
     }
 
@@ -840,18 +750,12 @@ export class DagOrchestrator {
       return child?.mode === "dag-review" && child.activeSessionId
     })
     if (existingReviewChildren.length > 0) {
-      await this.ctx.telegram.sendMessage(
-        `⚠️ A DAG review is already in progress (${existingReviewChildren.length} active reviewer(s)). Wait for it to finish or <code>/close</code> first.`,
-        topicSession.threadId,
-      )
+      await this.ctx.postStatus(topicSession, `⚠️ A DAG review is already in progress (${existingReviewChildren.length} active reviewer(s)). Wait for it to finish or <code>/close</code> first.`)
       return
     }
 
     const task = directive ?? `Review all ${reviewableNodes.length} DAG PRs`
-    await this.ctx.telegram.sendMessage(
-      formatDagReviewStart(topicSession.repo, topicSession.slug, task),
-      topicSession.threadId,
-    )
+    await this.ctx.postStatus(topicSession, formatDagReviewStart(topicSession.repo, topicSession.slug, task))
 
     if (!topicSession.childThreadIds) topicSession.childThreadIds = []
 
@@ -867,10 +771,7 @@ export class DagOrchestrator {
       const available = Math.min(dagSlots, globalSlots)
       if (available <= 0) {
         log.warn({ dagId: graph.id, nodeId: node.id }, "no session slots for DAG review child, skipping remaining")
-        await this.ctx.telegram.sendMessage(
-          `⏳ Session limit reached — reviewed ${spawned}/${reviewableNodes.length} PRs. Send <code>/review</code> again when slots free up.`,
-          topicSession.threadId,
-        )
+        await this.ctx.postStatus(topicSession, `⏳ Session limit reached — reviewed ${spawned}/${reviewableNodes.length} PRs. Send <code>/review</code> again when slots free up.`)
         break
       }
 
@@ -882,10 +783,7 @@ export class DagOrchestrator {
     }
 
     if (spawned === 0) {
-      await this.ctx.telegram.sendMessage(
-        "❌ Failed to spawn any review sessions.",
-        topicSession.threadId,
-      )
+      await this.ctx.postStatus(topicSession, "❌ Failed to spawn any review sessions.")
     }
 
     await this.ctx.persistTopicSessions()
@@ -960,10 +858,7 @@ export class DagOrchestrator {
     this.ctx.topicSessions.set(threadId, childSession)
     this.ctx.broadcastSession(childSession, "session_created")
 
-    await this.ctx.telegram.sendMessage(
-      formatDagReviewChildStarting(slug, node.title, prNumber ? parseInt(prNumber, 10) : 0),
-      parent.threadId,
-    )
+    await this.ctx.postStatus(parent, formatDagReviewChildStarting(slug, node.title, prNumber ? parseInt(prNumber, 10) : 0))
 
     await this.ctx.spawnTopicAgent(childSession, task, { browserEnabled: false }, DEFAULT_DAG_REVIEW_PROMPT)
     return threadId
@@ -986,10 +881,7 @@ export class DagOrchestrator {
     // Free conversation memory — review output is posted to GitHub, not needed here
     childSession.conversation = []
 
-    await this.ctx.telegram.sendMessage(
-      `📋 Review of <b>${esc(node.title)}</b> (${node.prUrl ? `<a href="${node.prUrl}">#${node.prUrl.match(/\/pull\/(\d+)/)?.[1] ?? ""}</a>` : "no PR"}) complete  ·  🏷 <code>${esc(childSession.slug)}</code>`,
-      parent.threadId,
-    )
+    await this.ctx.postStatus(parent, `📋 Review of <b>${esc(node.title)}</b> (${node.prUrl ? `<a href="${node.prUrl}">#${node.prUrl.match(/\/pull\/(\d+)/)?.[1] ?? ""}</a>` : "no PR"}) complete  ·  🏷 <code>${esc(childSession.slug)}</code>`)
 
     // Check if all review children are done
     const reviewChildren = (parent.childThreadIds ?? [])
@@ -999,10 +891,7 @@ export class DagOrchestrator {
     const allDone = reviewChildren.every((s) => !s.activeSessionId)
 
     if (allDone) {
-      await this.ctx.telegram.sendMessage(
-        formatDagReviewComplete(parent.slug),
-        parent.threadId,
-      )
+      await this.ctx.postStatus(parent, formatDagReviewComplete(parent.slug))
     }
 
     await this.ctx.persistTopicSessions()

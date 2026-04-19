@@ -96,7 +96,7 @@ export class JudgeOrchestrator {
     }
 
     // Send extraction status
-    await this.ctx.telegram.sendMessage(formatJudgeExtraction(slug), threadId)
+    await this.ctx.postStatus(topicSession, formatJudgeExtraction(slug))
 
     // Resolve provider profile
     const profile = topicSession.profileId
@@ -108,18 +108,12 @@ export class JudgeOrchestrator {
 
     if (extractResult.error) {
       log.warn({ slug, error: extractResult.error, message: extractResult.errorMessage }, "option extraction failed")
-      await this.ctx.telegram.sendMessage(
-        formatJudgeError(slug, extractResult.errorMessage ?? "Failed to extract options"),
-        threadId,
-      )
+      await this.ctx.postStatus(topicSession, formatJudgeError(slug, extractResult.errorMessage ?? "Failed to extract options"))
       return
     }
 
     if (extractResult.options.length < 2) {
-      await this.ctx.telegram.sendMessage(
-        formatJudgeError(slug, "Could not identify at least 2 distinct design options from the conversation. Try providing more context or a directive."),
-        threadId,
-      )
+      await this.ctx.postStatus(topicSession, formatJudgeError(slug, "Could not identify at least 2 distinct design options from the conversation. Try providing more context or a directive."))
       return
     }
 
@@ -127,10 +121,7 @@ export class JudgeOrchestrator {
     const question = directive ?? summarizeQuestion(conversation)
 
     // Show arena with options
-    await this.ctx.telegram.sendMessage(
-      formatJudgeArena(slug, question, options),
-      threadId,
-    )
+    await this.ctx.postStatus(topicSession, formatJudgeArena(slug, question, options))
 
     // Spawn advocates in parallel
     log.info({ slug, optionCount: options.length }, "spawning advocates")
@@ -140,18 +131,12 @@ export class JudgeOrchestrator {
     for (const result of advocateResults) {
       const option = options.find((o) => o.id === result.optionId)
       if (!option) continue
-      await this.ctx.telegram.sendMessage(
-        formatAdvocateArgument(result.optionId, option.title, result.argument, result.sources.length),
-        threadId,
-      )
+      await this.ctx.postStatus(topicSession, formatAdvocateArgument(result.optionId, option.title, result.argument, result.sources.length))
     }
 
     if (advocateResults.length === 0) {
       log.warn({ slug }, "all advocates failed")
-      await this.ctx.telegram.sendMessage(
-        formatJudgeError(slug, "All advocate agents failed to produce arguments. Try again."),
-        threadId,
-      )
+      await this.ctx.postStatus(topicSession, formatJudgeError(slug, "All advocate agents failed to produce arguments. Try again."))
       return
     }
 
@@ -161,10 +146,7 @@ export class JudgeOrchestrator {
 
     if (!decision) {
       log.warn({ slug }, "judge failed to produce verdict")
-      await this.ctx.telegram.sendMessage(
-        formatJudgeError(slug, "Judge agent failed to produce a verdict. Try again."),
-        threadId,
-      )
+      await this.ctx.postStatus(topicSession, formatJudgeError(slug, "Judge agent failed to produce a verdict. Try again."))
       return
     }
 
@@ -173,10 +155,7 @@ export class JudgeOrchestrator {
     const chosenTitle = chosenOption?.title ?? decision.chosenOptionId
 
     // Post verdict
-    await this.ctx.telegram.sendMessage(
-      formatJudgeVerdict(question, decision.chosenOptionId, chosenTitle, decision.reasoning),
-      threadId,
-    )
+    await this.ctx.postStatus(topicSession, formatJudgeVerdict(question, decision.chosenOptionId, chosenTitle, decision.reasoning))
 
     // Add verdict to conversation so the planning agent has it
     this.ctx.pushToConversation(topicSession, {
@@ -195,7 +174,7 @@ export class JudgeOrchestrator {
   }
 
   async tryJudgeArena(topicSession: TopicSession, directive?: string): Promise<boolean> {
-    const { slug, threadId, conversation } = topicSession
+    const { slug, conversation } = topicSession
 
     const profile = topicSession.profileId
       ? this.ctx.profileStore.get(topicSession.profileId)
@@ -211,10 +190,7 @@ export class JudgeOrchestrator {
     const options = extractResult.options
     const question = directive ?? summarizeQuestion(conversation)
 
-    await this.ctx.telegram.sendMessage(
-      formatJudgeArena(slug, question, options),
-      threadId,
-    )
+    await this.ctx.postStatus(topicSession, formatJudgeArena(slug, question, options))
 
     log.info({ slug, optionCount: options.length }, "spawning advocates")
     const advocateResults = await this.runAdvocates(options, conversation, question, profile)
@@ -222,10 +198,7 @@ export class JudgeOrchestrator {
     for (const result of advocateResults) {
       const option = options.find((o) => o.id === result.optionId)
       if (!option) continue
-      await this.ctx.telegram.sendMessage(
-        formatAdvocateArgument(result.optionId, option.title, result.argument, result.sources.length),
-        threadId,
-      )
+      await this.ctx.postStatus(topicSession, formatAdvocateArgument(result.optionId, option.title, result.argument, result.sources.length))
     }
 
     if (advocateResults.length === 0) {
@@ -244,10 +217,7 @@ export class JudgeOrchestrator {
     const chosenOption = options.find((o) => o.id === decision.chosenOptionId)
     const chosenTitle = chosenOption?.title ?? decision.chosenOptionId
 
-    await this.ctx.telegram.sendMessage(
-      formatJudgeVerdict(question, decision.chosenOptionId, chosenTitle, decision.reasoning),
-      threadId,
-    )
+    await this.ctx.postStatus(topicSession, formatJudgeVerdict(question, decision.chosenOptionId, chosenTitle, decision.reasoning))
 
     this.ctx.pushToConversation(topicSession, {
       role: "assistant",
