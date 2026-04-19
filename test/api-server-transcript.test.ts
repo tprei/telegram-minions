@@ -345,3 +345,385 @@ describe("StateBroadcaster transcript_event fan-out", () => {
     expect(listener).toHaveBeenCalledWith(event)
   })
 })
+
+describe("GET /api/sessions/:slug/transcript — additional coverage", () => {
+  let server: http.Server
+  let broadcaster: StateBroadcaster
+
+  beforeEach(() => {
+    broadcaster = new StateBroadcaster()
+  })
+
+  afterEach(() => {
+    server?.close()
+  })
+
+  it("returns an empty snapshot when the session exists but has no events yet", async () => {
+    const topicSessions = new Map<number, TopicSession>()
+    topicSessions.set(1, makeTopicSession())
+    const snapshot: TranscriptSnapshot = {
+      session: { sessionId: "bold-meadow", startedAt: 1_700_000_000_000 },
+      events: [],
+      highWaterMark: -1,
+    }
+    const dispatcher = makeDispatcher({
+      getTopicSessions: () => topicSessions,
+      getTranscript: vi.fn().mockReturnValue(snapshot),
+    })
+    server = createApiServer(dispatcher, {
+      port: 0,
+      uiDistPath: "/nonexistent",
+      broadcaster,
+    })
+    const port = await listen(server)
+
+    const res = await fetch(`http://localhost:${port}/api/sessions/bold-meadow/transcript`)
+    const body = await res.json()
+
+    expect(res.status).toBe(200)
+    expect(body.data.events).toEqual([])
+    expect(body.data.highWaterMark).toBe(-1)
+    expect(body.data.session.sessionId).toBe("bold-meadow")
+  })
+
+  it("treats after=-1 the same as omitting the query param", async () => {
+    const topicSessions = new Map<number, TopicSession>()
+    topicSessions.set(1, makeTopicSession())
+    const snapshot: TranscriptSnapshot = {
+      session: { sessionId: "bold-meadow", startedAt: 1_700_000_000_000 },
+      events: [makeEvent({ seq: 0, type: "turn_started" })],
+      highWaterMark: 0,
+    }
+    const getTranscript = vi.fn().mockReturnValue(snapshot)
+    const dispatcher = makeDispatcher({
+      getTopicSessions: () => topicSessions,
+      getTranscript,
+    })
+    server = createApiServer(dispatcher, {
+      port: 0,
+      uiDistPath: "/nonexistent",
+      broadcaster,
+    })
+    const port = await listen(server)
+
+    const res = await fetch(`http://localhost:${port}/api/sessions/bold-meadow/transcript?after=-1`)
+
+    expect(res.status).toBe(200)
+    expect(getTranscript).toHaveBeenCalledWith("bold-meadow", -1)
+  })
+
+  it("forwards session metadata (repo, mode, totals) from the snapshot", async () => {
+    const topicSessions = new Map<number, TopicSession>()
+    topicSessions.set(1, makeTopicSession())
+    const snapshot: TranscriptSnapshot = {
+      session: {
+        sessionId: "bold-meadow",
+        startedAt: 1_700_000_000_000,
+        repo: "org/repo",
+        mode: "task",
+        totalTokens: 1234,
+        totalCostUsd: 0.42,
+        numTurns: 3,
+        active: true,
+      },
+      events: [],
+      highWaterMark: -1,
+    }
+    const dispatcher = makeDispatcher({
+      getTopicSessions: () => topicSessions,
+      getTranscript: vi.fn().mockReturnValue(snapshot),
+    })
+    server = createApiServer(dispatcher, {
+      port: 0,
+      uiDistPath: "/nonexistent",
+      broadcaster,
+    })
+    const port = await listen(server)
+
+    const res = await fetch(`http://localhost:${port}/api/sessions/bold-meadow/transcript`)
+    const body = await res.json()
+
+    expect(res.status).toBe(200)
+    expect(body.data.session).toMatchObject({
+      sessionId: "bold-meadow",
+      repo: "org/repo",
+      mode: "task",
+      totalTokens: 1234,
+      totalCostUsd: 0.42,
+      numTurns: 3,
+      active: true,
+    })
+  })
+
+  it("rejects floating-point `after` values", async () => {
+    const topicSessions = new Map<number, TopicSession>()
+    topicSessions.set(1, makeTopicSession())
+    const getTranscript = vi.fn()
+    const dispatcher = makeDispatcher({
+      getTopicSessions: () => topicSessions,
+      getTranscript,
+    })
+    server = createApiServer(dispatcher, {
+      port: 0,
+      uiDistPath: "/nonexistent",
+      broadcaster,
+    })
+    const port = await listen(server)
+
+    const res = await fetch(`http://localhost:${port}/api/sessions/bold-meadow/transcript?after=1.5`)
+    const body = await res.json()
+
+    expect(res.status).toBe(400)
+    expect(body.error).toMatch(/integer/i)
+    expect(getTranscript).not.toHaveBeenCalled()
+  })
+
+  it("matches session slugs exactly — lookalike slugs still 404", async () => {
+    const topicSessions = new Map<number, TopicSession>()
+    topicSessions.set(1, makeTopicSession({ slug: "bold-meadow" }))
+    const dispatcher = makeDispatcher({
+      getTopicSessions: () => topicSessions,
+      getTranscript: vi.fn(),
+    })
+    server = createApiServer(dispatcher, {
+      port: 0,
+      uiDistPath: "/nonexistent",
+      broadcaster,
+    })
+    const port = await listen(server)
+
+    const res = await fetch(`http://localhost:${port}/api/sessions/bold-meadow-2/transcript`)
+    const body = await res.json()
+
+    expect(res.status).toBe(404)
+    expect(body.error).toBe("Session not found")
+    expect(dispatcher.getTranscript).not.toHaveBeenCalled()
+  })
+
+  it("returns 404 for unsupported HTTP methods on the transcript path", async () => {
+    const topicSessions = new Map<number, TopicSession>()
+    topicSessions.set(1, makeTopicSession())
+    const dispatcher = makeDispatcher({
+      getTopicSessions: () => topicSessions,
+      getTranscript: vi.fn(),
+    })
+    server = createApiServer(dispatcher, {
+      port: 0,
+      uiDistPath: "/nonexistent",
+      broadcaster,
+    })
+    const port = await listen(server)
+
+    const res = await fetch(`http://localhost:${port}/api/sessions/bold-meadow/transcript`, {
+      method: "POST",
+      body: "{}",
+      headers: { "Content-Type": "application/json" },
+    })
+
+    expect(res.status).toBe(404)
+    expect(dispatcher.getTranscript).not.toHaveBeenCalled()
+  })
+})
+
+describe("SSE transcript_event delivery", () => {
+  let server: http.Server
+  let broadcaster: StateBroadcaster
+
+  beforeEach(() => {
+    broadcaster = new StateBroadcaster()
+  })
+
+  afterEach(() => {
+    server?.close()
+  })
+
+  interface SseStream {
+    next(predicate: (frame: string) => boolean, timeoutMs?: number): Promise<string>
+    close: () => void
+  }
+
+  async function openSseStream(port: number): Promise<SseStream> {
+    const controller = new AbortController()
+    const res = await fetch(`http://localhost:${port}/api/events`, {
+      signal: controller.signal,
+    })
+    expect(res.status).toBe(200)
+    expect(res.headers.get("content-type")).toBe("text/event-stream")
+    const reader = res.body!.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ""
+    const pending: string[] = []
+
+    async function next(predicate: (frame: string) => boolean, timeoutMs = 2000): Promise<string> {
+      const start = Date.now()
+      while (true) {
+        while (pending.length > 0) {
+          const frame = pending.shift()!
+          if (predicate(frame)) return frame
+        }
+        if (Date.now() - start >= timeoutMs) {
+          throw new Error("timed out waiting for SSE event")
+        }
+        const { value, done } = await reader.read()
+        if (done) throw new Error("SSE stream closed before event arrived")
+        buffer += decoder.decode(value, { stream: true })
+        const frames = buffer.split("\n\n")
+        buffer = frames.pop() ?? ""
+        for (const frame of frames) {
+          if (frame.length > 0) pending.push(frame)
+        }
+      }
+    }
+
+    return {
+      next,
+      close: () => {
+        controller.abort()
+        reader.cancel().catch(() => undefined)
+      },
+    }
+  }
+
+  function parseDataPayload(frame: string): unknown {
+    const dataLines = frame
+      .split("\n")
+      .filter((line) => line.startsWith("data: "))
+      .map((line) => line.slice("data: ".length))
+    if (dataLines.length === 0) throw new Error(`no data lines in frame: ${frame}`)
+    return JSON.parse(dataLines.join("\n"))
+  }
+
+  it("delivers a broadcast transcript_event to an SSE subscriber over the wire", async () => {
+    const dispatcher = makeDispatcher({ getTranscript: vi.fn() })
+    server = createApiServer(dispatcher, {
+      port: 0,
+      uiDistPath: "/nonexistent",
+      broadcaster,
+    })
+    const port = await listen(server)
+
+    const stream = await openSseStream(port)
+    try {
+      const event: SseEvent = {
+        type: "transcript_event",
+        sessionId: "bold-meadow",
+        event: makeEvent({ seq: 7, type: "assistant_text" }),
+      }
+      // Broadcast after the subscriber is attached.
+      broadcaster.broadcast(event)
+
+      const frame = await stream.next((f) => f.includes("transcript_event"))
+      const payload = parseDataPayload(frame) as SseEvent
+
+      expect(payload.type).toBe("transcript_event")
+      if (payload.type !== "transcript_event") throw new Error("unreachable")
+      expect(payload.sessionId).toBe("bold-meadow")
+      expect(payload.event.seq).toBe(7)
+      expect(payload.event.type).toBe("assistant_text")
+    } finally {
+      stream.close()
+    }
+  })
+
+  it("delivers multiple transcript_events in broadcast order", async () => {
+    const dispatcher = makeDispatcher({ getTranscript: vi.fn() })
+    server = createApiServer(dispatcher, {
+      port: 0,
+      uiDistPath: "/nonexistent",
+      broadcaster,
+    })
+    const port = await listen(server)
+
+    const stream = await openSseStream(port)
+    try {
+      const e0 = makeEvent({ seq: 0, type: "turn_started" })
+      const e1 = makeEvent({ seq: 1, type: "user_message" })
+      const e2 = makeEvent({ seq: 2, type: "assistant_text" })
+      broadcaster.broadcast({ type: "transcript_event", sessionId: "bold-meadow", event: e0 })
+      broadcaster.broadcast({ type: "transcript_event", sessionId: "bold-meadow", event: e1 })
+      broadcaster.broadcast({ type: "transcript_event", sessionId: "bold-meadow", event: e2 })
+
+      const seqs: number[] = []
+      while (seqs.length < 3) {
+        const frame = await stream.next((f) => f.includes("transcript_event"))
+        const payload = parseDataPayload(frame) as SseEvent
+        if (payload.type !== "transcript_event") throw new Error("unexpected event type")
+        seqs.push(payload.event.seq)
+      }
+
+      expect(seqs).toEqual([0, 1, 2])
+    } finally {
+      stream.close()
+    }
+  })
+
+  it("fans out transcript_events for every session to every subscriber (client-side filtering)", async () => {
+    const dispatcher = makeDispatcher({ getTranscript: vi.fn() })
+    server = createApiServer(dispatcher, {
+      port: 0,
+      uiDistPath: "/nonexistent",
+      broadcaster,
+    })
+    const port = await listen(server)
+
+    const stream = await openSseStream(port)
+    try {
+      broadcaster.broadcast({
+        type: "transcript_event",
+        sessionId: "other-session",
+        event: { ...makeEvent({ seq: 0, type: "assistant_text" }), sessionId: "other-session" },
+      })
+      broadcaster.broadcast({
+        type: "transcript_event",
+        sessionId: "bold-meadow",
+        event: makeEvent({ seq: 1, type: "assistant_text" }),
+      })
+
+      const sessionIds: string[] = []
+      while (sessionIds.length < 2) {
+        const frame = await stream.next((f) => f.includes("transcript_event"))
+        const payload = parseDataPayload(frame) as SseEvent
+        if (payload.type !== "transcript_event") throw new Error("unexpected event type")
+        sessionIds.push(payload.sessionId)
+      }
+
+      expect(sessionIds).toEqual(["other-session", "bold-meadow"])
+    } finally {
+      stream.close()
+    }
+  })
+
+  it("interleaves transcript_event and session_updated on the same SSE stream", async () => {
+    const dispatcher = makeDispatcher({ getTranscript: vi.fn() })
+    server = createApiServer(dispatcher, {
+      port: 0,
+      uiDistPath: "/nonexistent",
+      broadcaster,
+    })
+    const port = await listen(server)
+
+    const stream = await openSseStream(port)
+    try {
+      const apiSession = topicSessionToApi(makeTopicSession(), undefined)
+      broadcaster.broadcast({ type: "session_updated", session: apiSession })
+      broadcaster.broadcast({
+        type: "transcript_event",
+        sessionId: "bold-meadow",
+        event: makeEvent({ seq: 0, type: "assistant_text" }),
+      })
+
+      const types: string[] = []
+      while (types.length < 2) {
+        const frame = await stream.next(
+          (f) => f.includes("session_updated") || f.includes("transcript_event"),
+        )
+        const payload = parseDataPayload(frame) as SseEvent
+        types.push(payload.type)
+      }
+
+      expect(types).toEqual(["session_updated", "transcript_event"])
+    } finally {
+      stream.close()
+    }
+  })
+})
