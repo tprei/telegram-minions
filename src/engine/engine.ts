@@ -1378,6 +1378,7 @@ export class MinionEngine {
 
     const onTextCapture = (_sid: string, text: string) => {
       this.pushToConversation(topicSession, { role: "assistant", text })
+      this.broadcastSession(topicSession, "session_updated")
     }
 
     const onActivityCapture = (_sid: string, activityText: string) => {
