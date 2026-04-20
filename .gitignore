@@ -3,6 +3,7 @@ dist/
 .env
 *.log
 session-log.json
+.minion-data/
 .minion-images/
 .home/
 .claude/settings.local.json

@@ -371,6 +371,7 @@ function requireAuth(req: http.IncomingMessage, res: http.ServerResponse, token?
   const url = new URL(req.url ?? "", "http://x")
   if (url.pathname === "/validate") return true
   if (url.pathname === "/api/version" && req.method === "GET") return true
+  if (url.pathname === "/api/health" && req.method === "GET") return true
 
   const authHeader = req.headers["authorization"]
   const bearer = authHeader?.startsWith("Bearer ") ? authHeader.slice("Bearer ".length) : undefined
@@ -935,6 +936,13 @@ async function handleApiRoute(
       await dispatcher.handleIncomingText(text, sessionId)
       res.writeHead(200, { "Content-Type": "application/json" })
       res.end(JSON.stringify({ data: { ok: true, sessionId: sessionId ?? null } }))
+      return
+    }
+
+    // GET /api/health — unauthenticated liveness probe for orchestration tools.
+    if (pathname === "/api/health" && req.method === "GET") {
+      res.writeHead(200, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ data: { status: "ok" } }))
       return
     }
 

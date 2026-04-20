@@ -16,10 +16,20 @@ export default defineConfig({
     },
   },
   server: {
-    port: 3000,
+    port: 5173,
     host: true,
+    proxy: {
+      '/api': {
+        target: process.env.MINION_API_URL ?? 'http://localhost:8080',
+        changeOrigin: true,
+      },
+      '/validate': {
+        target: process.env.MINION_API_URL ?? 'http://localhost:8080',
+        changeOrigin: true,
+      },
+    },
   },
   preview: {
-    port: 3000,
+    port: 5173,
   },
 })

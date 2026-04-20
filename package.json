@@ -23,6 +23,9 @@
   "scripts": {
     "start": "node dist/cli.js",
     "dev": "npx tsx src/cli.ts",
+    "dev:ui": "cd ui && npm run dev",
+    "dev:full": "node scripts/dev-full.mjs",
+    "doctor": "npx tsx src/cli.ts doctor",
     "build": "tsc && npm run build:ui",
     "build:ui": "cd ui && npm install && npm run build && cp -r dist ../assets/ui",
     "lint": "eslint src/",
