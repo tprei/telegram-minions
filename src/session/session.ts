@@ -53,6 +53,10 @@ type McpHttpServerConfig = {
 
 type McpConfigEntry = McpServerConfig | McpHttpServerConfig
 
+function isHttpMcp(server: McpConfigEntry): server is McpHttpServerConfig {
+  return "type" in server && server.type === "http"
+}
+
 export class SessionHandle implements SessionPort {
   private process: ChildProcess | null = null
   private state: SessionState = "spawning"
@@ -255,14 +259,13 @@ export class SessionHandle implements SessionPort {
 
     for (const [, server] of Object.entries(servers)) {
       // Skip HTTP MCPs - Goose doesn't support HTTP transport
-      if ("type" in server && server.type === "http") {
+      if (isHttpMcp(server)) {
         continue
       }
-      const stdioServer = server as McpServerConfig
-      const envPrefix = stdioServer.env
-        ? Object.entries(stdioServer.env).map(([k, v]) => `${k}=${v}`).join(" ") + " "
+      const envPrefix = server.env
+        ? Object.entries(server.env).map(([k, v]) => `${k}=${v}`).join(" ") + " "
         : ""
-      const cmdWithArgs = envPrefix + [stdioServer.command, ...stdioServer.args].join(" ")
+      const cmdWithArgs = envPrefix + [server.command, ...server.args].join(" ")
       args.push("--with-extension", cmdWithArgs)
     }
 
@@ -275,18 +278,17 @@ export class SessionHandle implements SessionPort {
 
     const mcpConfig: Record<string, unknown> = {}
     for (const [name, server] of Object.entries(servers)) {
-      if ("type" in server && server.type === "http") {
+      if (isHttpMcp(server)) {
         mcpConfig[name] = {
           type: "http",
           url: server.url,
           headers: server.headers,
         }
       } else {
-        const stdioServer = server as McpServerConfig
         mcpConfig[name] = {
-          command: stdioServer.command,
-          args: stdioServer.args,
-          env: stdioServer.env,
+          command: server.command,
+          args: server.args,
+          env: server.env,
         }
       }
     }
