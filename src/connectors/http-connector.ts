@@ -122,6 +122,24 @@ export class HttpConnector implements Connector {
       handleIncomingText: (text, sessionSlug) => engine.handleIncomingText(text, sessionSlug),
       createSession: (request) => engine.createSession(request),
       createSessionVariants: (request, count) => engine.createSessionVariants(request, count),
+      getTranscript: (slug, afterSeq) => {
+        const topicSession = [...engine.getTopicSessions().values()].find((s) => s.slug === slug)
+        if (!topicSession) return undefined
+        const events = engine.transcriptStore.getSince(slug, afterSeq)
+        const storeHwm = engine.transcriptStore.highWaterMark(slug)
+        return {
+          session: {
+            sessionId: slug,
+            topicName: slug,
+            repo: topicSession.repo,
+            mode: topicSession.mode,
+            startedAt: topicSession.lastActivityAt,
+            transcriptUrl: `/api/sessions/${encodeURIComponent(slug)}/transcript`,
+          },
+          events,
+          highWaterMark: storeHwm,
+        }
+      },
     }
 
     this.server = createApiServer(dispatcherApi, {
