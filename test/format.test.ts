@@ -66,7 +66,6 @@ import {
   formatLandSkipped,
   formatLandSummary,
   formatLandConflictResolution,
-  formatLandRestacking,
   formatLandPreflightFailed,
 } from "../src/telegram/format.js"
 import type { ClaudeUsageResponse } from "../src/claude-usage.js"
@@ -1978,21 +1977,6 @@ describe("formatPinnedDagStatus", () => {
       expect(result).toContain("Auth")
     })
   })
-
-  describe("formatLandRestacking", () => {
-    it("includes title and branch", () => {
-      const result = formatLandRestacking("Setup DB", "feat/db")
-      expect(result).toContain("Setup DB")
-      expect(result).toContain("feat/db")
-    })
-
-    it("escapes HTML in title and branch", () => {
-      const result = formatLandRestacking("<b>task</b>", "feat/<branch>")
-      expect(result).toContain("&lt;b&gt;task&lt;/b&gt;")
-      expect(result).toContain("feat/&lt;branch&gt;")
-    })
-  })
-
 
   describe("formatCheckList", () => {
     it("returns empty string for empty checks", () => {

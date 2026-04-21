@@ -1201,10 +1201,6 @@ export function formatLandConflictResolution(title: string, branch: string, reso
   return `⚠️ Could not resolve conflicts for <b>${esc(title)}</b> (<code>${esc(branch)}</code>)`
 }
 
-export function formatLandRestacking(title: string, branch: string): string {
-  return `🔄 Restacking <b>${esc(title)}</b> (<code>${esc(branch)}</code>)…`
-}
-
 export function formatDagCIWaiting(slug: string, nodeTitle: string, prUrl: string): string {
   return `🔄 <b>${esc(slug)}</b> waiting for CI: ${esc(nodeTitle)} — <a href="${esc(prUrl)}">PR</a>`
 }
