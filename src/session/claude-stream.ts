@@ -9,6 +9,7 @@ interface ClaudeContentBlock {
   thinking?: string
   signature?: string
   id?: string
+  tool_use_id?: string
   name?: string
   input?: Record<string, unknown>
   content?: unknown
@@ -214,7 +215,7 @@ export function translateClaudeEvents(raw: ClaudeStreamEvent): GooseStreamEvent[
         content: [
           {
             type: "toolResponse" as const,
-            id: block.id ?? "",
+            id: block.tool_use_id ?? block.id ?? "",
             parentToolUseId,
             toolResult: block.content ?? block.input ?? null,
           },

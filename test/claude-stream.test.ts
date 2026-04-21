@@ -516,6 +516,25 @@ describe("translateClaudeEvents", () => {
       .map((b) => (b as { id: string }).id)
     expect(ids).toEqual(["t1", "t2"])
   })
+
+  it("reads tool_use_id from Anthropic-shape tool_result blocks", () => {
+    const events = translateClaudeEvents({
+      type: "user",
+      message: {
+        role: "user",
+        content: [
+          { type: "tool_result", tool_use_id: "toolu_abc", content: "paired output" },
+        ],
+      },
+    })
+
+    expect(events).toHaveLength(1)
+    const ids = events
+      .flatMap((e) => (e.type === "message" ? e.message.content : []))
+      .filter((b) => b.type === "toolResponse")
+      .map((b) => (b as { id: string }).id)
+    expect(ids).toEqual(["toolu_abc"])
+  })
 })
 
 describe("translateClaudeEvent — thinking coverage", () => {
