@@ -29,6 +29,50 @@ interface ClaudeCredentials {
   }
 }
 
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function parseUsageTier(value: unknown): UsageTier | null {
+  if (!isObject(value)) return null
+  if (typeof value.utilization !== "number") return null
+  if (value.resets_at !== null && typeof value.resets_at !== "string") return null
+  return { utilization: value.utilization, resets_at: value.resets_at }
+}
+
+function parseExtraUsage(value: unknown): ClaudeUsageResponse["extra_usage"] {
+  if (value === null) return null
+  if (!isObject(value)) return null
+  if (typeof value.is_enabled !== "boolean") return null
+  if (value.monthly_limit !== null && typeof value.monthly_limit !== "number") return null
+  if (value.used_credits !== null && typeof value.used_credits !== "number") return null
+  if (value.utilization !== null && typeof value.utilization !== "number") return null
+  return {
+    is_enabled: value.is_enabled,
+    monthly_limit: value.monthly_limit,
+    used_credits: value.used_credits,
+    utilization: value.utilization,
+  }
+}
+
+function parseClaudeUsageResponse(value: unknown): ClaudeUsageResponse | null {
+  if (!isObject(value)) return null
+  const fiveHour = parseUsageTier(value.five_hour)
+  const sevenDay = parseUsageTier(value.seven_day)
+  const sevenDayOpus = parseUsageTier(value.seven_day_opus)
+  const sevenDaySonnet = parseUsageTier(value.seven_day_sonnet)
+  if (!fiveHour || !sevenDay || !sevenDayOpus || !sevenDaySonnet) return null
+  const extraUsage = parseExtraUsage(value.extra_usage)
+  if (extraUsage === null && value.extra_usage !== null) return null
+  return {
+    five_hour: fiveHour,
+    seven_day: sevenDay,
+    seven_day_opus: sevenDayOpus,
+    seven_day_sonnet: sevenDaySonnet,
+    extra_usage: extraUsage,
+  }
+}
+
 function getCredentialsPath(): string {
   const configDir = process.env.CLAUDE_CONFIG_DIR
     ?? path.join(process.env.HOME ?? "/root", ".claude")
@@ -80,7 +124,7 @@ export async function fetchClaudeUsage(): Promise<ClaudeUsageResponse | null> {
     })
 
     if (!res.ok) return null
-    return await res.json() as ClaudeUsageResponse
+    return parseClaudeUsageResponse(await res.json())
   } catch (err) {
     captureException(err, { operation: "claude-usage.fetch" })
     return null
